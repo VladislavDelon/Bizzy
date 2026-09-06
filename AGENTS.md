@@ -14,3 +14,14 @@ Flutter-приложение: календарь записей (sqflite) + сп
   `build\app\outputs\flutter-apk\app-release.apk`.
 - Если Gradle-задача падает с "PowerShell executable not found", перед сборкой добавить в PATH:
   `$env:PATH = "C:\Windows\System32\WindowsPowerShell\v1.0;$env:PATH"`.
+
+## Git / релизы
+- Репозиторий: https://github.com/VladislavDelon/Bizzy (public, ветка main).
+- На этой машине есть только mingit из SDK — для push/pull использовать полный Git:
+  `C:\Program Files\Git\cmd\git.exe`.
+- В hosts заблокирован api.github.com — локально API дёргать через
+  `curl.exe --resolve api.github.com:443:140.82.121.6`.
+- Версия приложения = `version` в pubspec.yaml. Релиз: поднять версию → commit →
+  `git tag vX.Y.Z` → push тега → Actions сам собирает APK в Releases.
+- Приложение при запуске проверяет /releases/latest через UpdateService в main.dart
+  и предлагает скачать APK поверх.

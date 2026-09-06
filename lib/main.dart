@@ -37,7 +37,7 @@ class AppUpdate {
 }
 
 class UpdateService {
-  const UpdateService({this.owner = 'OWNER', this.repo = 'bizzy'});
+  const UpdateService({this.owner = 'VladislavDelon', this.repo = 'Bizzy'});
 
   final String owner;
   final String repo;

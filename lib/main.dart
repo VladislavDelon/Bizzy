@@ -14,6 +14,7 @@ import 'package:install_plugin_v3/install_plugin_v3.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:table_calendar/table_calendar.dart';
@@ -223,6 +224,97 @@ class UpdateService {
       return false;
     }
   }
+}
+
+Future<bool> _ensureInstallPermission(BuildContext context) async {
+  if (!Platform.isAndroid) return false;
+  var status = await Permission.requestInstallPackages.status;
+  if (status.isGranted) return true;
+
+  final requested = await Permission.requestInstallPackages.request();
+  if (requested.isGranted) return true;
+
+  if (context.mounted) {
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Нужно разрешение'),
+        content: const Text(
+          'Для установки обновлений Bizzy необходимо разрешить установку '
+          'приложений из неизвестных источников. Хотите открыть настройки?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Открыть настройки'),
+          ),
+        ],
+      ),
+    );
+    if (open == true) {
+      await openAppSettings();
+    }
+  }
+
+  status = await Permission.requestInstallPackages.status;
+  return status.isGranted;
+}
+
+Future<void> _showUpdateFlow(
+  BuildContext context,
+  UpdateService service,
+  AppUpdate update,
+) async {
+  final hasPermission = await _ensureInstallPermission(context);
+  if (!hasPermission) {
+    if (context.mounted) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => const AlertDialog(
+          title: Text('Не удалось продолжить'),
+          content: Text(
+            'Без разрешения на установку приложений обновление невозможно. '
+            'Включите разрешение «Установка из неизвестных источников» для '
+            'Bizzy в настройках телефона и попробуйте снова.',
+          ),
+        ),
+      );
+    }
+    return;
+  }
+
+  if (!context.mounted) return;
+  final ok = await showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => DownloadUpdateDialog(
+      service: service,
+      downloadUrl: update.downloadUrl,
+    ),
+  );
+
+  if (!context.mounted || ok == true) return;
+
+  await showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Не удалось обновить'),
+      content: const Text(
+        'Проверьте подключение к интернету, свободное место и разрешение '
+        '«Установка из неизвестных источников» для Bizzy в настройках телефона.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
 }
 
 class DownloadUpdateDialog extends StatefulWidget {
@@ -1433,31 +1525,7 @@ class _MainShellState extends State<MainShell> {
         ),
       );
       if (!mounted || shouldInstall != true) return;
-      final ok = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => DownloadUpdateDialog(
-          service: service,
-          downloadUrl: update.downloadUrl,
-        ),
-      );
-      if (!mounted || ok == true) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Не удалось обновить'),
-          content: const Text(
-            'Проверьте подключение к интернету, свободное место и разрешение '
-            '«Установка из неизвестных источников» для Bizzy в настройках телефона.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
+      await _showUpdateFlow(context, service, update);
     } catch (_) {
       // Нет сети или релиз ещё не опубликован — приложение работает офлайн.
     }
@@ -2302,21 +2370,7 @@ class _MoreTabState extends State<MoreTab> {
         ),
       );
       if (!mounted || shouldInstall != true) return;
-      final ok = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => DownloadUpdateDialog(
-          service: service,
-          downloadUrl: update.downloadUrl,
-        ),
-      );
-      if (!mounted || ok == true) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => const AlertDialog(
-          content: Text('Не удалось загрузить обновление'),
-        ),
-      );
+      await _showUpdateFlow(context, service, update);
     } catch (_) {
       if (!mounted) return;
       await showDialog<void>(

@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart' as phone;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:http/http.dart' as http;
@@ -18,6 +19,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 final ValueNotifier<ThemeMode> _themeMode = ValueNotifier(ThemeMode.system);
 
@@ -144,10 +146,15 @@ ThemeData _bizzyTheme(Brightness brightness) {
 }
 
 class AppUpdate {
-  const AppUpdate({required this.version, required this.downloadUrl});
+  const AppUpdate({
+    required this.version,
+    required this.downloadUrl,
+    required this.releaseUrl,
+  });
 
   final String version;
   final Uri downloadUrl;
+  final Uri releaseUrl;
 }
 
 class UpdateService {
@@ -171,15 +178,20 @@ class UpdateService {
     final current = '${info.version}+${info.buildNumber}';
     if (tag.isEmpty || !_isNewer(tag, current)) return null;
 
-    Uri url = Uri.parse(data['html_url'] as String? ?? '');
+    final releaseUrl = Uri.parse(data['html_url'] as String? ?? '');
+    Uri downloadUrl = releaseUrl;
     for (final asset in data['assets'] as List? ?? []) {
       final name = (asset as Map<String, Object?>)['name'] as String? ?? '';
       if (name.endsWith('.apk')) {
-        url = Uri.parse(asset['browser_download_url'] as String);
+        downloadUrl = Uri.parse(asset['browser_download_url'] as String);
         break;
       }
     }
-    return AppUpdate(version: tag, downloadUrl: url);
+    return AppUpdate(
+      version: tag,
+      downloadUrl: downloadUrl,
+      releaseUrl: releaseUrl,
+    );
   }
 
   Future<void> downloadAndInstall(
@@ -189,23 +201,46 @@ class UpdateService {
     if (!Platform.isAndroid) {
       throw UnsupportedError('Обновления APK доступны только на Android');
     }
-    final dir = await getTemporaryDirectory();
+    final dir = await getApplicationDocumentsDirectory();
     final path = '${dir.path}/bizzy_update.apk';
-    await Dio().download(
-      url.toString(),
-      path,
-      onReceiveProgress: (received, total) {
-        if (total > 0) onProgress(received / total);
-      },
-    );
-    final file = File(path);
-    if (!file.existsSync()) {
-      throw Exception('APK не загрузился');
-    }
-    final res = await InstallPlugin.installApk(path);
-    if (res is! Map || res['isSuccess'] != true) {
-      final message = res is Map ? res['errorMessage'] : res?.toString();
-      throw Exception(message ?? 'Не удалось начать установку');
+    try {
+      final response = await Dio().download(
+        url.toString(),
+        path,
+        onReceiveProgress: (received, total) {
+          if (total > 0) onProgress(received / total);
+        },
+        options: Options(
+          followRedirects: true,
+          maxRedirects: 5,
+          validateStatus: (s) => s != null && s >= 200 && s < 300,
+        ),
+      );
+      if (response.statusCode != 200) {
+        throw Exception('Сервер вернул ${response.statusCode} при загрузке APK');
+      }
+      final file = File(path);
+      if (!file.existsSync()) {
+        throw Exception('APK не загрузился');
+      }
+      final length = await file.length();
+      if (length < 1024) {
+        throw Exception('APK загружен, но файл слишком мал — возможно, ссылка ведёт не на APK');
+      }
+      final header = await file.openRead(0, 4).first;
+      if (header.isEmpty || String.fromCharCodes(header).startsWith('PK') == false) {
+        throw Exception('Загруженный файл не похож на APK (плохая ссылка или redirect)');
+      }
+      final res = await InstallPlugin.installApk(path);
+      if (res is! Map || res['isSuccess'] != true) {
+        final message = res is Map ? res['errorMessage'] : res?.toString();
+        throw Exception(message ?? 'Не удалось начать установку');
+      }
+    } finally {
+      try {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      } catch (_) {}
     }
   }
 
@@ -267,6 +302,18 @@ Future<bool> _ensureInstallPermission(BuildContext context) async {
   return status.isGranted;
 }
 
+class UpdateResult {
+  const UpdateResult({
+    this.success = false,
+    this.needsRestart = false,
+    this.error,
+  });
+
+  final bool success;
+  final bool needsRestart;
+  final String? error;
+}
+
 Future<void> _showUpdateFlow(
   BuildContext context,
   UpdateService service,
@@ -292,7 +339,7 @@ Future<void> _showUpdateFlow(
   }
 
   if (!context.mounted) return;
-  final ok = await showDialog<bool>(
+  final result = await showDialog<UpdateResult>(
     context: context,
     barrierDismissible: false,
     builder: (context) => DownloadUpdateDialog(
@@ -301,20 +348,75 @@ Future<void> _showUpdateFlow(
     ),
   );
 
-  if (!context.mounted || ok == true) return;
+  if (!context.mounted || result == null) return;
+
+  if (result.success && result.needsRestart) {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Обновление установлено'),
+        content: const Text(
+          'Новая версия установлена. Перезапустите приложение, чтобы '
+          'использовать обновление.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Позже'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              SystemNavigator.pop();
+            },
+            child: const Text('Перезапустить'),
+          ),
+        ],
+      ),
+    );
+    return;
+  }
+
+  if (result.success) return;
+
+  final error = result.error?.toLowerCase() ?? '';
+  final isPermissionError = error.contains('permission') ||
+      error.contains('разрешение') ||
+      error.contains('unknown source') ||
+      error.contains('неизвестных');
+  final isCancel = error.contains('cancel') || error.contains('отмена');
+  final isSignature = error.contains('install failed') ||
+      error.contains('not installed') ||
+      error.contains('не установлено') ||
+      error.contains('install error');
+
+  final content = isCancel
+      ? 'Установка была отменена.'
+      : isPermissionError
+          ? 'Не удалось получить разрешение на установку. Включите «Установка из неизвестных источников» для Bizzy.'
+          : isSignature
+              ? 'Установщик Android отказал. Вероятно, APK подписан другим ключом, чем установленная версия, или установщик не смог обновить приложение. Скачайте APK вручную и установите поверх.'
+              : (result.error ?? 'Не удалось обновить. Проверьте подключение к интернету, свободное место и разрешения.');
 
   await showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
       title: const Text('Не удалось обновить'),
-      content: const Text(
-        'Проверьте подключение к интернету, свободное место и разрешение '
-        '«Установка из неизвестных источников» для Bizzy в настройках телефона.',
-      ),
+      content: Text(content),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('OK'),
+          child: const Text('Закрыть'),
+        ),
+        FilledButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+            launchUrl(
+              update.releaseUrl,
+              mode: LaunchMode.externalApplication,
+            );
+          },
+          child: const Text('Скачать вручную'),
         ),
       ],
     ),
@@ -354,12 +456,24 @@ class _DownloadUpdateDialogState extends State<DownloadUpdateDialog> {
           _status = 'Загружено ${(p * 100).toStringAsFixed(0)}%';
         }),
       );
-      if (mounted) Navigator.of(context).pop(true);
+      if (mounted) {
+        setState(() => _status = 'Установлено');
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted) {
+          Navigator.of(context).pop(
+            const UpdateResult(success: true, needsRestart: true),
+          );
+        }
+      }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = 'Ошибка загрузки');
+      setState(() => _status = 'Ошибка: $e');
       await Future.delayed(const Duration(seconds: 1));
-      if (mounted) Navigator.of(context).pop(false);
+      if (mounted) {
+        Navigator.of(context).pop(
+          UpdateResult(error: e.toString()),
+        );
+      }
     }
   }
 
@@ -376,9 +490,10 @@ class _DownloadUpdateDialogState extends State<DownloadUpdateDialog> {
             const SizedBox(height: 16),
             LinearProgressIndicator(value: _progress),
             const SizedBox(height: 8),
-            Text(
-              'По завершении система предложит установить новую версию.',
-              style: Theme.of(context).textTheme.bodySmall,
+            const Text(
+              'Скачиваем обновление, затем запустится установщик Android. '
+              'После установки приложение нужно будет перезапустить.',
+              style: TextStyle(fontSize: 12),
             ),
           ],
         ),

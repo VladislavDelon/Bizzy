@@ -13,9 +13,12 @@ class MemoryDatabase extends AppointmentsDatabase {
   final appointments = <Appointment>[];
   final companies = <Company>[];
   final users = <String, String>{};
+  final services = <Service>[];
   bool failContacts = false;
   var _nextCompanyId = 1;
   var _nextAppointmentId = 1;
+  var _nextContactId = 1;
+  var _nextServiceId = 1;
 
   String _table(ContactType type) => type.table;
 
@@ -71,12 +74,70 @@ class MemoryDatabase extends AppointmentsDatabase {
     String phone,
   ) async {
     final contact = Contact(
-      id: contacts[_table(type)]!.length + 1,
+      id: _nextContactId++,
       name: name.trim(),
       phone: phone.trim(),
     );
     contacts[_table(type)]!.add(contact);
     return contact;
+  }
+
+  @override
+  Future<int> updateContact(
+    ContactType type,
+    int companyId,
+    Contact contact,
+    String name,
+    String phone,
+  ) async {
+    final index =
+        contacts[_table(type)]!.indexWhere((c) => c.id == contact.id);
+    if (index < 0) throw StateError('contact not found');
+    contacts[_table(type)]![index] = Contact(
+      id: contact.id,
+      name: name.trim(),
+      phone: phone.trim(),
+    );
+    return 1;
+  }
+
+  @override
+  Future<int> deleteContact(ContactType type, int id) async {
+    contacts[_table(type)]!.removeWhere((c) => c.id == id);
+    return 1;
+  }
+
+  @override
+  Future<List<Service>> getServices(int companyId) async {
+    return services.where((s) => s.companyId == companyId).toList();
+  }
+
+  @override
+  Future<Service> createService(Service service) async {
+    final saved = Service(
+      id: _nextServiceId++,
+      companyId: service.companyId,
+      name: service.name.trim(),
+      price: service.price,
+      durationMinutes: service.durationMinutes,
+      notes: service.notes.trim(),
+    );
+    services.add(saved);
+    return saved;
+  }
+
+  @override
+  Future<int> updateService(Service service) async {
+    final index = services.indexWhere((s) => s.id == service.id);
+    if (index < 0) throw StateError('service not found');
+    services[index] = service;
+    return 1;
+  }
+
+  @override
+  Future<int> deleteService(int id) async {
+    services.removeWhere((s) => s.id == id);
+    return 1;
   }
 
   @override
@@ -337,5 +398,108 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Время пересекается'), findsOneWidget);
     expect(find.textContaining('предупредить второго клиента'), findsOneWidget);
+  });
+
+  testWidgets('Service can be created in services directory', (tester) async {
+    final db = await loggedInDb(tester);
+    await tester.tap(find.text('Услуги'));
+    await tester.pumpAndSettle();
+    expect(find.text('Услуг пока нет'), findsOneWidget);
+    await tester.tap(find.text('Добавить услугу'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Название'), 'Стрижка');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Цена, ₽'), '1500');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Длительность, мин'), '90');
+    await tester.tap(find.text('Сохранить'));
+    await tester.pumpAndSettle();
+    expect(find.text('Стрижка'), findsOneWidget);
+    expect(find.text('1500.00 ₽ • 90 мин'), findsOneWidget);
+    expect(db.services.length, 1);
+    expect(db.services.single.name, 'Стрижка');
+    expect(db.services.single.price, 1500);
+    expect(db.services.single.durationMinutes, 90);
+  });
+
+  testWidgets('Appointment dialog selects service and fills duration',
+      (tester) async {
+    final db = await loggedInDb(tester);
+    await db.saveContact(ContactType.client, 1, 'Анна', '+79001234567');
+    await db.saveContact(ContactType.master, 1, 'Мария', '');
+    await db.createService(
+      const Service(
+        companyId: 1,
+        name: 'Стрижка',
+        price: 1500,
+        durationMinutes: 90,
+      ),
+    );
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Выбрать клиента'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Анна'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Выбрать мастера'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Мария'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('service_dropdown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Стрижка').last);
+    await tester.pumpAndSettle();
+
+    final durationField =
+        find.widgetWithText(TextFormField, 'Продолжительность (мин)');
+    expect(
+      (tester.widget(durationField) as TextFormField).controller?.text,
+      '90',
+    );
+
+    await tester.tap(find.text('Сохранить'));
+    await tester.pumpAndSettle();
+    final appointment = db.appointments.single;
+    expect(appointment.clientName, 'Анна');
+    expect(appointment.master, 'Мария');
+    expect(appointment.service, 'Стрижка');
+    expect(appointment.durationMinutes, 90);
+  });
+
+  testWidgets('Client can be edited', (tester) async {
+    final db = await loggedInDb(tester);
+    await db.saveContact(ContactType.client, 1, 'Анна', '+79001234567');
+    await tester.tap(find.text('Клиенты'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Редактировать'));
+    await tester.pumpAndSettle();
+    expect(find.text('Редактировать клиента'), findsOneWidget);
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Имя'), 'Анна И.');
+    await tester.tap(find.text('Сохранить'));
+    await tester.pumpAndSettle();
+    expect(find.text('Анна И.'), findsOneWidget);
+    expect(db.contacts['clients']!.single.name, 'Анна И.');
+  });
+
+  testWidgets('Client can be deleted', (tester) async {
+    final db = await loggedInDb(tester);
+    await db.saveContact(ContactType.client, 1, 'Анна', '+79001234567');
+    await tester.tap(find.text('Клиенты'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Удалить'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Удалить'));
+    await tester.pumpAndSettle();
+    expect(find.text('Анна'), findsNothing);
+    expect(find.text('Клиентов пока нет'), findsOneWidget);
+    expect(db.contacts['clients']!, isEmpty);
   });
 }

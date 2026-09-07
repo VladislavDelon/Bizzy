@@ -186,6 +186,9 @@ class UpdateService {
     Uri url,
     ValueChanged<double> onProgress,
   ) async {
+    if (!Platform.isAndroid) {
+      throw UnsupportedError('Обновления APK доступны только на Android');
+    }
     final dir = await getTemporaryDirectory();
     final path = '${dir.path}/bizzy_update.apk';
     await Dio().download(
@@ -269,6 +272,7 @@ Future<void> _showUpdateFlow(
   UpdateService service,
   AppUpdate update,
 ) async {
+  if (!Platform.isAndroid) return;
   final hasPermission = await _ensureInstallPermission(context);
   if (!hasPermission) {
     if (context.mounted) {
@@ -413,6 +417,46 @@ class Company {
   String get label => type.isEmpty ? name : '$name ($type)';
 }
 
+class Service {
+  final int? id;
+  final int companyId;
+  final String name;
+  final double price;
+  final int durationMinutes;
+  final String notes;
+
+  const Service({
+    this.id,
+    required this.companyId,
+    required this.name,
+    this.price = 0,
+    this.durationMinutes = 60,
+    this.notes = '',
+  });
+
+  Map<String, Object?> toMap() {
+    return {
+      'id': id,
+      'companyId': companyId,
+      'name': name,
+      'price': price,
+      'durationMinutes': durationMinutes,
+      'notes': notes,
+    };
+  }
+
+  factory Service.fromMap(Map<String, Object?> map) {
+    return Service(
+      id: map['id'] as int?,
+      companyId: map['companyId'] as int? ?? 0,
+      name: map['name'] as String,
+      price: (map['price'] as num?)?.toDouble() ?? 0,
+      durationMinutes: (map['durationMinutes'] as int?) ?? 60,
+      notes: (map['notes'] as String?) ?? '',
+    );
+  }
+}
+
 class Appointment {
   final int? id;
   final int companyId;
@@ -508,7 +552,7 @@ class AppointmentsDatabase {
     final pathString = p.join(databasesPath, 'bizzy.db');
     return openDatabase(
       pathString,
-      version: 4,
+      version: 5,
       onCreate: (db, version) => _createAll(db),
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -536,6 +580,9 @@ class AppointmentsDatabase {
             ALTER TABLE appointments ADD COLUMN reminderMinutes INTEGER NOT NULL DEFAULT 30
           ''');
         }
+        if (oldVersion < 5) {
+          await _createServices(db);
+        }
       },
     );
   }
@@ -557,6 +604,7 @@ class AppointmentsDatabase {
     ''');
     await _createDirectories(db);
     await _createAccounts(db);
+    await _createServices(db);
   }
 
   Future<void> _createDirectories(Database db) async {
@@ -588,6 +636,19 @@ class AppointmentsDatabase {
         userId INTEGER NOT NULL,
         name TEXT NOT NULL,
         type TEXT NOT NULL DEFAULT ''
+      )
+    ''');
+  }
+
+  Future<void> _createServices(Database db) async {
+    await db.execute('''
+      CREATE TABLE services(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        companyId INTEGER NOT NULL DEFAULT 0,
+        name TEXT NOT NULL,
+        price REAL NOT NULL DEFAULT 0,
+        durationMinutes INTEGER NOT NULL DEFAULT 60,
+        notes TEXT NOT NULL DEFAULT ''
       )
     ''');
   }
@@ -784,6 +845,84 @@ class AppointmentsDatabase {
     final db = await database;
     return db.delete('appointments', where: 'id = ?', whereArgs: [id]);
   }
+
+  Future<List<Service>> getServices(int companyId) async {
+    final db = await database;
+    final maps = await db.query(
+      'services',
+      where: 'companyId = ?',
+      whereArgs: [companyId],
+      orderBy: 'name',
+    );
+    return maps.map(Service.fromMap).toList();
+  }
+
+  Future<Service> createService(Service service) async {
+    final db = await database;
+    final id = await db.insert('services', {
+      'companyId': service.companyId,
+      'name': service.name.trim(),
+      'price': service.price,
+      'durationMinutes': service.durationMinutes,
+      'notes': service.notes.trim(),
+    });
+    return Service(
+      id: id,
+      companyId: service.companyId,
+      name: service.name.trim(),
+      price: service.price,
+      durationMinutes: service.durationMinutes,
+      notes: service.notes.trim(),
+    );
+  }
+
+  Future<int> updateService(Service service) async {
+    final db = await database;
+    return db.update(
+      'services',
+      {
+        'name': service.name.trim(),
+        'price': service.price,
+        'durationMinutes': service.durationMinutes,
+        'notes': service.notes.trim(),
+      },
+      where: 'id = ?',
+      whereArgs: [service.id],
+    );
+  }
+
+  Future<int> deleteService(int id) async {
+    final db = await database;
+    return db.delete('services', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<int> updateContact(
+    ContactType type,
+    int companyId,
+    Contact contact,
+    String name,
+    String phone,
+  ) async {
+    final trimmed = name.trim();
+    final trimmedPhone = phone.trim();
+    if (trimmed.isEmpty ||
+        (type == ContactType.client && trimmedPhone.isEmpty)) {
+      throw ArgumentError('Имя и телефон клиента обязательны');
+    }
+    final db = await database;
+    return db.update(
+      type.table,
+      {'companyId': companyId, 'name': trimmed, 'phone': trimmedPhone},
+      where: 'id = ?',
+      whereArgs: [contact.id],
+      conflictAlgorithm: ConflictAlgorithm.rollback,
+    );
+  }
+
+  Future<int> deleteContact(ContactType type, int id) async {
+    final db = await database;
+    return db.delete(type.table, where: 'id = ?', whereArgs: [id]);
+  }
 }
 
 class SessionStore {
@@ -841,6 +980,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _checkForUpdate(BuildContext context) async {
+    if (!Platform.isAndroid) return;
     final messenger = ScaffoldMessenger.of(context);
     final update = await const UpdateService().check();
     if (!context.mounted) return;
@@ -1343,6 +1483,7 @@ class _CompanySelectScreenState extends State<CompanySelectScreen> {
       floatingActionButton: _companies.isEmpty
           ? null
           : FloatingActionButton.extended(
+              heroTag: null,
               onPressed: _addCompany,
               icon: const Icon(Icons.add),
               label: const Text('Новая компания'),
@@ -1659,7 +1800,10 @@ class _MainShellState extends State<MainShell> {
         company: widget.company,
         isVisible: _currentIndex == 2,
       ),
-      const ServicesTab(),
+      ServicesTab(
+        database: _db,
+        company: widget.company,
+      ),
       MoreTab(
         database: _db,
         company: widget.company,
@@ -1742,6 +1886,7 @@ class _MainShellState extends State<MainShell> {
       ),
       floatingActionButton: _currentIndex == 0
           ? FloatingActionButton.extended(
+              heroTag: null,
               onPressed: _openAppointmentDialog,
               icon: const Icon(Icons.add),
               label: const Text('Новая запись'),
@@ -2189,6 +2334,74 @@ class _ClientsTabState extends State<ClientsTab> {
     await _load();
   }
 
+  Future<void> _editClient(Contact contact) async {
+    final result = await showDialog<Contact>(
+      context: context,
+      builder: (context) => AddContactDialog(
+        database: widget.database,
+        type: ContactType.client,
+        companyId: widget.company.id,
+        contact: contact,
+      ),
+    );
+    if (!mounted || result == null) return;
+    await _load();
+  }
+
+  Future<void> _deleteClient(Contact contact) async {
+    final inAppointments = await _isContactUsed(contact);
+    if (!mounted) return;
+    final confirmed = await _confirmDelete(context, contact, inAppointments);
+    if (!confirmed || !mounted) return;
+    try {
+      await widget.database.deleteContact(ContactType.client, contact.id);
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось удалить клиента')),
+      );
+    }
+  }
+
+  Future<bool> _isContactUsed(Contact contact) async {
+    final appointments =
+        await widget.database.getAll(widget.company.id);
+    return appointments.any(
+      (a) => a.clientName == contact.name || a.master == contact.name,
+    );
+  }
+
+  Future<bool> _confirmDelete(
+    BuildContext context,
+    Contact contact,
+    bool inAppointments,
+  ) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Удалить ${contact.name}?'),
+            content: inAppointments
+                ? const Text(
+                    'Записи с этим клиентом/мастером останутся, удалится только '
+                    'запись в справочнике.',
+                  )
+                : const Text('Удалить запись из справочника?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Отмена'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Удалить'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final contacts = _contacts
@@ -2261,6 +2474,25 @@ class _ClientsTabState extends State<ClientsTab> {
                                 subtitle: contact.phone.isEmpty
                                     ? null
                                     : Text(contact.phone),
+                                trailing: PopupMenuButton<String>(
+                                  onSelected: (value) {
+                                    if (value == 'edit') {
+                                      _editClient(contact);
+                                    } else if (value == 'delete') {
+                                      _deleteClient(contact);
+                                    }
+                                  },
+                                  itemBuilder: (context) => const [
+                                    PopupMenuItem(
+                                      value: 'edit',
+                                      child: Text('Редактировать'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'delete',
+                                      child: Text('Удалить'),
+                                    ),
+                                  ],
+                                ),
                               );
                             },
                           ),
@@ -2268,6 +2500,7 @@ class _ClientsTabState extends State<ClientsTab> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
         onPressed: _addClient,
         icon: const Icon(Icons.add),
         label: const Text('Добавить клиента'),
@@ -2276,18 +2509,376 @@ class _ClientsTabState extends State<ClientsTab> {
   }
 }
 
-class ServicesTab extends StatelessWidget {
-  const ServicesTab({super.key});
+class AddServiceDialog extends StatefulWidget {
+  const AddServiceDialog({
+    super.key,
+    required this.database,
+    required this.companyId,
+    this.service,
+  });
+
+  final AppointmentsDatabase database;
+  final int companyId;
+  final Service? service;
+
+  @override
+  State<AddServiceDialog> createState() => _AddServiceDialogState();
+}
+
+class _AddServiceDialogState extends State<AddServiceDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _priceController = TextEditingController();
+  final _durationController = TextEditingController();
+  final _notesController = TextEditingController();
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final s = widget.service;
+    _nameController.text = s?.name ?? '';
+    _priceController.text = s?.price.toString() ?? '';
+    _durationController.text = (s?.durationMinutes ?? 60).toString();
+    _notesController.text = s?.notes ?? '';
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _priceController.dispose();
+    _durationController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving || !_formKey.currentState!.validate()) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final price = double.tryParse(_priceController.text.trim()) ?? 0;
+    final duration = int.tryParse(_durationController.text.trim()) ?? 60;
+    final service = Service(
+      id: widget.service?.id,
+      companyId: widget.companyId,
+      name: _nameController.text,
+      price: price,
+      durationMinutes: duration,
+      notes: _notesController.text,
+    );
+    try {
+      final saved = widget.service == null
+          ? await widget.database.createService(service)
+          : await widget.database.updateService(service).then((_) => service);
+      if (!mounted) return;
+      Navigator.of(context).pop(saved);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = 'Не удалось сохранить. Попробуйте ещё раз.';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('Справочник услуг'),
-          Text('появится здесь'),
+    final isEdit = widget.service != null;
+    return PopScope(
+      canPop: !_saving,
+      child: AlertDialog(
+        title: Text(isEdit ? 'Редактирование услуги' : 'Новая услуга'),
+        content: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  enabled: !_saving,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Название',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Введите название'
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _priceController,
+                  enabled: !_saving,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Цена, ₽',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    final n = double.tryParse(value?.trim() ?? '');
+                    if (n == null || n < 0) return 'Введите число';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _durationController,
+                  enabled: !_saving,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Длительность, мин',
+                    border: OutlineInputBorder(),
+                    hintText: '60',
+                  ),
+                  validator: (value) {
+                    final n = int.tryParse(value?.trim() ?? '');
+                    if (n == null || n < 1) return 'Введите целое число';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _notesController,
+                  enabled: !_saving,
+                  textCapitalization: TextCapitalization.sentences,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Примечания',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : () => Navigator.of(context).pop(),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: _saving ? null : _save,
+            child: Text(_saving ? 'Сохранение…' : 'Сохранить'),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class ServicesTab extends StatefulWidget {
+  const ServicesTab({
+    super.key,
+    required this.database,
+    required this.company,
+  });
+
+  final AppointmentsDatabase database;
+  final Company company;
+
+  @override
+  State<ServicesTab> createState() => _ServicesTabState();
+}
+
+class _ServicesTabState extends State<ServicesTab> {
+  List<Service> _services = [];
+  String _query = '';
+  bool _loading = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant ServicesTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.company.id != widget.company.id) _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    try {
+      final services =
+          await widget.database.getServices(widget.company.id);
+      if (!mounted) return;
+      setState(() => _services = services);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _failed = true);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _addService() async {
+    final service = await showDialog<Service>(
+      context: context,
+      builder: (context) => AddServiceDialog(
+        database: widget.database,
+        companyId: widget.company.id,
+      ),
+    );
+    if (!mounted || service == null) return;
+    await _load();
+  }
+
+  Future<void> _editService(Service service) async {
+    final result = await showDialog<Service>(
+      context: context,
+      builder: (context) => AddServiceDialog(
+        database: widget.database,
+        companyId: widget.company.id,
+        service: service,
+      ),
+    );
+    if (!mounted || result == null) return;
+    await _load();
+  }
+
+  Future<void> _deleteService(Service service) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить услугу?'),
+        content: Text('Услуга «${service.name}» будет удалена.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await widget.database.deleteService(service.id!);
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось удалить услугу')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final displayed = _services
+        .where(
+          (s) => s.name.toLowerCase().contains(_query),
+        )
+        .toList();
+    return Scaffold(
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: TextField(
+              decoration: const InputDecoration(
+                labelText: 'Поиск по названию',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (value) =>
+                  setState(() => _query = value.trim().toLowerCase()),
+            ),
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _failed
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Не удалось загрузить список'),
+                            TextButton(
+                              onPressed: _load,
+                              child: const Text('Повторить'),
+                            ),
+                          ],
+                        ),
+                      )
+                    : displayed.isEmpty
+                        ? Center(
+                            child: Text(
+                              _query.isEmpty
+                                  ? 'Услуг пока нет'
+                                  : 'Ничего не найдено',
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.only(bottom: 88),
+                            itemCount: displayed.length,
+                            itemBuilder: (context, index) {
+                              final service = displayed[index];
+                              return Card(
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
+                                child: ListTile(
+                                  leading: const Icon(Icons.spa),
+                                  title: Text(service.name),
+                                  subtitle: Text(
+                                    '${service.price.toStringAsFixed(2)} ₽ • ${service.durationMinutes} мин',
+                                  ),
+                                  trailing: PopupMenuButton<String>(
+                                    onSelected: (value) {
+                                      if (value == 'edit') {
+                                        _editService(service);
+                                      } else if (value == 'delete') {
+                                        _deleteService(service);
+                                      }
+                                    },
+                                    itemBuilder: (context) => const [
+                                      PopupMenuItem(
+                                        value: 'edit',
+                                        child: Text('Редактировать'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'delete',
+                                        child: Text('Удалить'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
+        onPressed: _addService,
+        icon: const Icon(Icons.add),
+        label: const Text('Добавить услугу'),
       ),
     );
   }
@@ -2336,6 +2927,7 @@ class _MoreTabState extends State<MoreTab> {
   }
 
   Future<void> _checkUpdates() async {
+    if (!Platform.isAndroid) return;
     const service = UpdateService();
     try {
       final update = await service.check();
@@ -2521,6 +3113,81 @@ class _ContactsScreenState extends State<ContactsScreen> {
     }
   }
 
+  Future<void> _editContact(Contact contact) async {
+    final result = await showDialog<Contact>(
+      context: context,
+      builder: (context) => AddContactDialog(
+        database: widget.database,
+        type: widget.type,
+        companyId: widget.companyId,
+        contact: contact,
+      ),
+    );
+    if (!mounted || result == null) return;
+    if (widget.selectContact) {
+      Navigator.of(context).pop(result);
+    } else {
+      await _load();
+    }
+  }
+
+  Future<void> _deleteContact(Contact contact) async {
+    final inAppointments = await _isContactUsed(contact);
+    if (!mounted) return;
+    final confirmed = await _confirmDelete(context, contact, inAppointments);
+    if (!confirmed || !mounted) return;
+    try {
+      await widget.database.deleteContact(widget.type, contact.id);
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Не удалось удалить ${widget.type == ContactType.client ? 'клиента' : 'мастера'}',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<bool> _isContactUsed(Contact contact) async {
+    final appointments = await widget.database.getAll(widget.companyId);
+    return appointments.any(
+      (a) => a.clientName == contact.name || a.master == contact.name,
+    );
+  }
+
+  Future<bool> _confirmDelete(
+    BuildContext context,
+    Contact contact,
+    bool inAppointments,
+  ) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Удалить ${contact.name}?'),
+            content: inAppointments
+                ? const Text(
+                    'Записи с этим клиентом/мастером останутся, удалится только '
+                    'запись в справочнике.',
+                  )
+                : const Text('Удалить запись из справочника?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Отмена'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Удалить'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final contacts = _contacts
@@ -2597,7 +3264,25 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                     : Text(contact.phone),
                                 trailing: widget.selectContact
                                     ? const Icon(Icons.chevron_right)
-                                    : null,
+                                    : PopupMenuButton<String>(
+                                        onSelected: (value) {
+                                          if (value == 'edit') {
+                                            _editContact(contact);
+                                          } else if (value == 'delete') {
+                                            _deleteContact(contact);
+                                          }
+                                        },
+                                        itemBuilder: (context) => const [
+                                          PopupMenuItem(
+                                            value: 'edit',
+                                            child: Text('Редактировать'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'delete',
+                                            child: Text('Удалить'),
+                                          ),
+                                        ],
+                                      ),
                                 onTap: widget.selectContact
                                     ? () => Navigator.of(context).pop(contact)
                                     : null,
@@ -2608,6 +3293,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
         onPressed: _addContact,
         icon: const Icon(Icons.add),
         label: Text(widget.type.addTitle),
@@ -2622,11 +3308,13 @@ class AddContactDialog extends StatefulWidget {
     required this.database,
     required this.type,
     required this.companyId,
+    this.contact,
   });
 
   final AppointmentsDatabase database;
   final ContactType type;
   final int companyId;
+  final Contact? contact;
 
   @override
   State<AddContactDialog> createState() => _AddContactDialogState();
@@ -2638,6 +3326,16 @@ class _AddContactDialogState extends State<AddContactDialog> {
   final _phoneController = TextEditingController();
   bool _saving = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final c = widget.contact;
+    if (c != null) {
+      _nameController.text = c.name;
+      _phoneController.text = c.phone;
+    }
+  }
 
   @override
   void dispose() {
@@ -2653,12 +3351,30 @@ class _AddContactDialogState extends State<AddContactDialog> {
       _error = null;
     });
     try {
-      final contact = await widget.database.saveContact(
-        widget.type,
-        widget.companyId,
-        _nameController.text,
-        _phoneController.text,
-      );
+      final name = _nameController.text;
+      final phone = _phoneController.text;
+      final contact = widget.contact == null
+          ? await widget.database.saveContact(
+              widget.type,
+              widget.companyId,
+              name,
+              phone,
+            )
+          : await widget.database
+              .updateContact(
+                widget.type,
+                widget.companyId,
+                widget.contact!,
+                name,
+                phone,
+              )
+              .then(
+                (_) => Contact(
+                  id: widget.contact!.id,
+                  name: name.trim(),
+                  phone: phone.trim(),
+                ),
+              );
       if (!mounted) return;
       Navigator.of(context).pop(contact);
     } catch (_) {
@@ -2686,10 +3402,17 @@ class _AddContactDialogState extends State<AddContactDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isEdit = widget.contact != null;
     return PopScope(
       canPop: !_saving,
       child: AlertDialog(
-        title: Text(widget.type.addTitle),
+        title: Text(
+          isEdit
+              ? (widget.type == ContactType.client
+                  ? 'Редактировать клиента'
+                  : 'Редактировать мастера')
+              : widget.type.addTitle,
+        ),
         content: SingleChildScrollView(
           child: Form(
             key: _formKey,
@@ -3014,6 +3737,9 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
   late TimeOfDay _selectedTime;
   int _reminderMinutes = 30;
   int? _appointmentId;
+  List<Service> _services = [];
+  Service? _selectedService;
+  bool _loadingServices = true;
 
   static const _reminderOptions = {
     15: '15 минут',
@@ -3039,6 +3765,24 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
     _notesController.text = a?.notes ?? '';
     _durationController.text = (a?.durationMinutes ?? 60).toString();
     _reminderMinutes = a?.reminderMinutes ?? 30;
+    _loadServices();
+  }
+
+  Future<void> _loadServices() async {
+    final services = await widget.database.getServices(widget.companyId);
+    if (!mounted) return;
+    final a = widget.appointment;
+    final match = a == null
+        ? null
+        : services.cast<Service?>().firstWhere(
+              (s) => s!.name == a.service,
+              orElse: () => null,
+            );
+    setState(() {
+      _services = services;
+      _selectedService = match;
+      _loadingServices = false;
+    });
   }
 
   @override
@@ -3120,6 +3864,100 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
     if (mounted && picked != null) setState(() => _selectedTime = picked);
   }
 
+  Future<void> _onServiceSelected(Service? value) async {
+    if (value == null) {
+      setState(() => _selectedService = null);
+      return;
+    }
+    final addNew = Service(
+      id: -1,
+      companyId: widget.companyId,
+      name: '+ Добавить услугу',
+      price: 0,
+      durationMinutes: 0,
+      notes: '',
+    );
+    if (value.id == addNew.id && value.name == addNew.name) {
+      final result = await showDialog<Service>(
+        context: context,
+        builder: (context) => AddServiceDialog(
+          database: widget.database,
+          companyId: widget.companyId,
+        ),
+      );
+      if (!mounted || result == null) return;
+      setState(() {
+        _services = [..._services, result]..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
+        _selectedService = result;
+      });
+      _serviceController.text = result.name;
+      _durationController.text = result.durationMinutes.toString();
+      return;
+    }
+    setState(() => _selectedService = value);
+    _serviceController.text = value.name;
+    _durationController.text = value.durationMinutes.toString();
+  }
+
+  Widget _serviceDropdown() {
+    return FormField<Service?>(
+      key: const Key('service_dropdown_field'),
+      initialValue: _selectedService,
+      builder: (field) => InputDecorator(
+        decoration: const InputDecoration(
+          labelText: 'Выбрать услугу',
+          border: OutlineInputBorder(),
+          errorStyle: TextStyle(height: 0),
+        ),
+        isEmpty: _selectedService == null,
+        child: _loadingServices
+            ? const SizedBox(
+                height: 24,
+                child: Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            : DropdownButtonHideUnderline(
+                child: DropdownButton<Service?>(
+                  key: const Key('service_dropdown'),
+                  value: field.value,
+                  isDense: true,
+                  isExpanded: true,
+                  items: [
+                    const DropdownMenuItem<Service?>(
+                      value: null,
+                      child: Text('— Своя услуга —'),
+                    ),
+                    ..._services.map(
+                      (s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(s.name),
+                      ),
+                    ),
+                    DropdownMenuItem(
+                      value: Service(
+                        id: -1,
+                        companyId: widget.companyId,
+                        name: '+ Добавить услугу',
+                        price: 0,
+                        durationMinutes: 0,
+                        notes: '',
+                      ),
+                      child: const Text('+ Добавить услугу'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    field.didChange(value);
+                    _onServiceSelected(value);
+                  },
+                ),
+              ),
+      ),
+    );
+  }
+
   void _save() {
     if (!_formKey.currentState!.validate()) return;
     final duration = int.tryParse(_durationController.text.trim()) ?? 60;
@@ -3170,9 +4008,18 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
                     ? 'Введите телефон'
                     : null,
               ),
+              _serviceDropdown(),
               TextFormField(
                 controller: _serviceController,
                 decoration: const InputDecoration(labelText: 'Услуга'),
+                onChanged: (_) {
+                  final text = _serviceController.text.trim();
+                  final match = _services.cast<Service?>().firstWhere(
+                        (s) => s!.name == text,
+                        orElse: () => null,
+                      );
+                  setState(() => _selectedService = match);
+                },
                 validator: (value) => value == null || value.trim().isEmpty
                     ? 'Введите услугу'
                     : null,

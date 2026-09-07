@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_contacts/flutter_contacts.dart' as phone;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:http/http.dart' as http;
 import 'package:install_plugin_v3/install_plugin_v3.dart';
@@ -1680,6 +1681,24 @@ class _ContactsScreenState extends State<ContactsScreen> {
     }
   }
 
+  Future<void> _importContacts() async {
+    final contact = await showDialog<Contact>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => ImportContactsDialog(
+        database: widget.database,
+        type: widget.type,
+        companyId: widget.companyId,
+      ),
+    );
+    if (!mounted || contact == null) return;
+    if (widget.selectContact) {
+      Navigator.of(context).pop(contact);
+    } else {
+      await _load();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final contacts = _contacts
@@ -1690,7 +1709,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
         )
         .toList();
     return Scaffold(
-      appBar: AppBar(title: Text(widget.type.title)),
+      appBar: AppBar(
+        title: Text(widget.type.title),
+        actions: [
+          if (!widget.selectContact)
+            IconButton(
+              onPressed: _importContacts,
+              icon: const Icon(Icons.contacts),
+              tooltip: 'Импорт из телефона',
+            ),
+        ],
+      ),
       body: Column(
         children: [
           Padding(
@@ -1819,6 +1848,20 @@ class _AddContactDialogState extends State<AddContactDialog> {
     }
   }
 
+  Future<void> _importFromPhone() async {
+    final contact = await showDialog<Contact>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => ImportContactsDialog(
+        database: widget.database,
+        type: widget.type,
+        companyId: widget.companyId,
+      ),
+    );
+    if (!mounted || contact == null) return;
+    Navigator.of(context).pop(contact);
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -1855,6 +1898,12 @@ class _AddContactDialogState extends State<AddContactDialog> {
                           ? 'Введите телефон'
                           : null,
                 ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _saving ? null : _importFromPhone,
+                  icon: const Icon(Icons.contacts),
+                  label: const Text('Импортировать из телефона'),
+                ),
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
@@ -1880,6 +1929,235 @@ class _AddContactDialogState extends State<AddContactDialog> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class ImportContactsDialog extends StatefulWidget {
+  const ImportContactsDialog({
+    super.key,
+    required this.database,
+    required this.type,
+    required this.companyId,
+  });
+
+  final AppointmentsDatabase database;
+  final ContactType type;
+  final int companyId;
+
+  @override
+  State<ImportContactsDialog> createState() => _ImportContactsDialogState();
+}
+
+class _ImportContactsDialogState extends State<ImportContactsDialog> {
+  List<phone.Contact> _contacts = [];
+  final _selectedIds = <String>{};
+  final _searchController = TextEditingController();
+  bool _loading = true;
+  bool _denied = false;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _init() async {
+    final status = await phone.FlutterContacts.permissions.request(
+      phone.PermissionType.read,
+    );
+    if (status != phone.PermissionStatus.granted) {
+      if (mounted) setState(() => _denied = true);
+      return;
+    }
+    await _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final list = await phone.FlutterContacts.getAll(
+        properties: {phone.ContactProperty.phone},
+      );
+      list.sort((a, b) => (a.displayName ?? '').compareTo(b.displayName ?? ''));
+      if (mounted) {
+        setState(() {
+          _contacts = list;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _denied = true;
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _import() async {
+    if (_selectedIds.isEmpty || _saving) return;
+    setState(() => _saving = true);
+    try {
+      final selected = _contacts
+          .where((c) => c.id != null && _selectedIds.contains(c.id!))
+          .toList();
+      Contact? first;
+      for (final c in selected) {
+        final name = (c.displayName ?? '').trim();
+        if (name.isEmpty) continue;
+        final phoneNumber = c.phones.isNotEmpty ? c.phones.first.number : '';
+        if (widget.type == ContactType.client && phoneNumber.trim().isEmpty) {
+          continue;
+        }
+        final saved = await widget.database.saveContact(
+          widget.type,
+          widget.companyId,
+          name,
+          phoneNumber,
+        );
+        first ??= saved;
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop(first);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+    }
+  }
+
+  bool _matches(phone.Contact c) {
+    final query = _searchController.text.trim().toLowerCase();
+    if (query.isEmpty) return true;
+    final name = (c.displayName ?? '').toLowerCase();
+    if (name.contains(query)) return true;
+    for (final p in c.phones) {
+      final number = p.number.toLowerCase();
+      if (number.contains(query)) return true;
+    }
+    return false;
+  }
+
+  String _subtitle(phone.Contact c) {
+    final number = c.phones.isNotEmpty ? c.phones.first.number : '';
+    if (widget.type == ContactType.client && number.isEmpty) {
+      return 'Нет телефона — не будет импортирован';
+    }
+    return number;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _contacts.where(_matches).toList();
+    final allSelected = filtered.isNotEmpty &&
+        filtered.every(
+          (c) => c.id != null && _selectedIds.contains(c.id!),
+        );
+
+    return AlertDialog(
+      title: const Text('Импорт из телефона'),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 480,
+        child: Column(
+          children: [
+            TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                labelText: 'Поиск по имени или телефону',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            if (_denied)
+              const Expanded(
+                child: Center(
+                  child: Text(
+                    'Нужно разрешение на доступ к контактам.\n'
+                    'Разрешите его в настройках телефона.',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              )
+            else if (_loading)
+              const Expanded(child: Center(child: CircularProgressIndicator()))
+            else
+              Expanded(
+                child: filtered.isEmpty
+                    ? const Center(child: Text('Ничего не найдено'))
+                    : ListView.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) {
+                          final c = filtered[index];
+                          final disabled = c.id == null ||
+                              (widget.type == ContactType.client &&
+                                  c.phones.isEmpty);
+                          return CheckboxListTile(
+                            value: c.id != null && _selectedIds.contains(c.id!),
+                            onChanged: disabled
+                                ? null
+                                : (selected) {
+                                    setState(() {
+                                      if (c.id == null) return;
+                                      if (selected == true) {
+                                        _selectedIds.add(c.id!);
+                                      } else {
+                                        _selectedIds.remove(c.id!);
+                                      }
+                                    });
+                                  },
+                            title: Text(c.displayName ?? ''),
+                            subtitle: Text(_subtitle(c)),
+                          );
+                        },
+                      ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Отмена'),
+        ),
+        if (!_denied && !_loading)
+          TextButton(
+            onPressed: () {
+              setState(() {
+                if (allSelected) {
+                  for (final c in filtered) {
+                    if (c.id != null) _selectedIds.remove(c.id!);
+                  }
+                } else {
+                  for (final c in filtered) {
+                    if (c.id == null) continue;
+                    if (widget.type == ContactType.client &&
+                        c.phones.isEmpty) {
+                      continue;
+                    }
+                    _selectedIds.add(c.id!);
+                  }
+                }
+              });
+            },
+            child: Text(allSelected ? 'Снять всё' : 'Выбрать всё'),
+          ),
+        FilledButton(
+          onPressed: _selectedIds.isEmpty || _saving ? null : _import,
+          child: Text(_saving
+              ? 'Сохранение…'
+              : 'Импортировать (${_selectedIds.length})'),
+        ),
+      ],
     );
   }
 }

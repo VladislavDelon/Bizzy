@@ -700,6 +700,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setString('bizzy_theme_mode', _themeModeToString(_value));
   }
 
+  Future<void> _checkForUpdate(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final update = await const UpdateService().check();
+    if (!context.mounted) return;
+    if (update == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Обновлений пока нет')),
+      );
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => DownloadUpdateDialog(
+        service: const UpdateService(),
+        downloadUrl: update.downloadUrl,
+      ),
+    );
+    if (!context.mounted) return;
+    if (ok != true) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Не удалось загрузить обновление')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -733,6 +759,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               label: Text(e.value),
                             ))
                         .toList(),
+                  ),
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () => _checkForUpdate(context),
+                      icon: const Icon(Icons.system_update),
+                      label: const Text('Проверить обновления'),
+                    ),
                   ),
                 ],
               ),
@@ -830,10 +865,12 @@ class _AuthGateState extends State<AuthGate> {
         onChosen: _onCompanyChosen,
       );
     }
+    final updateService =
+        widget.updateService ?? (widget.database == null ? const UpdateService() : null);
     return ScheduleScreen(
       database: _db,
       company: _company!,
-      updateService: widget.updateService,
+      updateService: updateService,
       onSwitchCompany: () => setState(() => _company = null),
       onLogout: _logout,
     );
@@ -1245,8 +1282,7 @@ class ScheduleScreen extends StatefulWidget {
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
   late final AppointmentsDatabase _db = widget.database ?? AppointmentsDatabase();
-  late final UpdateService? _updateService =
-      widget.updateService ?? (widget.database == null ? const UpdateService() : null);
+  late final UpdateService? _updateService = widget.updateService;
   CalendarFormat _calendarFormat = CalendarFormat.month;
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;

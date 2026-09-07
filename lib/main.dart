@@ -895,6 +895,23 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _registerMode = false;
   bool _busy = false;
   String? _error;
+  PackageInfo _info = PackageInfo(
+    appName: 'Bizzy',
+    packageName: 'com.example.bizzy_app',
+    version: '',
+    buildNumber: '',
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInfo();
+  }
+
+  Future<void> _loadInfo() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) setState(() => _info = info);
+  }
 
   @override
   void dispose() {
@@ -944,10 +961,37 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+  Widget _logo() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 24, bottom: 8),
+      child: Center(
+        child: Image.asset(
+          'assets/icons/logo.png',
+          width: 160,
+          height: 160,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) => Container(
+            width: 160,
+            height: 160,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.calendar_month,
+              size: 96,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final versionText = 'Версия ${_info.version}${_info.buildNumber.isNotEmpty ? '+${_info.buildNumber}' : ''}';
     return Scaffold(
-      appBar: AppBar(title: const Text('Bizzy')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -956,6 +1000,7 @@ class _AuthScreenState extends State<AuthScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                _logo(),
                 Text(
                   _registerMode ? 'Регистрация' : 'Вход',
                   style: Theme.of(context).textTheme.headlineSmall,
@@ -1037,6 +1082,12 @@ class _AuthScreenState extends State<AuthScreen> {
                         ? 'Уже есть аккаунт? Войти'
                         : 'Нет аккаунта? Зарегистрироваться',
                   ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  versionText,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
                 if (_registerMode)
                   Padding(

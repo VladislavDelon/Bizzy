@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:bizzy_app/main.dart';
@@ -146,6 +147,10 @@ Future<MemoryDatabase> loggedInDb(WidgetTester tester) async {
 }
 
 void main() {
+  setUpAll(() async {
+    await initializeDateFormatting('ru_RU', null);
+  });
+
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   testWidgets('Register shows local-storage warning then company setup',
@@ -180,7 +185,6 @@ void main() {
     await tester.tap(find.text('Сохранить'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Салон «Лилия»'), findsOneWidget);
     expect(find.text('На этот день записей нет.'), findsOneWidget);
   });
 
@@ -200,19 +204,19 @@ void main() {
   testWidgets('Schedule shows company directories and switch menu',
       (tester) async {
     await loggedInDb(tester);
-    expect(find.text('Салон «Тест»'), findsOneWidget);
     await tester.tap(find.text('Клиенты'));
     await tester.pumpAndSettle();
     expect(find.text('Клиентов пока нет'), findsOneWidget);
-    await tester.tap(find.byType(BackButton));
+    await tester.tap(find.text('Ещё'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Мастера'));
     await tester.pumpAndSettle();
     expect(find.text('Мастеров пока нет'), findsOneWidget);
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.tap(find.text('Ещё'));
     await tester.pumpAndSettle();
+    expect(find.text('Салон «Тест»'), findsOneWidget);
     expect(find.text('Сменить компанию'), findsOneWidget);
     expect(find.text('Выйти из аккаунта'), findsOneWidget);
   });

@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart' as phone;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
 import 'package:install_plugin_v3/install_plugin_v3.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
@@ -41,6 +43,7 @@ Future<void> _loadTheme() async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('ru_RU', null);
   await _loadTheme();
   runApp(const BizzyApp());
 }
@@ -58,30 +61,8 @@ class BizzyApp extends StatelessWidget {
       builder: (context, child) => MaterialApp(
         title: 'Bizzy',
         themeMode: _themeMode.value,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.deepPurple,
-            brightness: Brightness.light,
-          ),
-          useMaterial3: true,
-          pageTransitionsTheme: const PageTransitionsTheme(
-            builders: {
-              TargetPlatform.android: ZoomPageTransitionsBuilder(),
-            },
-          ),
-        ),
-        darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.deepPurple,
-            brightness: Brightness.dark,
-          ),
-          useMaterial3: true,
-          pageTransitionsTheme: const PageTransitionsTheme(
-            builders: {
-              TargetPlatform.android: ZoomPageTransitionsBuilder(),
-            },
-          ),
-        ),
+        theme: _bizzyTheme(Brightness.light),
+        darkTheme: _bizzyTheme(Brightness.dark),
         locale: const Locale('ru'),
         supportedLocales: const [Locale('ru')],
         localizationsDelegates: const [
@@ -93,6 +74,72 @@ class BizzyApp extends StatelessWidget {
       ),
     );
   }
+}
+
+DateTime _startOfDay(DateTime date) => DateTime(date.year, date.month, date.day);
+
+String _formatTime(DateTime dateTime) {
+  final hour = dateTime.hour.toString().padLeft(2, '0');
+  final minute = dateTime.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
+}
+
+String _formatDateTime(DateTime dateTime) {
+  final hour = dateTime.hour.toString().padLeft(2, '0');
+  final minute = dateTime.minute.toString().padLeft(2, '0');
+  return '${dateTime.day}.${dateTime.month}.${dateTime.year} $hour:$minute';
+}
+
+ThemeData _bizzyTheme(Brightness brightness) {
+  const seedColor = Color(0xFFFFD600);
+  final isLight = brightness == Brightness.light;
+  final selectedColor = isLight ? Colors.black : Colors.white;
+  return ThemeData(
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: seedColor,
+      brightness: brightness,
+    ),
+    useMaterial3: true,
+    scaffoldBackgroundColor: isLight ? Colors.white : null,
+    appBarTheme: isLight
+        ? const AppBarTheme(
+            backgroundColor: Colors.white,
+            foregroundColor: Colors.black,
+            iconTheme: IconThemeData(color: Colors.black),
+            titleTextStyle: TextStyle(
+              color: Colors.black,
+              fontSize: 20,
+              fontWeight: FontWeight.w500,
+            ),
+            elevation: 0,
+          )
+        : null,
+    floatingActionButtonTheme: const FloatingActionButtonThemeData(
+      backgroundColor: Colors.black,
+      foregroundColor: Colors.white,
+      extendedTextStyle: TextStyle(color: Colors.white),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      indicatorColor: seedColor,
+      iconTheme: WidgetStateProperty.resolveWith((states) {
+        final selected = states.contains(WidgetState.selected);
+        return IconThemeData(
+          color: selected ? selectedColor : Colors.grey,
+        );
+      }),
+      labelTextStyle: WidgetStateProperty.resolveWith((states) {
+        final selected = states.contains(WidgetState.selected);
+        return TextStyle(
+          color: selected ? selectedColor : Colors.grey,
+        );
+      }),
+    ),
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: ZoomPageTransitionsBuilder(),
+      },
+    ),
+  );
 }
 
 class AppUpdate {
@@ -868,9 +915,10 @@ class _AuthGateState extends State<AuthGate> {
     }
     final updateService =
         widget.updateService ?? (widget.database == null ? const UpdateService() : null);
-    return ScheduleScreen(
+    return MainShell(
       database: _db,
       company: _company!,
+      user: _user!,
       updateService: updateService,
       onSwitchCompany: () => setState(() => _company = null),
       onLogout: _logout,
@@ -1312,46 +1360,54 @@ class _AddCompanyDialogState extends State<AddCompanyDialog> {
   }
 }
 
-class ScheduleScreen extends StatefulWidget {
-  const ScheduleScreen({
+class MainShell extends StatefulWidget {
+  const MainShell({
     super.key,
-    this.database,
-    this.updateService,
+    required this.database,
     required this.company,
+    required this.user,
+    this.updateService,
     required this.onSwitchCompany,
     required this.onLogout,
   });
 
-  final AppointmentsDatabase? database;
-  final UpdateService? updateService;
+  final AppointmentsDatabase database;
   final Company company;
+  final User user;
+  final UpdateService? updateService;
   final VoidCallback onSwitchCompany;
   final VoidCallback onLogout;
 
   @override
-  State<ScheduleScreen> createState() => _ScheduleScreenState();
+  State<MainShell> createState() => _MainShellState();
 }
 
-class _ScheduleScreenState extends State<ScheduleScreen> {
-  late final AppointmentsDatabase _db = widget.database ?? AppointmentsDatabase();
-  late final UpdateService? _updateService = widget.updateService;
-  CalendarFormat _calendarFormat = CalendarFormat.month;
-  DateTime _focusedDay = DateTime.now();
-  DateTime? _selectedDay;
+class _MainShellState extends State<MainShell> {
+  late final AppointmentsDatabase _db = widget.database;
+  late final ValueNotifier<DateTime> _homeDayNotifier;
+  int _currentIndex = 0;
   List<Appointment> _allAppointments = [];
-  List<Appointment> _dayAppointments = [];
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _selectedDay = _focusedDay;
+    _homeDayNotifier = ValueNotifier(_startOfDay(DateTime.now()));
     _loadAppointments();
-    _checkUpdates();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkUpdates();
+    });
+  }
+
+  @override
+  void dispose() {
+    _homeDayNotifier.dispose();
+    super.dispose();
   }
 
   Future<void> _checkUpdates() async {
-    final service = _updateService;
+    if (!Platform.isAndroid) return;
+    final service = widget.updateService;
     if (service == null) return;
     try {
       final update = await service.check();
@@ -1412,37 +1468,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     if (!mounted) return;
     setState(() {
       _allAppointments = appointments;
-      _dayAppointments = _appointmentsFor(_selectedDay!);
       _loading = false;
     });
-  }
-
-  List<Appointment> _appointmentsFor(DateTime day) {
-    return _allAppointments
-        .where((a) => isSameDay(a.dateTime, day))
-        .toList();
-  }
-
-  List<Appointment> _eventsForDay(DateTime day) {
-    return _appointmentsFor(day);
   }
 
   Future<void> _deleteAppointment(int id) async {
     await _db.delete(id);
     await _loadAppointments();
-  }
-
-  Future<void> _showAppointmentDialog({Appointment? appointment}) async {
-    final result = await showDialog<Appointment>(
-      context: context,
-      builder: (context) => AppointmentDialog(
-        database: _db,
-        companyId: widget.company.id,
-        initialDate: _selectedDay!,
-        appointment: appointment,
-      ),
-    );
-    if (result != null) await _saveAppointment(result);
   }
 
   Future<void> _saveAppointment(Appointment appointment) async {
@@ -1466,10 +1498,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Время пересекается'),
-          content: Text(
-            'Новое время накладывается на запись «${conflict.clientName}» '
-            '(${conflict.master}, ${_formatDateTime(conflict.dateTime)}).\n\n'
-            'Сохранить всё равно? Не забудьте предупредить второго клиента.',
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Новое время накладывается на запись «${conflict.clientName}» '
+                '(${conflict.master}, ${_formatDateTime(conflict.dateTime)}).',
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Сохранить всё равно? Не забудьте предупредить второго клиента.',
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -1494,126 +1535,853 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     await _loadAppointments();
   }
 
-  String _formatDateTime(DateTime dateTime) {
-    final hour = dateTime.hour.toString().padLeft(2, '0');
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    return '${dateTime.day}.${dateTime.month}.${dateTime.year} $hour:$minute';
+  Future<void> _showAppointmentDialog({
+    Appointment? appointment,
+    required DateTime initialDate,
+  }) async {
+    final result = await showDialog<Appointment>(
+      context: context,
+      builder: (context) => AppointmentDialog(
+        database: _db,
+        companyId: widget.company.id,
+        initialDate: initialDate,
+        appointment: appointment,
+      ),
+    );
+    if (result != null) await _saveAppointment(result);
+  }
+
+  void _openAppointmentDialog() {
+    _showAppointmentDialog(initialDate: _homeDayNotifier.value);
+  }
+
+  void _showNotificationDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => const AlertDialog(
+        title: Text('Уведомления'),
+        content: Text('Push-уведомления пока не реализованы'),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final tabs = [
+      HomeTab(
+        database: _db,
+        company: widget.company,
+        user: widget.user,
+        appointments: _allAppointments,
+        selectedDayNotifier: _homeDayNotifier,
+        loading: _loading,
+        onEdit: _showAppointmentDialog,
+        onDelete: _deleteAppointment,
+      ),
+      CalendarTab(
+        database: _db,
+        company: widget.company,
+        appointments: _allAppointments,
+        loading: _loading,
+        onEdit: _showAppointmentDialog,
+        onDelete: _deleteAppointment,
+      ),
+      ClientsTab(
+        database: _db,
+        company: widget.company,
+        isVisible: _currentIndex == 2,
+      ),
+      const ServicesTab(),
+      MoreTab(
+        database: _db,
+        company: widget.company,
+        onSwitchCompany: widget.onSwitchCompany,
+        onLogout: widget.onLogout,
+      ),
+    ];
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.company.name),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        actions: [
-          for (final type in ContactType.values)
-            TextButton(
-              onPressed: () => Navigator.of(context).push<void>(
-                MaterialPageRoute(
-                  builder: (context) => ContactsScreen(
-                    database: _db,
-                    type: type,
-                    companyId: widget.company.id,
-                  ),
+        automaticallyImplyLeading: false,
+        centerTitle: false,
+        title: Image.asset(
+          'assets/icons/logo.png',
+          height: 40,
+          errorBuilder: (context, error, stackTrace) => Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.calendar_month,
+                  color: Theme.of(context).colorScheme.primary,
                 ),
               ),
-              child: Text(type.title),
-            ),
-          IconButton(
-            onPressed: () => Navigator.of(context).push<void>(
-              MaterialPageRoute(builder: (context) => const SettingsScreen()),
-            ),
-            icon: const Icon(Icons.settings),
-            tooltip: 'Настройки',
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'switch') widget.onSwitchCompany();
-              if (value == 'logout') widget.onLogout();
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'switch', child: Text('Сменить компанию')),
-              PopupMenuItem(value: 'logout', child: Text('Выйти из аккаунта')),
+              const SizedBox(width: 8),
+              const Text(
+                'Bizzy',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ],
+          ),
+        ),
+        actions: [
+          IconButton(
+            onPressed: _showNotificationDialog,
+            icon: const Icon(Icons.notifications_outlined),
+            tooltip: 'Уведомления',
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                TableCalendar(
-                  locale: 'ru_RU',
-                  firstDay: DateTime.utc(2020, 1, 1),
-                  lastDay: DateTime.utc(2030, 12, 31),
-                  focusedDay: _focusedDay,
-                  selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-                  calendarFormat: _calendarFormat,
-                  eventLoader: _eventsForDay,
-                  availableCalendarFormats: const {
-                    CalendarFormat.month: 'Месяц',
-                    CalendarFormat.twoWeeks: '2 недели',
-                    CalendarFormat.week: 'Неделя',
-                  },
-                  onDaySelected: (selectedDay, focusedDay) {
-                    setState(() {
-                      _selectedDay = selectedDay;
-                      _focusedDay = focusedDay;
-                      _dayAppointments = _appointmentsFor(selectedDay);
-                    });
-                  },
-                  onFormatChanged: (format) {
-                    setState(() {
-                      _calendarFormat = format;
-                    });
-                  },
-                  onPageChanged: (focusedDay) {
-                    _focusedDay = focusedDay;
-                  },
+      body: IndexedStack(
+        index: _currentIndex,
+        children: tabs,
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (index) => setState(() => _currentIndex = index),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_filled),
+            label: 'Главная',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.calendar_today),
+            label: 'Календарь',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.people_outline),
+            label: 'Клиенты',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.spa),
+            label: 'Услуги',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.menu),
+            label: 'Ещё',
+          ),
+        ],
+      ),
+      floatingActionButton: _currentIndex == 0
+          ? FloatingActionButton.extended(
+              onPressed: _openAppointmentDialog,
+              icon: const Icon(Icons.add),
+              label: const Text('Новая запись'),
+            )
+          : null,
+    );
+  }
+}
+
+class HomeTab extends StatefulWidget {
+  const HomeTab({
+    super.key,
+    required this.database,
+    required this.company,
+    required this.user,
+    required this.appointments,
+    required this.selectedDayNotifier,
+    required this.loading,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final AppointmentsDatabase database;
+  final Company company;
+  final User user;
+  final List<Appointment> appointments;
+  final ValueNotifier<DateTime> selectedDayNotifier;
+  final bool loading;
+  final Future<void> Function({
+    Appointment? appointment,
+    required DateTime initialDate,
+  }) onEdit;
+  final Future<void> Function(int) onDelete;
+
+  @override
+  State<HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<HomeTab> {
+  late DateTime _selectedDay;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedDay = _startOfDay(widget.selectedDayNotifier.value);
+    widget.selectedDayNotifier.addListener(_onDayChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selectedDayNotifier != oldWidget.selectedDayNotifier) {
+      oldWidget.selectedDayNotifier.removeListener(_onDayChanged);
+      _selectedDay = _startOfDay(widget.selectedDayNotifier.value);
+      widget.selectedDayNotifier.addListener(_onDayChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.selectedDayNotifier.removeListener(_onDayChanged);
+    super.dispose();
+  }
+
+  void _onDayChanged() {
+    if (!mounted) return;
+    setState(() => _selectedDay = _startOfDay(widget.selectedDayNotifier.value));
+  }
+
+  void _selectDay(DateTime day) {
+    widget.selectedDayNotifier.value = _startOfDay(day);
+  }
+
+  DateTime get _weekStart =>
+      _selectedDay.subtract(Duration(days: _selectedDay.weekday - 1));
+
+  @override
+  Widget build(BuildContext context) {
+    final dayAppointments = widget.appointments
+        .where((a) => isSameDay(a.dateTime, _selectedDay))
+        .toList()
+      ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
+    final todayCount = widget.appointments
+        .where((a) => isSameDay(a.dateTime, DateTime.now()))
+        .length;
+    final hour = DateTime.now().hour;
+    final String greeting;
+    if (hour < 6) {
+      greeting = 'Доброй ночи';
+    } else if (hour < 12) {
+      greeting = 'Доброе утро';
+    } else if (hour < 18) {
+      greeting = 'Добрый день';
+    } else {
+      greeting = 'Добрый вечер';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(text: '$greeting, '),
+                    TextSpan(
+                      text: widget.user.login,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const TextSpan(text: '! ✨'),
+                  ],
                 ),
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 250),
-                    child: _dayAppointments.isEmpty
-                        ? const Center(
-                            key: ValueKey('empty'),
-                            child: Text('На этот день записей нет.'),
-                          )
-                        : ListView.builder(
-                            key: ValueKey(_selectedDay?.toIso8601String()),
-                            itemCount: _dayAppointments.length,
-                            itemBuilder: (context, index) {
-                              final a = _dayAppointments[index];
-                              return Card(
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
-                                ),
-                                child: ListTile(
-                                  title: Text(a.clientName),
-                                  subtitle: Text(
-                                    '${a.master} • ${a.service}\n${_formatDateTime(a.dateTime)}',
-                                  ),
-                                  trailing: Text(a.phone),
-                                  isThreeLine: true,
-                                  onTap: () => _showAppointmentDialog(appointment: a),
-                                  onLongPress: () => _deleteAppointment(a.id!),
-                                ),
-                              );
-                            },
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'У вас $todayCount записей сегодня',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Colors.grey[700],
+                    ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: SizedBox(
+            height: 72,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: 7,
+              itemBuilder: (context, index) {
+                final day = _weekStart.add(Duration(days: index));
+                final selected = isSameDay(day, _selectedDay);
+                return GestureDetector(
+                  onTap: () => _selectDay(day),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: selected ? const Color(0xFFFFD600) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          DateFormat.E('ru_RU').format(day).toUpperCase(),
+                          style: TextStyle(
+                            color: selected ? Colors.black : Colors.grey[700],
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
                           ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${day.day}',
+                          style: TextStyle(
+                            color: selected ? Colors.black : Colors.black87,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+                );
+              },
+            ),
+          ),
+        ),
+        Expanded(
+          child: widget.loading
+              ? const Center(child: CircularProgressIndicator())
+              : dayAppointments.isEmpty
+                  ? const Center(
+                      child: Text('На этот день записей нет.'),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 80),
+                      itemCount: dayAppointments.length,
+                      itemBuilder: (context, index) {
+                        final a = dayAppointments[index];
+                        final initial = a.clientName.trim().isEmpty
+                            ? ''
+                            : a.clientName.trim()[0].toUpperCase();
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: const Color(0xFFFFD600),
+                              foregroundColor: Colors.black,
+                              child: initial.isEmpty
+                                  ? const Icon(Icons.person_outline)
+                                  : Text(initial),
+                            ),
+                            title: Text(a.clientName),
+                            subtitle: Text(a.service),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _formatTime(a.dateTime),
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                PopupMenuButton<String>(
+                                  onSelected: (value) {
+                                    if (value == 'edit') {
+                                      widget.onEdit(
+                                        appointment: a,
+                                        initialDate: a.dateTime,
+                                      );
+                                    } else if (value == 'delete') {
+                                      widget.onDelete(a.id!);
+                                    }
+                                  },
+                                  itemBuilder: (context) => const [
+                                    PopupMenuItem(
+                                      value: 'edit',
+                                      child: Text('Редактировать'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'delete',
+                                      child: Text('Удалить'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            onTap: () => widget.onEdit(
+                              appointment: a,
+                              initialDate: a.dateTime,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+        ),
+      ],
+    );
+  }
+}
+
+class CalendarTab extends StatefulWidget {
+  const CalendarTab({
+    super.key,
+    required this.database,
+    required this.company,
+    required this.appointments,
+    required this.loading,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final AppointmentsDatabase database;
+  final Company company;
+  final List<Appointment> appointments;
+  final bool loading;
+  final Future<void> Function({
+    Appointment? appointment,
+    required DateTime initialDate,
+  }) onEdit;
+  final Future<void> Function(int) onDelete;
+
+  @override
+  State<CalendarTab> createState() => _CalendarTabState();
+}
+
+class _CalendarTabState extends State<CalendarTab> {
+  CalendarFormat _calendarFormat = CalendarFormat.month;
+  DateTime _focusedDay = DateTime.now();
+  late DateTime _selectedDay;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedDay = _focusedDay;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dayAppointments = widget.appointments
+        .where((a) => isSameDay(a.dateTime, _selectedDay))
+        .toList()
+      ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
+
+    return widget.loading
+        ? const Center(child: CircularProgressIndicator())
+        : Column(
+            children: [
+              TableCalendar<Appointment>(
+                locale: 'ru_RU',
+                firstDay: DateTime.utc(2020, 1, 1),
+                lastDay: DateTime.utc(2030, 12, 31),
+                focusedDay: _focusedDay,
+                selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                calendarFormat: _calendarFormat,
+                eventLoader: (day) => widget.appointments
+                    .where((a) => isSameDay(a.dateTime, day))
+                    .toList(),
+                availableCalendarFormats: const {
+                  CalendarFormat.month: 'Месяц',
+                  CalendarFormat.twoWeeks: '2 недели',
+                  CalendarFormat.week: 'Неделя',
+                },
+                onDaySelected: (selectedDay, focusedDay) {
+                  setState(() {
+                    _selectedDay = selectedDay;
+                    _focusedDay = focusedDay;
+                  });
+                },
+                onFormatChanged: (format) {
+                  setState(() => _calendarFormat = format);
+                },
+                onPageChanged: (focusedDay) {
+                  _focusedDay = focusedDay;
+                },
+              ),
+              Expanded(
+                child: dayAppointments.isEmpty
+                    ? const Center(
+                        child: Text('На этот день записей нет.'),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        itemCount: dayAppointments.length,
+                        itemBuilder: (context, index) {
+                          final a = dayAppointments[index];
+                          return Card(
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
+                            ),
+                            child: ListTile(
+                              title: Text(a.clientName),
+                              subtitle: Text('${a.master} • ${a.service}'),
+                              trailing: Text(_formatTime(a.dateTime)),
+                              onTap: () => widget.onEdit(
+                                appointment: a,
+                                initialDate: a.dateTime,
+                              ),
+                              onLongPress: () => widget.onDelete(a.id!),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          );
+  }
+}
+
+class ClientsTab extends StatefulWidget {
+  const ClientsTab({
+    super.key,
+    required this.database,
+    required this.company,
+    this.isVisible = false,
+  });
+
+  final AppointmentsDatabase database;
+  final Company company;
+  final bool isVisible;
+
+  @override
+  State<ClientsTab> createState() => _ClientsTabState();
+}
+
+class _ClientsTabState extends State<ClientsTab> {
+  List<Contact> _contacts = [];
+  String _query = '';
+  bool _loading = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isVisible) _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant ClientsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.isVisible && widget.isVisible) _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    try {
+      final contacts = await widget.database.getContacts(
+        ContactType.client,
+        widget.company.id,
+      );
+      if (!mounted) return;
+      setState(() => _contacts = contacts);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _failed = true);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _addClient() async {
+    final contact = await showDialog<Contact>(
+      context: context,
+      builder: (context) => AddContactDialog(
+        database: widget.database,
+        type: ContactType.client,
+        companyId: widget.company.id,
+      ),
+    );
+    if (!mounted || contact == null) return;
+    await _load();
+  }
+
+  Future<void> _importClients() async {
+    final contact = await showDialog<Contact>(
+      context: context,
+      builder: (context) => ImportContactsDialog(
+        database: widget.database,
+        type: ContactType.client,
+        companyId: widget.company.id,
+      ),
+    );
+    if (!mounted || contact == null) return;
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final contacts = _contacts
+        .where(
+          (contact) =>
+              contact.name.toLowerCase().contains(_query) ||
+              contact.phone.contains(_query),
+        )
+        .toList();
+    return Scaffold(
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    decoration: const InputDecoration(
+                      labelText: 'Поиск по имени или телефону',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (value) => setState(
+                      () => _query = value.trim().toLowerCase(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: _importClients,
+                  icon: const Icon(Icons.contacts),
+                  tooltip: 'Импорт из телефона',
                 ),
               ],
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAppointmentDialog,
-        child: const Icon(Icons.add),
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _failed
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Не удалось загрузить список'),
+                            TextButton(
+                              onPressed: _load,
+                              child: const Text('Повторить'),
+                            ),
+                          ],
+                        ),
+                      )
+                    : contacts.isEmpty
+                        ? Center(
+                            child: Text(
+                              _query.isEmpty
+                                  ? 'Клиентов пока нет'
+                                  : 'Ничего не найдено',
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.only(bottom: 88),
+                            itemCount: contacts.length,
+                            itemBuilder: (context, index) {
+                              final contact = contacts[index];
+                              return ListTile(
+                                leading: const Icon(Icons.person_outline),
+                                title: Text(contact.name),
+                                subtitle: contact.phone.isEmpty
+                                    ? null
+                                    : Text(contact.phone),
+                              );
+                            },
+                          ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addClient,
+        icon: const Icon(Icons.add),
+        label: const Text('Добавить клиента'),
       ),
     );
   }
 }
+
+class ServicesTab extends StatelessWidget {
+  const ServicesTab({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Справочник услуг'),
+          Text('появится здесь'),
+        ],
+      ),
+    );
+  }
+}
+
+class MoreTab extends StatefulWidget {
+  const MoreTab({
+    super.key,
+    required this.database,
+    required this.company,
+    required this.onSwitchCompany,
+    required this.onLogout,
+  });
+
+  final AppointmentsDatabase database;
+  final Company company;
+  final VoidCallback onSwitchCompany;
+  final VoidCallback onLogout;
+
+  @override
+  State<MoreTab> createState() => _MoreTabState();
+}
+
+class _MoreTabState extends State<MoreTab> {
+  PackageInfo _info = PackageInfo(
+    appName: 'Bizzy',
+    packageName: '',
+    version: '',
+    buildNumber: '',
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInfo();
+  }
+
+  Future<void> _loadInfo() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() => _info = info);
+    } catch (_) {
+      // В тестах PackageInfo может быть недоступен.
+    }
+  }
+
+  Future<void> _checkUpdates() async {
+    const service = UpdateService();
+    try {
+      final update = await service.check();
+      if (!mounted) return;
+      if (update == null) {
+        await showDialog<void>(
+          context: context,
+          builder: (context) => const AlertDialog(
+            content: Text('Обновлений пока нет'),
+          ),
+        );
+        return;
+      }
+      final shouldInstall = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Доступно обновление'),
+          content: Text(
+            'Вышла новая версия ${update.version}. '
+            'Нажмите «Обновить», чтобы загрузить и установить её.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Позже'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Обновить'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || shouldInstall != true) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => DownloadUpdateDialog(
+          service: service,
+          downloadUrl: update.downloadUrl,
+        ),
+      );
+      if (!mounted || ok == true) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => const AlertDialog(
+          content: Text('Не удалось загрузить обновление'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => const AlertDialog(
+          content: Text('Не удалось проверить обновления'),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final version = '${_info.version}${_info.buildNumber.isNotEmpty ? '+${_info.buildNumber}' : ''}';
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      children: [
+        ListTile(
+          leading: const Icon(Icons.badge_outlined),
+          title: const Text('Мастера'),
+          onTap: () => Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (context) => ContactsScreen(
+                database: widget.database,
+                type: ContactType.master,
+                companyId: widget.company.id,
+              ),
+            ),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.settings),
+          title: const Text('Настройки'),
+          onTap: () => Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (context) => const SettingsScreen(),
+            ),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.business),
+          title: const Text('Сменить компанию'),
+          onTap: widget.onSwitchCompany,
+        ),
+        ListTile(
+          leading: const Icon(Icons.logout),
+          title: const Text('Выйти из аккаунта'),
+          onTap: widget.onLogout,
+        ),
+        if (Platform.isAndroid)
+          ListTile(
+            leading: const Icon(Icons.system_update),
+            title: const Text('Проверить обновления'),
+            onTap: _checkUpdates,
+          ),
+        const Divider(),
+        ListTile(
+          title: Text(widget.company.name),
+          subtitle: Text('Версия $version'),
+        ),
+      ],
+    );
+  }
+}
+
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({

@@ -1,16 +1,19 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:http/http.dart' as http;
+import 'package:install_plugin_v3/install_plugin_v3.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart' as p;
 import 'package:table_calendar/table_calendar.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 void main() => runApp(const BizzyApp());
 
@@ -79,6 +82,30 @@ class UpdateService {
     return AppUpdate(version: tag, downloadUrl: url);
   }
 
+  Future<void> downloadAndInstall(
+    Uri url,
+    ValueChanged<double> onProgress,
+  ) async {
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/bizzy_update.apk';
+    await Dio().download(
+      url.toString(),
+      path,
+      onReceiveProgress: (received, total) {
+        if (total > 0) onProgress(received / total);
+      },
+    );
+    final file = File(path);
+    if (!file.existsSync()) {
+      throw Exception('APK не загрузился');
+    }
+    final res = await InstallPlugin.installApk(path);
+    if (res is! Map || res['isSuccess'] != true) {
+      final message = res is Map ? res['errorMessage'] : res?.toString();
+      throw Exception(message ?? 'Не удалось начать установку');
+    }
+  }
+
   static bool _isNewer(String remote, String local) {
     List<int> parts(String v) =>
         v.split('+').first.split('.').map(int.parse).toList();
@@ -96,6 +123,72 @@ class UpdateService {
     } on FormatException {
       return false;
     }
+  }
+}
+
+class DownloadUpdateDialog extends StatefulWidget {
+  const DownloadUpdateDialog({
+    super.key,
+    required this.service,
+    required this.downloadUrl,
+  });
+
+  final UpdateService service;
+  final Uri downloadUrl;
+
+  @override
+  State<DownloadUpdateDialog> createState() => _DownloadUpdateDialogState();
+}
+
+class _DownloadUpdateDialogState extends State<DownloadUpdateDialog> {
+  double _progress = 0;
+  String _status = 'Загрузка…';
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+  }
+
+  Future<void> _start() async {
+    try {
+      await widget.service.downloadAndInstall(
+        widget.downloadUrl,
+        (p) => setState(() {
+          _progress = p;
+          _status = 'Загружено ${(p * 100).toStringAsFixed(0)}%';
+        }),
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = 'Ошибка загрузки');
+      await Future.delayed(const Duration(seconds: 1));
+      if (mounted) Navigator.of(context).pop(false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      child: AlertDialog(
+        title: const Text('Обновление Bizzy'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_status),
+            const SizedBox(height: 16),
+            LinearProgressIndicator(value: _progress),
+            const SizedBox(height: 8),
+            Text(
+              'По завершении система предложит установить новую версию.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -998,26 +1091,48 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     try {
       final update = await service.check();
       if (!mounted || update == null) return;
-      await showDialog<void>(
+      final shouldInstall = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Доступно обновление'),
           content: Text(
             'Вышла новая версия ${update.version}. '
-            'Нажмите «Обновить», чтобы скачать её.',
+            'Нажмите «Обновить», чтобы загрузить и установить её.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Позже'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Обновить'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || shouldInstall != true) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => DownloadUpdateDialog(
+          service: service,
+          downloadUrl: update.downloadUrl,
+        ),
+      );
+      if (!mounted || ok == true) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Не удалось обновить'),
+          content: const Text(
+            'Проверьте подключение к интернету, свободное место и разрешение '
+            '«Установка из неизвестных источников» для Bizzy в настройках телефона.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Позже'),
-            ),
-            FilledButton(
-              onPressed: () {
-                launchUrl(update.downloadUrl,
-                    mode: LaunchMode.externalApplication);
-                Navigator.of(context).pop();
-              },
-              child: const Text('Обновить'),
+              child: const Text('OK'),
             ),
           ],
         ),

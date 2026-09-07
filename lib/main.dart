@@ -23,6 +23,27 @@ import 'package:url_launcher/url_launcher.dart';
 
 final ValueNotifier<ThemeMode> _themeMode = ValueNotifier(ThemeMode.system);
 
+enum Currency {
+  kzt('₸', 'Тенге (KZT)'),
+  rub('₽', 'Рубли (RUB)'),
+  usd(r'$', 'Доллары (USD)'),
+  eur('€', 'Евро (EUR)');
+
+  final String symbol;
+  final String label;
+
+  const Currency(this.symbol, this.label);
+
+  static Currency fromString(String? value) {
+    return Currency.values.firstWhere(
+      (c) => c.name == value,
+      orElse: () => Currency.kzt,
+    );
+  }
+}
+
+final ValueNotifier<Currency> _currency = ValueNotifier(Currency.kzt);
+
 ThemeMode _themeModeFromString(String? value) {
   return switch (value) {
     'light' => ThemeMode.light,
@@ -44,10 +65,16 @@ Future<void> _loadTheme() async {
   _themeMode.value = _themeModeFromString(prefs.getString('bizzy_theme_mode'));
 }
 
+Future<void> _loadCurrency() async {
+  final prefs = await SharedPreferences.getInstance();
+  _currency.value = Currency.fromString(prefs.getString('bizzy_currency'));
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('ru_RU', null);
   await _loadTheme();
+  await _loadCurrency();
   runApp(const BizzyApp());
 }
 
@@ -96,44 +123,47 @@ String _formatDateTime(DateTime dateTime) {
 ThemeData _bizzyTheme(Brightness brightness) {
   const seedColor = Color(0xFFFFD600);
   final isLight = brightness == Brightness.light;
-  final selectedColor = isLight ? Colors.black : Colors.white;
+  final unselectedColor = isLight ? Colors.grey : Colors.grey[400]!;
+  const selectedIconColor = Colors.black;
+  final selectedLabelColor = isLight ? Colors.black : Colors.white;
   return ThemeData(
     colorScheme: ColorScheme.fromSeed(
       seedColor: seedColor,
       brightness: brightness,
     ),
     useMaterial3: true,
-    scaffoldBackgroundColor: isLight ? Colors.white : null,
-    appBarTheme: isLight
-        ? const AppBarTheme(
-            backgroundColor: Colors.white,
-            foregroundColor: Colors.black,
-            iconTheme: IconThemeData(color: Colors.black),
-            titleTextStyle: TextStyle(
-              color: Colors.black,
-              fontSize: 20,
-              fontWeight: FontWeight.w500,
-            ),
-            elevation: 0,
-          )
-        : null,
+    scaffoldBackgroundColor: isLight ? Colors.white : Colors.black,
+    appBarTheme: AppBarTheme(
+      backgroundColor: isLight ? Colors.white : Colors.black,
+      foregroundColor: isLight ? Colors.black : Colors.white,
+      iconTheme: IconThemeData(
+        color: isLight ? Colors.black : Colors.white,
+      ),
+      titleTextStyle: TextStyle(
+        color: isLight ? Colors.black : Colors.white,
+        fontSize: 20,
+        fontWeight: FontWeight.w500,
+      ),
+      elevation: 0,
+    ),
     floatingActionButtonTheme: const FloatingActionButtonThemeData(
-      backgroundColor: Colors.black,
-      foregroundColor: Colors.white,
-      extendedTextStyle: TextStyle(color: Colors.white),
+      backgroundColor: seedColor,
+      foregroundColor: Colors.black,
+      extendedTextStyle: TextStyle(color: Colors.black),
     ),
     navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: isLight ? null : Colors.black,
       indicatorColor: seedColor,
       iconTheme: WidgetStateProperty.resolveWith((states) {
         final selected = states.contains(WidgetState.selected);
         return IconThemeData(
-          color: selected ? selectedColor : Colors.grey,
+          color: selected ? selectedIconColor : unselectedColor,
         );
       }),
       labelTextStyle: WidgetStateProperty.resolveWith((states) {
         final selected = states.contains(WidgetState.selected);
         return TextStyle(
-          color: selected ? selectedColor : Colors.grey,
+          color: selected ? selectedLabelColor : unselectedColor,
         );
       }),
     ),
@@ -1154,6 +1184,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               label: Text(e.value),
                             ))
                         .toList(),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Валюта',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  ValueListenableBuilder<Currency>(
+                    valueListenable: _currency,
+                    builder: (context, currency, _) => InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Валюта',
+                        border: OutlineInputBorder(),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      isEmpty: false,
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<Currency>(
+                          value: currency,
+                          isExpanded: true,
+                          isDense: true,
+                          items: Currency.values
+                              .map(
+                                (c) => DropdownMenuItem(
+                                  value: c,
+                                  child: Text('${c.label} (${c.symbol})'),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) async {
+                            if (value == null) return;
+                            _currency.value = value;
+                            final prefs = await SharedPreferences.getInstance();
+                            await prefs.setString(
+                                'bizzy_currency', value.name);
+                          },
+                        ),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 32),
                   SizedBox(
@@ -2725,20 +2795,23 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
                       : null,
                 ),
                 const SizedBox(height: 12),
-                TextFormField(
-                  controller: _priceController,
-                  enabled: !_saving,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Цена, ₽',
-                    border: OutlineInputBorder(),
+                ListenableBuilder(
+                  listenable: _currency,
+                  builder: (context, _) => TextFormField(
+                    controller: _priceController,
+                    enabled: !_saving,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      labelText: 'Цена, ${_currency.value.symbol}',
+                      border: const OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      final n = double.tryParse(value?.trim() ?? '');
+                      if (n == null || n < 0) return 'Введите число';
+                      return null;
+                    },
                   ),
-                  validator: (value) {
-                    final n = double.tryParse(value?.trim() ?? '');
-                    if (n == null || n < 0) return 'Введите число';
-                    return null;
-                  },
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -2960,8 +3033,11 @@ class _ServicesTabState extends State<ServicesTab> {
                                 child: ListTile(
                                   leading: const Icon(Icons.spa),
                                   title: Text(service.name),
-                                  subtitle: Text(
-                                    '${service.price.toStringAsFixed(2)} ₽ • ${service.durationMinutes} мин',
+                                  subtitle: ValueListenableBuilder<Currency>(
+                                    valueListenable: _currency,
+                                    builder: (context, currency, _) => Text(
+                                      '${service.price.toStringAsFixed(2)} ${currency.symbol} • ${service.durationMinutes} мин',
+                                    ),
                                   ),
                                   trailing: PopupMenuButton<String>(
                                     onSelected: (value) {

@@ -410,13 +410,13 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextFormField, 'Название'), 'Стрижка');
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Цена, ₽'), '1500');
+        find.widgetWithText(TextFormField, 'Цена, ₸'), '1500');
     await tester.enterText(
         find.widgetWithText(TextFormField, 'Длительность, мин'), '90');
     await tester.tap(find.text('Сохранить'));
     await tester.pumpAndSettle();
     expect(find.text('Стрижка'), findsOneWidget);
-    expect(find.text('1500.00 ₽ • 90 мин'), findsOneWidget);
+    expect(find.text('1500.00 ₸ • 90 мин'), findsOneWidget);
     expect(db.services.length, 1);
     expect(db.services.single.name, 'Стрижка');
     expect(db.services.single.price, 1500);

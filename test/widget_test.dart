@@ -14,6 +14,7 @@ class MemoryDatabase extends AppointmentsDatabase {
   final users = <String, String>{};
   bool failContacts = false;
   var _nextCompanyId = 1;
+  var _nextAppointmentId = 1;
 
   String _table(ContactType type) => type.table;
 
@@ -79,8 +80,47 @@ class MemoryDatabase extends AppointmentsDatabase {
 
   @override
   Future<int> insert(Appointment appointment) async {
-    appointments.add(appointment);
-    return appointments.length;
+    final saved = Appointment(
+      id: _nextAppointmentId++,
+      companyId: appointment.companyId,
+      clientName: appointment.clientName,
+      phone: appointment.phone,
+      service: appointment.service,
+      master: appointment.master,
+      dateTime: appointment.dateTime,
+      durationMinutes: appointment.durationMinutes,
+      reminderMinutes: appointment.reminderMinutes,
+      notes: appointment.notes,
+    );
+    appointments.add(saved);
+    return saved.id!;
+  }
+
+  @override
+  Future<int> update(Appointment appointment) async {
+    final index = appointments.indexWhere((a) => a.id == appointment.id);
+    if (index < 0) throw StateError('appointment not found');
+    appointments[index] = appointment;
+    return 1;
+  }
+
+  @override
+  Future<List<Appointment>> getForDay(
+    int companyId,
+    DateTime day, {
+    String? master,
+    int? excludeId,
+  }) async {
+    return appointments.where((a) {
+      final sameDay = a.dateTime.year == day.year &&
+          a.dateTime.month == day.month &&
+          a.dateTime.day == day.day;
+      if (a.companyId != companyId) return false;
+      if (!sameDay) return false;
+      if (master != null && a.master != master) return false;
+      if (excludeId != null && a.id == excludeId) return false;
+      return true;
+    }).toList();
   }
 
   @override
@@ -243,5 +283,55 @@ void main() {
     await tester.tap(find.text('Повторить'));
     await tester.pumpAndSettle();
     expect(find.text('Клиентов пока нет'), findsOneWidget);
+  });
+
+  testWidgets('Appointment can be edited and warns on overlap',
+      (tester) async {
+    final db = MemoryDatabase();
+    db.users['u'] = 'p';
+    final company = await db.createCompany(1, 'Салон «Тест»', 'Самозанятость');
+    final base = DateTime.now();
+    final day = DateTime(base.year, base.month, base.day, 13, 0);
+    db.appointments.addAll([
+      Appointment(
+        id: 1,
+        companyId: company.id,
+        clientName: 'Анна',
+        phone: '+1',
+        service: 'Стрижка',
+        master: 'Мария',
+        dateTime: day,
+        durationMinutes: 60,
+        notes: '',
+      ),
+      Appointment(
+        id: 2,
+        companyId: company.id,
+        clientName: 'Борис',
+        phone: '+2',
+        service: 'Окрашивание',
+        master: 'Мария',
+        dateTime: day.add(const Duration(minutes: 30)),
+        durationMinutes: 60,
+        notes: '',
+      ),
+    ]);
+    SharedPreferences.setMockInitialValues({
+      'bizzy_user_id': 1,
+      'bizzy_user_login': 'u',
+      'bizzy_company_id': company.id,
+    });
+    await tester.pumpWidget(BizzyApp(database: db));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Анна'));
+    await tester.pumpAndSettle();
+    expect(find.text('Редактирование записи'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Сохранить'));
+    await tester.tap(find.text('Сохранить'));
+    await tester.pumpAndSettle();
+    expect(find.text('Время пересекается'), findsOneWidget);
+    expect(find.textContaining('предупредить второго клиента'), findsOneWidget);
   });
 }

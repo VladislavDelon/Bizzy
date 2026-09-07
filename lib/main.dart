@@ -15,7 +15,34 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:table_calendar/table_calendar.dart';
 
-void main() => runApp(const BizzyApp());
+final ValueNotifier<ThemeMode> _themeMode = ValueNotifier(ThemeMode.system);
+
+ThemeMode _themeModeFromString(String? value) {
+  return switch (value) {
+    'light' => ThemeMode.light,
+    'dark' => ThemeMode.dark,
+    _ => ThemeMode.system,
+  };
+}
+
+String _themeModeToString(ThemeMode value) {
+  return switch (value) {
+    ThemeMode.light => 'light',
+    ThemeMode.dark => 'dark',
+    _ => 'system',
+  };
+}
+
+Future<void> _loadTheme() async {
+  final prefs = await SharedPreferences.getInstance();
+  _themeMode.value = _themeModeFromString(prefs.getString('bizzy_theme_mode'));
+}
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await _loadTheme();
+  runApp(const BizzyApp());
+}
 
 class BizzyApp extends StatelessWidget {
   const BizzyApp({super.key, this.database, this.updateService});
@@ -25,20 +52,44 @@ class BizzyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Bizzy',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
+    return ListenableBuilder(
+      listenable: _themeMode,
+      builder: (context, child) => MaterialApp(
+        title: 'Bizzy',
+        themeMode: _themeMode.value,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.deepPurple,
+            brightness: Brightness.light,
+          ),
+          useMaterial3: true,
+          pageTransitionsTheme: const PageTransitionsTheme(
+            builders: {
+              TargetPlatform.android: ZoomPageTransitionsBuilder(),
+            },
+          ),
+        ),
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.deepPurple,
+            brightness: Brightness.dark,
+          ),
+          useMaterial3: true,
+          pageTransitionsTheme: const PageTransitionsTheme(
+            builders: {
+              TargetPlatform.android: ZoomPageTransitionsBuilder(),
+            },
+          ),
+        ),
+        locale: const Locale('ru'),
+        supportedLocales: const [Locale('ru')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        home: AuthGate(database: database, updateService: updateService),
       ),
-      locale: const Locale('ru'),
-      supportedLocales: const [Locale('ru')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      home: AuthGate(database: database, updateService: updateService),
     );
   }
 }
@@ -230,6 +281,8 @@ class Appointment {
   final String service;
   final String master;
   final DateTime dateTime;
+  final int durationMinutes;
+  final int reminderMinutes;
   final String notes;
 
   Appointment({
@@ -240,6 +293,8 @@ class Appointment {
     required this.service,
     required this.master,
     required this.dateTime,
+    this.durationMinutes = 60,
+    this.reminderMinutes = 30,
     required this.notes,
   });
 
@@ -252,6 +307,8 @@ class Appointment {
       'service': service,
       'master': master,
       'dateTime': dateTime.toIso8601String(),
+      'durationMinutes': durationMinutes,
+      'reminderMinutes': reminderMinutes,
       'notes': notes,
     };
   }
@@ -265,6 +322,8 @@ class Appointment {
       service: map['service'] as String,
       master: map['master'] as String,
       dateTime: DateTime.parse(map['dateTime'] as String),
+      durationMinutes: (map['durationMinutes'] as int?) ?? 60,
+      reminderMinutes: (map['reminderMinutes'] as int?) ?? 30,
       notes: map['notes'] as String,
     );
   }
@@ -309,7 +368,7 @@ class AppointmentsDatabase {
     final pathString = p.join(databasesPath, 'bizzy.db');
     return openDatabase(
       pathString,
-      version: 3,
+      version: 4,
       onCreate: (db, version) => _createAll(db),
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -329,6 +388,14 @@ class AppointmentsDatabase {
           await _createAccounts(db);
           await _migrateToCompanies(db);
         }
+        if (oldVersion < 4) {
+          await db.execute('''
+            ALTER TABLE appointments ADD COLUMN durationMinutes INTEGER NOT NULL DEFAULT 60
+          ''');
+          await db.execute('''
+            ALTER TABLE appointments ADD COLUMN reminderMinutes INTEGER NOT NULL DEFAULT 30
+          ''');
+        }
       },
     );
   }
@@ -343,6 +410,8 @@ class AppointmentsDatabase {
         service TEXT NOT NULL,
         master TEXT NOT NULL,
         dateTime TEXT NOT NULL,
+        durationMinutes INTEGER NOT NULL DEFAULT 60,
+        reminderMinutes INTEGER NOT NULL DEFAULT 30,
         notes TEXT NOT NULL
       )
     ''');
@@ -518,6 +587,16 @@ class AppointmentsDatabase {
     return db.insert('appointments', appointment.toMap());
   }
 
+  Future<int> update(Appointment appointment) async {
+    final db = await database;
+    return db.update(
+      'appointments',
+      appointment.toMap()..remove('id'),
+      where: 'id = ?',
+      whereArgs: [appointment.id],
+    );
+  }
+
   Future<List<Appointment>> getAll(int companyId) async {
     final db = await database;
     final maps = await db.query(
@@ -525,6 +604,38 @@ class AppointmentsDatabase {
       where: 'companyId = ?',
       whereArgs: [companyId],
       orderBy: 'dateTime DESC',
+    );
+    return maps.map(Appointment.fromMap).toList();
+  }
+
+  Future<List<Appointment>> getForDay(
+    int companyId,
+    DateTime day, {
+    String? master,
+    int? excludeId,
+  }) async {
+    final db = await database;
+    final start = DateTime(day.year, day.month, day.day);
+    final end = start.add(const Duration(days: 1));
+    var where = 'companyId = ? AND dateTime >= ? AND dateTime < ?';
+    final args = <Object?>[
+      companyId,
+      start.toIso8601String(),
+      end.toIso8601String(),
+    ];
+    if (master != null && master.isNotEmpty) {
+      where += ' AND master = ?';
+      args.add(master);
+    }
+    if (excludeId != null) {
+      where += ' AND id != ?';
+      args.add(excludeId);
+    }
+    final maps = await db.query(
+      'appointments',
+      where: where,
+      whereArgs: args,
+      orderBy: 'dateTime',
     );
     return maps.map(Appointment.fromMap).toList();
   }
@@ -564,6 +675,72 @@ class SessionStore {
     await prefs.remove(_userKey);
     await prefs.remove(_loginKey);
     await prefs.remove(_companyKey);
+  }
+}
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  static const _options = {
+    ThemeMode.system: 'Системная',
+    ThemeMode.light: 'Светлая',
+    ThemeMode.dark: 'Тёмная',
+  };
+
+  late ThemeMode _value = _themeMode.value;
+
+  Future<void> _save() async {
+    final prefs = await SharedPreferences.getInstance();
+    _themeMode.value = _value;
+    await prefs.setString('bizzy_theme_mode', _themeModeToString(_value));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Настройки')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Тема оформления',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  SegmentedButton<ThemeMode>(
+                    multiSelectionEnabled: false,
+                    emptySelectionAllowed: false,
+                    selected: {_value},
+                    onSelectionChanged: (selected) {
+                      if (selected.isEmpty) return;
+                      setState(() => _value = selected.first);
+                      _save();
+                    },
+                    segments: _options.entries
+                        .map((e) => ButtonSegment<ThemeMode>(
+                              value: e.key,
+                              label: Text(e.value),
+                            ))
+                        .toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -1162,28 +1339,71 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     return _appointmentsFor(day);
   }
 
-  Future<void> _addAppointment(Appointment appointment) async {
-    await _db.insert(appointment);
-    await _loadAppointments();
-  }
-
   Future<void> _deleteAppointment(int id) async {
     await _db.delete(id);
     await _loadAppointments();
   }
 
-  Future<void> _showAddDialog() async {
+  Future<void> _showAppointmentDialog({Appointment? appointment}) async {
     final result = await showDialog<Appointment>(
       context: context,
-      builder: (context) => AddAppointmentDialog(
+      builder: (context) => AppointmentDialog(
         database: _db,
         companyId: widget.company.id,
         initialDate: _selectedDay!,
+        appointment: appointment,
       ),
     );
-    if (result != null) {
-      await _addAppointment(result);
+    if (result != null) await _saveAppointment(result);
+  }
+
+  Future<void> _saveAppointment(Appointment appointment) async {
+    final conflicts = await _db.getForDay(
+      widget.company.id,
+      appointment.dateTime,
+      master: appointment.master,
+      excludeId: appointment.id,
+    );
+    final overlapping = conflicts.where((c) {
+      final aStart = c.dateTime;
+      final aEnd = aStart.add(Duration(minutes: c.durationMinutes));
+      final bStart = appointment.dateTime;
+      final bEnd = bStart.add(Duration(minutes: appointment.durationMinutes));
+      return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
+    }).toList();
+
+    if (overlapping.isNotEmpty && mounted) {
+      final conflict = overlapping.first;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Время пересекается'),
+          content: Text(
+            'Новое время накладывается на запись «${conflict.clientName}» '
+            '(${conflict.master}, ${_formatDateTime(conflict.dateTime)}).\n\n'
+            'Сохранить всё равно? Не забудьте предупредить второго клиента.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Сохранить'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
     }
+
+    if (appointment.id == null) {
+      await _db.insert(appointment);
+    } else {
+      await _db.update(appointment);
+    }
+    await _loadAppointments();
   }
 
   String _formatDateTime(DateTime dateTime) {
@@ -1212,6 +1432,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               ),
               child: Text(type.title),
             ),
+          IconButton(
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (context) => const SettingsScreen()),
+            ),
+            icon: const Icon(Icons.settings),
+            tooltip: 'Настройки',
+          ),
           PopupMenuButton<String>(
             onSelected: (value) {
               if (value == 'switch') widget.onSwitchCompany();
@@ -1258,30 +1485,42 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   },
                 ),
                 Expanded(
-                  child: _dayAppointments.isEmpty
-                      ? const Center(
-                          child: Text('На этот день записей нет.'),
-                        )
-                      : ListView.builder(
-                          itemCount: _dayAppointments.length,
-                          itemBuilder: (context, index) {
-                            final a = _dayAppointments[index];
-                            return ListTile(
-                              title: Text(a.clientName),
-                              subtitle: Text(
-                                '${a.master} • ${a.service}\n${_formatDateTime(a.dateTime)}',
-                              ),
-                              trailing: Text(a.phone),
-                              isThreeLine: true,
-                              onLongPress: () => _deleteAppointment(a.id!),
-                            );
-                          },
-                        ),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 250),
+                    child: _dayAppointments.isEmpty
+                        ? const Center(
+                            key: ValueKey('empty'),
+                            child: Text('На этот день записей нет.'),
+                          )
+                        : ListView.builder(
+                            key: ValueKey(_selectedDay?.toIso8601String()),
+                            itemCount: _dayAppointments.length,
+                            itemBuilder: (context, index) {
+                              final a = _dayAppointments[index];
+                              return Card(
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
+                                child: ListTile(
+                                  title: Text(a.clientName),
+                                  subtitle: Text(
+                                    '${a.master} • ${a.service}\n${_formatDateTime(a.dateTime)}',
+                                  ),
+                                  trailing: Text(a.phone),
+                                  isThreeLine: true,
+                                  onTap: () => _showAppointmentDialog(appointment: a),
+                                  onLongPress: () => _deleteAppointment(a.id!),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
                 ),
               ],
             ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _showAddDialog,
+        onPressed: _showAppointmentDialog,
         child: const Icon(Icons.add),
       ),
     );
@@ -1558,37 +1797,69 @@ class _AddContactDialogState extends State<AddContactDialog> {
   }
 }
 
-class AddAppointmentDialog extends StatefulWidget {
-  const AddAppointmentDialog({
+class AppointmentDialog extends StatefulWidget {
+  const AppointmentDialog({
     super.key,
     required this.database,
     required this.companyId,
     required this.initialDate,
+    this.appointment,
   });
 
   final AppointmentsDatabase database;
   final int companyId;
   final DateTime initialDate;
+  final Appointment? appointment;
 
   @override
-  State<AddAppointmentDialog> createState() => _AddAppointmentDialogState();
+  State<AppointmentDialog> createState() => _AppointmentDialogState();
 }
 
-class _AddAppointmentDialogState extends State<AddAppointmentDialog> {
+class _AppointmentDialogState extends State<AppointmentDialog> {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
   final _serviceController = TextEditingController();
   final _notesController = TextEditingController();
+  final _durationController = TextEditingController();
   Contact? _client;
   Contact? _master;
-  late DateTime _selectedDate = widget.initialDate;
-  TimeOfDay _selectedTime = TimeOfDay.now();
+  late DateTime _selectedDate;
+  late TimeOfDay _selectedTime;
+  int _reminderMinutes = 30;
+  int? _appointmentId;
+
+  static const _reminderOptions = {
+    15: '15 минут',
+    30: '30 минут',
+    60: '1 час',
+    120: '2 часа',
+    1440: '1 день',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    final a = widget.appointment;
+    _appointmentId = a?.id;
+    _selectedDate = a?.dateTime ?? widget.initialDate;
+    _selectedTime = a != null
+        ? TimeOfDay(hour: a.dateTime.hour, minute: a.dateTime.minute)
+        : TimeOfDay.now();
+    _client = a != null ? Contact(id: 0, name: a.clientName, phone: a.phone) : null;
+    _master = a != null ? Contact(id: 0, name: a.master, phone: '') : null;
+    _phoneController.text = a?.phone ?? '';
+    _serviceController.text = a?.service ?? '';
+    _notesController.text = a?.notes ?? '';
+    _durationController.text = (a?.durationMinutes ?? 60).toString();
+    _reminderMinutes = a?.reminderMinutes ?? 30;
+  }
 
   @override
   void dispose() {
     _phoneController.dispose();
     _serviceController.dispose();
     _notesController.dispose();
+    _durationController.dispose();
     super.dispose();
   }
 
@@ -1622,6 +1893,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog> {
     final isClient = type == ContactType.client;
     final label = isClient ? 'Выбрать клиента' : 'Выбрать мастера';
     return FormField<Contact>(
+      initialValue: isClient ? _client : _master,
       validator: (value) => value == null
           ? (isClient ? 'Выберите клиента' : 'Выберите мастера')
           : null,
@@ -1663,6 +1935,7 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog> {
 
   void _save() {
     if (!_formKey.currentState!.validate()) return;
+    final duration = int.tryParse(_durationController.text.trim()) ?? 60;
     final dateTime = DateTime(
       _selectedDate.year,
       _selectedDate.month,
@@ -1672,12 +1945,15 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog> {
     );
     Navigator.of(context).pop(
       Appointment(
+        id: _appointmentId,
         companyId: widget.companyId,
         clientName: _client!.name,
         phone: _phoneController.text.trim(),
         service: _serviceController.text.trim(),
         master: _master!.name,
         dateTime: dateTime,
+        durationMinutes: duration,
+        reminderMinutes: _reminderMinutes,
         notes: _notesController.text.trim(),
       ),
     );
@@ -1689,8 +1965,9 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog> {
         '${_selectedDate.day}.${_selectedDate.month}.${_selectedDate.year}';
     final timeText =
         '${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}';
+    final isEdit = widget.appointment != null;
     return AlertDialog(
-      title: const Text('Новая запись'),
+      title: Text(isEdit ? 'Редактирование записи' : 'Новая запись'),
       content: SingleChildScrollView(
         child: Form(
           key: _formKey,
@@ -1729,6 +2006,46 @@ class _AddAppointmentDialogState extends State<AddAppointmentDialog> {
                     ),
                   ),
                 ],
+              ),
+              TextFormField(
+                controller: _durationController,
+                decoration: const InputDecoration(
+                  labelText: 'Продолжительность (мин)',
+                  hintText: '60',
+                ),
+                keyboardType: TextInputType.number,
+                validator: (value) {
+                  final n = int.tryParse(value?.trim() ?? '');
+                  if (n == null || n < 1) return 'Введите целое число минут';
+                  return null;
+                },
+              ),
+              FormField<int>(
+                initialValue: _reminderMinutes,
+                builder: (field) => InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Напомнить за',
+                    errorStyle: TextStyle(height: 0),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      value: field.value,
+                      isExpanded: true,
+                      isDense: true,
+                      items: _reminderOptions.entries
+                          .map((e) => DropdownMenuItem(
+                                value: e.key,
+                                child: Text(e.value),
+                              ))
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        field.didChange(value);
+                        setState(() => _reminderMinutes = value);
+                      },
+                    ),
+                  ),
+                ),
               ),
               TextField(
                 controller: _notesController,

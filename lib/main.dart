@@ -3943,21 +3943,28 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
       validator: (value) => value == null
           ? (isClient ? 'Выберите клиента' : 'Выберите мастера')
           : null,
-      builder: (field) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: InputDecorator(
-          decoration: InputDecoration(
-            labelText: isClient ? 'Клиент' : 'Мастер',
-            errorText: field.errorText,
-            border: const OutlineInputBorder(),
+      builder: (field) => InputDecorator(
+        decoration: InputDecoration(
+          labelText: isClient ? 'Клиент' : 'Мастер',
+          errorText: field.errorText,
+          border: const OutlineInputBorder(),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        ),
+        isEmpty: false,
+        child: TextButton.icon(
+          style: TextButton.styleFrom(
+            alignment: Alignment.centerLeft,
+            padding: EdgeInsets.zero,
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
-          child: TextButton.icon(
-            onPressed: () => _selectContact(type, field),
-            icon: Icon(
-              isClient ? Icons.person_outline : Icons.badge_outlined,
-            ),
-            label: Text(field.value?.name ?? label),
+          onPressed: () => _selectContact(type, field),
+          icon: Icon(
+            isClient ? Icons.person_outline : Icons.badge_outlined,
+            size: 20,
           ),
+          label: Text(field.value?.name ?? label),
         ),
       ),
     );
@@ -3982,6 +3989,7 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
   Future<void> _onServiceSelected(Service? value) async {
     if (value == null) {
       setState(() => _selectedService = null);
+      _serviceController.text = '';
       return;
     }
     final addNew = Service(
@@ -4000,7 +4008,11 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
           companyId: widget.companyId,
         ),
       );
-      if (!mounted || result == null) return;
+      if (!mounted) return;
+      if (result == null) {
+        setState(() {});
+        return;
+      }
       setState(() {
         _services = [..._services, result]..sort(
             (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
@@ -4017,58 +4029,61 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
   }
 
   Widget _serviceDropdown() {
-    return FormField<Service?>(
-      key: const Key('service_dropdown_field'),
-      initialValue: _selectedService,
-      builder: (field) => InputDecorator(
-        decoration: const InputDecoration(
+    if (_loadingServices) {
+      return const InputDecorator(
+        decoration: InputDecoration(
           labelText: 'Выбрать услугу',
           border: OutlineInputBorder(),
-          errorStyle: TextStyle(height: 0),
         ),
-        isEmpty: _selectedService == null,
-        child: _loadingServices
-            ? const SizedBox(
-                height: 24,
-                child: Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              )
-            : DropdownButtonHideUnderline(
-                child: DropdownButton<Service?>(
-                  key: const Key('service_dropdown'),
-                  value: field.value,
-                  isDense: true,
-                  isExpanded: true,
-                  items: [
-                    const DropdownMenuItem<Service?>(
-                      value: null,
-                      child: Text('— Своя услуга —'),
-                    ),
-                    ..._services.map(
-                      (s) => DropdownMenuItem(
-                        value: s,
-                        child: Text(s.name),
-                      ),
-                    ),
-                    DropdownMenuItem(
-                      value: Service(
-                        id: -1,
-                        companyId: widget.companyId,
-                        name: '+ Добавить услугу',
-                        price: 0,
-                        durationMinutes: 0,
-                        notes: '',
-                      ),
-                      child: const Text('+ Добавить услугу'),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    field.didChange(value);
-                    _onServiceSelected(value);
-                  },
-                ),
+        child: SizedBox(
+          height: 24,
+          child: Center(
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    final addNew = Service(
+      id: -1,
+      companyId: widget.companyId,
+      name: '+ Добавить услугу',
+      price: 0,
+      durationMinutes: 0,
+      notes: '',
+    );
+
+    return InputDecorator(
+      decoration: const InputDecoration(
+        labelText: 'Выбрать услугу',
+        border: OutlineInputBorder(),
+        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      ),
+      isEmpty: false,
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<Service?>(
+          key: const Key('service_dropdown'),
+          value: _selectedService,
+          isExpanded: true,
+          isDense: true,
+          items: [
+            const DropdownMenuItem<Service?>(
+              value: null,
+              child: Text('— Своя услуга —'),
+            ),
+            ..._services.map(
+              (s) => DropdownMenuItem(
+                value: s,
+                child: Text(s.name),
               ),
+            ),
+            DropdownMenuItem(
+              value: addNew,
+              child: const Text('+ Добавить услугу'),
+            ),
+          ],
+          onChanged: (value) => _onServiceSelected(value),
+        ),
       ),
     );
   }
@@ -4113,20 +4128,35 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
           key: _formKey,
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _contactField(ContactType.client),
+              const SizedBox(height: 12),
               TextFormField(
                 controller: _phoneController,
-                decoration: const InputDecoration(labelText: 'Телефон'),
+                decoration: const InputDecoration(
+                  labelText: 'Телефон',
+                  border: OutlineInputBorder(),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                ),
                 keyboardType: TextInputType.phone,
                 validator: (value) => value == null || value.trim().isEmpty
                     ? 'Введите телефон'
                     : null,
               ),
+              const SizedBox(height: 12),
               _serviceDropdown(),
+              const SizedBox(height: 12),
               TextFormField(
                 controller: _serviceController,
-                decoration: const InputDecoration(labelText: 'Услуга'),
+                decoration: const InputDecoration(
+                  labelText: 'Услуга',
+                  hintText: 'Выберите из списка или введите свою',
+                  border: OutlineInputBorder(),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                ),
                 onChanged: (_) {
                   final text = _serviceController.text.trim();
                   final match = _services.cast<Service?>().firstWhere(
@@ -4139,28 +4169,37 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
                     ? 'Введите услугу'
                     : null,
               ),
+              const SizedBox(height: 12),
               _contactField(ContactType.master),
+              const SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(
-                    child: TextButton(
+                    child: OutlinedButton.icon(
                       onPressed: _pickDate,
-                      child: Text(dateText),
+                      icon: const Icon(Icons.calendar_today),
+                      label: Text(dateText),
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: TextButton(
+                    child: OutlinedButton.icon(
                       onPressed: _pickTime,
-                      child: Text(timeText),
+                      icon: const Icon(Icons.access_time),
+                      label: Text(timeText),
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
               TextFormField(
                 controller: _durationController,
                 decoration: const InputDecoration(
                   labelText: 'Продолжительность (мин)',
                   hintText: '60',
+                  border: OutlineInputBorder(),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 ),
                 keyboardType: TextInputType.number,
                 validator: (value) {
@@ -4169,36 +4208,42 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
                   return null;
                 },
               ),
-              FormField<int>(
-                initialValue: _reminderMinutes,
-                builder: (field) => InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: 'Напомнить за',
-                    errorStyle: TextStyle(height: 0),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
-                      value: field.value,
-                      isExpanded: true,
-                      isDense: true,
-                      items: _reminderOptions.entries
-                          .map((e) => DropdownMenuItem(
-                                value: e.key,
-                                child: Text(e.value),
-                              ))
-                          .toList(),
-                      onChanged: (value) {
-                        if (value == null) return;
-                        field.didChange(value);
-                        setState(() => _reminderMinutes = value);
-                      },
-                    ),
+              const SizedBox(height: 12),
+              InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Напомнить за',
+                  border: OutlineInputBorder(),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+                isEmpty: false,
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<int>(
+                    value: _reminderMinutes,
+                    isExpanded: true,
+                    isDense: true,
+                    items: _reminderOptions.entries
+                        .map((e) => DropdownMenuItem(
+                              value: e.key,
+                              child: Text(e.value),
+                            ))
+                        .toList(),
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setState(() => _reminderMinutes = value);
+                    },
                   ),
                 ),
               ),
+              const SizedBox(height: 12),
               TextField(
                 controller: _notesController,
-                decoration: const InputDecoration(labelText: 'Примечания'),
+                decoration: const InputDecoration(
+                  labelText: 'Примечания',
+                  border: OutlineInputBorder(),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                ),
               ),
             ],
           ),

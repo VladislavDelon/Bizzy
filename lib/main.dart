@@ -221,7 +221,11 @@ class UpdateService {
     final response = await http
         .get(uri, headers: {'Accept': 'application/vnd.github+json'})
         .timeout(const Duration(seconds: 10));
-    if (response.statusCode != 200) return null;
+    if (response.statusCode != 200) {
+      throw Exception(
+        'GitHub API вернул ${response.statusCode}: ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}',
+      );
+    }
 
     final data = jsonDecode(response.body) as Map<String, Object?>;
     final tag = (data['tag_name'] as String? ?? '').replaceFirst('v', '');
@@ -2161,6 +2165,7 @@ class _MainShellState extends State<MainShell> {
         database: _db,
         company: widget.company,
         user: widget.user,
+        onRefreshAppointments: _loadAppointments,
         onSwitchCompany: widget.onSwitchCompany,
         onLogout: widget.onLogout,
       ),
@@ -3265,6 +3270,7 @@ class MoreTab extends StatefulWidget {
     required this.database,
     required this.company,
     required this.user,
+    required this.onRefreshAppointments,
     required this.onSwitchCompany,
     required this.onLogout,
   });
@@ -3272,6 +3278,7 @@ class MoreTab extends StatefulWidget {
   final AppointmentsDatabase database;
   final Company company;
   final User user;
+  final Future<void> Function() onRefreshAppointments;
   final VoidCallback onSwitchCompany;
   final VoidCallback onLogout;
 
@@ -3340,12 +3347,19 @@ class _MoreTabState extends State<MoreTab> {
       );
       if (!mounted || shouldInstall != true) return;
       await _showUpdateFlow(context, service, update);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       await showDialog<void>(
         context: context,
-        builder: (context) => const AlertDialog(
-          content: Text('Не удалось проверить обновления'),
+        builder: (context) => AlertDialog(
+          title: const Text('Не удалось проверить обновления'),
+          content: Text(e.toString()),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Закрыть'),
+            ),
+          ],
         ),
       );
     }
@@ -3380,6 +3394,8 @@ class _MoreTabState extends State<MoreTab> {
                 builder: (context) => MasterBookingsScreen(
                   onBookingChanged: (b) async {
                     await widget.database.syncCloudBooking(b, widget.company.id);
+                    if (!mounted) return;
+                    await widget.onRefreshAppointments();
                   },
                 ),
               ),

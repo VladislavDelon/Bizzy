@@ -8,10 +8,12 @@ class ClientHome extends StatefulWidget {
     super.key,
     required this.profile,
     required this.onSignOut,
+    required this.onDeleteAccount,
   });
 
   final CloudProfile profile;
   final Future<void> Function() onSignOut;
+  final Future<void> Function() onDeleteAccount;
 
   @override
   State<ClientHome> createState() => _ClientHomeState();
@@ -25,7 +27,11 @@ class _ClientHomeState extends State<ClientHome> {
     final pages = [
       ClientCatalogTab(profile: widget.profile),
       const ClientBookingsTab(),
-      _ClientProfileTab(profile: widget.profile, onSignOut: widget.onSignOut),
+      _ClientProfileTab(
+        profile: widget.profile,
+        onSignOut: widget.onSignOut,
+        onDeleteAccount: widget.onDeleteAccount,
+      ),
     ];
     return Scaffold(
       body: pages[_tab],
@@ -55,6 +61,19 @@ class _ClientHomeState extends State<ClientHome> {
 }
 
 // ==================== КАТАЛОГ МАСТЕРОВ ====================
+
+Widget _masterAvatar(BuildContext context, MasterCard master, double radius) {
+  final scheme = Theme.of(context).colorScheme;
+  return CircleAvatar(
+    radius: radius,
+    backgroundColor: scheme.primary,
+    backgroundImage:
+        master.avatarUrl.isNotEmpty ? NetworkImage(master.avatarUrl) : null,
+    child: master.avatarUrl.isEmpty
+        ? Icon(Icons.person, color: scheme.onPrimary, size: radius)
+        : null,
+  );
+}
 
 class ClientCatalogTab extends StatefulWidget {
   const ClientCatalogTab({super.key, required this.profile});
@@ -190,15 +209,7 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
                             vertical: 4,
                           ),
                           child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor:
-                                  Theme.of(context).colorScheme.primary,
-                              child: Icon(
-                                Icons.person,
-                                color:
-                                    Theme.of(context).colorScheme.onPrimary,
-                              ),
-                            ),
+                            leading: _masterAvatar(context, m, 24),
                             title: Text(m.name.isEmpty ? 'Мастер' : m.name),
                             subtitle: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -277,7 +288,6 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final m = widget.master;
-    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: Text(m.name.isEmpty ? 'Мастер' : m.name)),
       body: _loading
@@ -287,12 +297,7 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
               children: [
                 Row(
                   children: [
-                    CircleAvatar(
-                      radius: 32,
-                      backgroundColor: scheme.primary,
-                      child: Icon(Icons.person,
-                          color: scheme.onPrimary, size: 32),
-                    ),
+                    _masterAvatar(context, widget.master, 32),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Column(
@@ -861,10 +866,49 @@ class _RateBookingDialogState extends State<RateBookingDialog> {
 // ==================== ПРОФИЛЬ КЛИЕНТА ====================
 
 class _ClientProfileTab extends StatelessWidget {
-  const _ClientProfileTab({required this.profile, required this.onSignOut});
+  const _ClientProfileTab({
+    required this.profile,
+    required this.onSignOut,
+    required this.onDeleteAccount,
+  });
 
   final CloudProfile profile;
   final Future<void> Function() onSignOut;
+  final Future<void> Function() onDeleteAccount;
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить аккаунт?'),
+        content: const Text(
+          'Все ваши данные в облаке будут удалены безвозвратно.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await onDeleteAccount();
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось удалить аккаунт')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -887,6 +931,12 @@ class _ClientProfileTab extends StatelessWidget {
             onPressed: () => onSignOut(),
             icon: const Icon(Icons.logout),
             label: const Text('Выйти'),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.tonalIcon(
+            onPressed: () => _confirmDelete(context),
+            icon: const Icon(Icons.delete_forever),
+            label: const Text('Удалить аккаунт'),
           ),
         ],
       ),

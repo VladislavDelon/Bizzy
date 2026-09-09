@@ -7,6 +7,9 @@ import 'package:bizzy_app/cloud/auth_screens.dart';
 import 'package:bizzy_app/cloud/client_app.dart';
 import 'package:bizzy_app/cloud/cloud_service.dart';
 import 'package:bizzy_app/cloud/master_screens.dart';
+import 'package:bizzy_app/tasks/notification_service.dart';
+import 'package:bizzy_app/tasks/task_model.dart';
+import 'package:bizzy_app/tasks/tasks_screen.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -82,6 +85,7 @@ const _supabasePublishableKey =
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await TaskNotificationService.init();
   await Supabase.initialize(
     url: _supabaseUrl,
     publishableKey: _supabasePublishableKey,
@@ -629,6 +633,7 @@ class Appointment {
   final int durationMinutes;
   final int reminderMinutes;
   final String notes;
+  final String externalId;
 
   Appointment({
     this.id,
@@ -641,6 +646,7 @@ class Appointment {
     this.durationMinutes = 60,
     this.reminderMinutes = 30,
     required this.notes,
+    this.externalId = '',
   });
 
   Map<String, Object?> toMap() {
@@ -655,6 +661,7 @@ class Appointment {
       'durationMinutes': durationMinutes,
       'reminderMinutes': reminderMinutes,
       'notes': notes,
+      'externalId': externalId,
     };
   }
 
@@ -670,6 +677,7 @@ class Appointment {
       durationMinutes: (map['durationMinutes'] as int?) ?? 60,
       reminderMinutes: (map['reminderMinutes'] as int?) ?? 30,
       notes: map['notes'] as String,
+      externalId: (map['externalId'] as String?) ?? '',
     );
   }
 }
@@ -713,7 +721,7 @@ class AppointmentsDatabase {
     final pathString = p.join(databasesPath, 'bizzy.db');
     return openDatabase(
       pathString,
-      version: 5,
+      version: 7,
       onCreate: (db, version) => _createAll(db),
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -744,6 +752,17 @@ class AppointmentsDatabase {
         if (oldVersion < 5) {
           await _createServices(db);
         }
+        if (oldVersion < 6) {
+          await _createTasks(db);
+        }
+        if (oldVersion < 7) {
+          await db.execute(
+            'ALTER TABLE appointments ADD COLUMN externalId TEXT NOT NULL DEFAULT \'\'',
+          );
+          await db.execute(
+            'CREATE INDEX idx_appointments_external ON appointments(externalId)',
+          );
+        }
       },
     );
   }
@@ -760,12 +779,14 @@ class AppointmentsDatabase {
         dateTime TEXT NOT NULL,
         durationMinutes INTEGER NOT NULL DEFAULT 60,
         reminderMinutes INTEGER NOT NULL DEFAULT 30,
-        notes TEXT NOT NULL
+        notes TEXT NOT NULL,
+        externalId TEXT NOT NULL DEFAULT ''
       )
     ''');
     await _createDirectories(db);
     await _createAccounts(db);
     await _createServices(db);
+    await _createTasks(db);
   }
 
   Future<void> _createDirectories(Database db) async {
@@ -812,6 +833,23 @@ class AppointmentsDatabase {
         notes TEXT NOT NULL DEFAULT ''
       )
     ''');
+  }
+
+  Future<void> _createTasks(Database db) async {
+    await db.execute('''
+      CREATE TABLE tasks(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        userId INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        dueAt TEXT NOT NULL,
+        notifyMinutes INTEGER NOT NULL DEFAULT 0,
+        isDone INTEGER NOT NULL DEFAULT 0,
+        createdAt TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX idx_tasks_user_due ON tasks(userId, dueAt)');
   }
 
   Future<void> _migrateToCompanies(Database db) async {
@@ -1075,6 +1113,100 @@ class AppointmentsDatabase {
   Future<int> deleteService(int id) async {
     final db = await database;
     return db.delete('services', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ---------- Личные дела ----------
+  Future<List<TaskItem>> getTasks(
+    int userId, {
+    bool includeDone = false,
+  }) async {
+    final db = await database;
+    final where = includeDone ? 'userId = ?' : 'userId = ? AND isDone = 0';
+    final maps = await db.query(
+      'tasks',
+      where: where,
+      whereArgs: [userId],
+      orderBy: 'dueAt',
+    );
+    return maps.map(TaskItem.fromMap).toList();
+  }
+
+  Future<int> addTask(TaskItem task) async {
+    final db = await database;
+    return db.insert('tasks', task.toMap());
+  }
+
+  Future<int> updateTask(TaskItem task) async {
+    final db = await database;
+    return db.update(
+      'tasks',
+      task.toMap()..remove('id'),
+      where: 'id = ?',
+      whereArgs: [task.id],
+    );
+  }
+
+  Future<int> setTaskDone(int id, bool done) async {
+    final db = await database;
+    return db.update(
+      'tasks',
+      {'isDone': done ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> deleteTask(int id) async {
+    final db = await database;
+    return db.delete('tasks', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ---------- Синхронизация облачных записей в локальный календарь ----------
+  Future<void> syncCloudBooking(CloudBooking booking, int companyId) async {
+    if (booking.status == 'cancelled') {
+      await deleteCloudBooking(booking.id);
+      return;
+    }
+    final db = await database;
+    final existing = await db.query(
+      'appointments',
+      where: 'externalId = ?',
+      whereArgs: ['cloud:${booking.id}'],
+    );
+    final appointment = Appointment(
+      companyId: companyId,
+      clientName: booking.clientName.isEmpty
+          ? 'Клиент'
+          : booking.clientName,
+      phone: booking.clientPhone,
+      service: booking.serviceName,
+      master: booking.masterName.isEmpty ? 'Я' : booking.masterName,
+      dateTime: booking.startsAt,
+      durationMinutes: booking.durationMinutes,
+      reminderMinutes: 30,
+      notes: booking.notes,
+      externalId: 'cloud:${booking.id}',
+    );
+    if (existing.isEmpty) {
+      await db.insert('appointments', appointment.toMap());
+    } else {
+      final id = existing.first['id'] as int;
+      await db.update(
+        'appointments',
+        appointment.toMap()..['id'] = id,
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+  }
+
+  Future<int> deleteCloudBooking(int cloudBookingId) async {
+    final db = await database;
+    return db.delete(
+      'appointments',
+      where: 'externalId = ?',
+      whereArgs: ['cloud:$cloudBookingId'],
+    );
   }
 
   Future<int> updateContact(
@@ -2028,6 +2160,7 @@ class _MainShellState extends State<MainShell> {
       MoreTab(
         database: _db,
         company: widget.company,
+        user: widget.user,
         onSwitchCompany: widget.onSwitchCompany,
         onLogout: widget.onLogout,
       ),
@@ -3131,12 +3264,14 @@ class MoreTab extends StatefulWidget {
     super.key,
     required this.database,
     required this.company,
+    required this.user,
     required this.onSwitchCompany,
     required this.onLogout,
   });
 
   final AppointmentsDatabase database;
   final Company company;
+  final User user;
   final VoidCallback onSwitchCompany;
   final VoidCallback onLogout;
 
@@ -3222,6 +3357,19 @@ class _MoreTabState extends State<MoreTab> {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
+        ListTile(
+          leading: const Icon(Icons.task_alt),
+          title: const Text('Мои дела'),
+          subtitle: const Text('Личные задачи и напоминания'),
+          onTap: () => Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (context) => TasksScreen(
+                database: widget.database,
+                user: widget.user,
+              ),
+            ),
+          ),
+        ),
         if (cloudSignedIn) ...[
           ListTile(
             leading: const Icon(Icons.event_note_outlined),
@@ -3229,7 +3377,11 @@ class _MoreTabState extends State<MoreTab> {
             subtitle: const Text('Записи из каталога Bizzy'),
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute(
-                builder: (context) => const MasterBookingsScreen(),
+                builder: (context) => MasterBookingsScreen(
+                  onBookingChanged: (b) async {
+                    await widget.database.syncCloudBooking(b, widget.company.id);
+                  },
+                ),
               ),
             ),
           ),
@@ -3239,7 +3391,9 @@ class _MoreTabState extends State<MoreTab> {
             subtitle: const Text('Категория и описание для клиентов'),
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute(
-                builder: (context) => const MasterProfileScreen(),
+                builder: (context) => MasterProfileScreen(
+                  onDeleteAccount: () => CloudService().deleteMyAccount().then((_) => widget.onLogout()),
+                ),
               ),
             ),
           ),
@@ -4492,6 +4646,11 @@ class _CloudGateState extends State<CloudGate> {
     await SessionStore().clear();
   }
 
+  Future<void> _deleteCloudAccount() async {
+    await _cloud.deleteMyAccount();
+    await SessionStore().clear();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -4544,9 +4703,14 @@ class _CloudGateState extends State<CloudGate> {
         profile: profile,
         updateService: widget.updateService,
         onSignOut: _signOut,
+        onDeleteAccount: _deleteCloudAccount,
       );
     }
-    return ClientHome(profile: profile, onSignOut: _signOut);
+    return ClientHome(
+      profile: profile,
+      onSignOut: _signOut,
+      onDeleteAccount: _deleteCloudAccount,
+    );
   }
 }
 
@@ -4558,12 +4722,14 @@ class _MasterBridge extends StatefulWidget {
     required this.profile,
     required this.updateService,
     required this.onSignOut,
+    required this.onDeleteAccount,
   });
 
   final AppointmentsDatabase database;
   final CloudProfile profile;
   final UpdateService? updateService;
   final Future<void> Function() onSignOut;
+  final Future<void> Function() onDeleteAccount;
 
   @override
   State<_MasterBridge> createState() => _MasterBridgeState();
@@ -4593,8 +4759,10 @@ class _MasterBridgeState extends State<_MasterBridge> {
           if (card == null && mounted) {
             await Navigator.of(context).push<void>(
               MaterialPageRoute(
-                builder: (context) =>
-                    const MasterProfileScreen(isFirstSetup: true),
+                builder: (context) => MasterProfileScreen(
+                  isFirstSetup: true,
+                  onDeleteAccount: widget.onDeleteAccount,
+                ),
               ),
             );
           }

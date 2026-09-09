@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'cloud_service.dart';
@@ -6,10 +7,17 @@ import 'cloud_service.dart';
 /// Экран профиля мастера: категория, описание, рейтинг.
 /// Показывается мастеру при первом входе и из «Ещё».
 class MasterProfileScreen extends StatefulWidget {
-  const MasterProfileScreen({super.key, this.isFirstSetup = false});
+  const MasterProfileScreen({
+    super.key,
+    this.isFirstSetup = false,
+    this.onDeleteAccount,
+  });
 
   /// true — показываем сразу после первого входа мастера.
   final bool isFirstSetup;
+
+  /// Колбэк удаления аккаунта.
+  final Future<void> Function()? onDeleteAccount;
 
   @override
   State<MasterProfileScreen> createState() => _MasterProfileScreenState();
@@ -22,6 +30,8 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   final _descController = TextEditingController();
   List<String> _categories = [];
   String? _category;
+  String _avatarUrl = '';
+  bool _pickingAvatar = false;
   double _ratingAvg = 0;
   int _ratingCount = 0;
   bool _loading = true;
@@ -54,6 +64,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _phoneController.text = profile?.phone ?? '';
         _category = card?.category ?? categories.firstOrNull;
         _descController.text = card?.description ?? '';
+        _avatarUrl = card?.avatarUrl ?? '';
         _ratingAvg = card?.ratingAvg ?? 0;
         _ratingCount = card?.ratingCount ?? 0;
         _loading = false;
@@ -63,6 +74,67 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       setState(() {
         _loading = false;
         _error = 'Не удалось загрузить профиль';
+      });
+    }
+  }
+
+  Future<void> _pickAvatar() async {
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        imageQuality: 85,
+      );
+      if (file == null || !mounted) return;
+      setState(() => _pickingAvatar = true);
+      final url = await _cloud.uploadAvatar(file.path);
+      await _cloud.updateAvatarUrl(url);
+      if (!mounted) return;
+      setState(() => _avatarUrl = url);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось загрузить фото')),
+      );
+    } finally {
+      if (mounted) setState(() => _pickingAvatar = false);
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    if (widget.onDeleteAccount == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить аккаунт?'),
+        content: const Text(
+          'Все данные профиля, услуги и записи в облаке будут удалены безвозвратно.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await widget.onDeleteAccount!();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = 'Не удалось удалить аккаунт';
       });
     }
   }
@@ -85,6 +157,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       await _cloud.upsertMasterProfile(
         category: _category!,
         description: _descController.text.trim(),
+        avatarUrl: _avatarUrl,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -127,11 +200,38 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                     padding: const EdgeInsets.all(16),
                     child: Row(
                       children: [
-                        CircleAvatar(
-                          radius: 28,
-                          backgroundColor: scheme.primary,
-                          child: Icon(Icons.star,
-                              color: scheme.onPrimary, size: 28),
+                        Stack(
+                          alignment: Alignment.bottomRight,
+                          children: [
+                            GestureDetector(
+                              onTap: _pickingAvatar ? null : _pickAvatar,
+                              child: CircleAvatar(
+                                radius: 40,
+                                backgroundColor: scheme.primary,
+                                backgroundImage: _avatarUrl.isNotEmpty
+                                    ? NetworkImage(_avatarUrl)
+                                    : null,
+                                child: _avatarUrl.isEmpty
+                                    ? Icon(Icons.person,
+                                        color: scheme.onPrimary, size: 36)
+                                    : null,
+                              ),
+                            ),
+                            if (_pickingAvatar)
+                              const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2),
+                              )
+                            else
+                              CircleAvatar(
+                                radius: 14,
+                                backgroundColor: scheme.secondary,
+                                child: Icon(Icons.camera_alt,
+                                    size: 14, color: scheme.onSecondary),
+                              ),
+                          ],
                         ),
                         const SizedBox(width: 16),
                         Expanded(
@@ -151,6 +251,11 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                                     : 'оценок: $_ratingCount',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
+                              if (_avatarUrl.isEmpty)
+                                Text(
+                                  'Нажмите на кружок, чтобы добавить фото',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
                             ],
                           ),
                         ),
@@ -232,6 +337,14 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                       : const Icon(Icons.save),
                   label: const Text('Сохранить'),
                 ),
+                if (!widget.isFirstSetup) ...[
+                  const SizedBox(height: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: _saving ? null : _deleteAccount,
+                    icon: const Icon(Icons.delete_forever),
+                    label: const Text('Удалить аккаунт'),
+                  ),
+                ],
               ],
             ),
     );
@@ -241,7 +354,14 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
 /// Экран «Заявки клиентов» — записи, которые клиенты
 /// сделали к этому мастеру через облако.
 class MasterBookingsScreen extends StatefulWidget {
-  const MasterBookingsScreen({super.key});
+  const MasterBookingsScreen({
+    super.key,
+    this.onBookingChanged,
+  });
+
+  /// Вызывается при изменении статуса заявки.
+  /// Можно синхронизировать с локальным календарём.
+  final Future<void> Function(CloudBooking booking)? onBookingChanged;
 
   @override
   State<MasterBookingsScreen> createState() => _MasterBookingsScreenState();
@@ -279,6 +399,8 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
   Future<void> _setStatus(CloudBooking b, String status) async {
     try {
       await _cloud.setBookingStatus(b.id, status);
+      final updated = b.copyWith(status: status);
+      await widget.onBookingChanged?.call(updated);
       await _load();
     } catch (_) {
       if (!mounted) return;

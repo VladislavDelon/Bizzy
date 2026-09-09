@@ -41,6 +41,7 @@ class MasterCard {
     required this.name,
     required this.category,
     required this.description,
+    required this.avatarUrl,
     required this.ratingAvg,
     required this.ratingCount,
   });
@@ -49,6 +50,7 @@ class MasterCard {
   final String name;
   final String category;
   final String description;
+  final String avatarUrl;
   final double ratingAvg;
   final int ratingCount;
 
@@ -59,6 +61,7 @@ class MasterCard {
       name: profile is Map ? (profile['name'] as String? ?? '') : '',
       category: map['category'] as String? ?? 'Другое',
       description: map['description'] as String? ?? '',
+      avatarUrl: map['avatar_url'] as String? ?? '',
       ratingAvg: (map['rating_avg'] as num?)?.toDouble() ?? 0,
       ratingCount: (map['rating_count'] as num?)?.toInt() ?? 0,
     );
@@ -123,6 +126,35 @@ class CloudBooking {
 
   bool get isPast => startsAt.isBefore(DateTime.now());
 
+  CloudBooking copyWith({
+    int? id,
+    String? clientId,
+    String? masterId,
+    int? serviceId,
+    String? serviceName,
+    DateTime? startsAt,
+    int? durationMinutes,
+    String? status,
+    String? notes,
+    String? clientName,
+    String? clientPhone,
+    String? masterName,
+  }) =>
+      CloudBooking(
+        id: id ?? this.id,
+        clientId: clientId ?? this.clientId,
+        masterId: masterId ?? this.masterId,
+        serviceId: serviceId ?? this.serviceId,
+        serviceName: serviceName ?? this.serviceName,
+        startsAt: startsAt ?? this.startsAt,
+        durationMinutes: durationMinutes ?? this.durationMinutes,
+        status: status ?? this.status,
+        notes: notes ?? this.notes,
+        clientName: clientName ?? this.clientName,
+        clientPhone: clientPhone ?? this.clientPhone,
+        masterName: masterName ?? this.masterName,
+      );
+
   factory CloudBooking.fromMap(Map<String, dynamic> map) {
     final client = map['client'];
     final master = map['master'];
@@ -172,6 +204,12 @@ class CloudService {
 
   Future<void> signOut() => supabase.auth.signOut();
 
+  /// Удаляет облачный аккаунт (auth.users + связанные public-данные).
+  Future<void> deleteMyAccount() async {
+    await supabase.rpc('delete_my_account');
+    await signOut();
+  }
+
   // ---------- Profiles ----------
   Future<CloudProfile?> myProfile() async {
     final id = uid;
@@ -213,7 +251,7 @@ class CloudService {
   // ---------- Master profiles ----------
   Future<List<MasterCard>> masters({String? category}) async {
     var query = supabase.from('master_profiles').select(
-        'user_id, category, description, rating_avg, rating_count, profiles!inner(name)');
+        'user_id, category, description, avatar_url, rating_avg, rating_count, profiles!inner(name)');
     if (category != null && category.isNotEmpty) {
       query = query.eq('category', category);
     }
@@ -225,7 +263,7 @@ class CloudService {
     final row = await supabase
         .from('master_profiles')
         .select(
-            'user_id, category, description, rating_avg, rating_count, profiles!inner(name)')
+            'user_id, category, description, avatar_url, rating_avg, rating_count, profiles!inner(name)')
         .eq('user_id', masterId)
         .maybeSingle();
     return row == null ? null : MasterCard.fromMap(row);
@@ -240,12 +278,31 @@ class CloudService {
   Future<void> upsertMasterProfile({
     required String category,
     required String description,
+    String avatarUrl = '',
   }) =>
       supabase.from('master_profiles').upsert({
         'user_id': uid,
         'category': category,
         'description': description,
+        'avatar_url': avatarUrl,
       });
+
+  Future<void> updateAvatarUrl(String url) =>
+      supabase.from('master_profiles').update({'avatar_url': url}).eq('user_id', uid as Object);
+
+  /// Загружает файл в публичный bucket `avatars/<user_id>/avatar.jpg`.
+  /// Возвращает публичный URL.
+  Future<String> uploadAvatar(String filePath) async {
+    final userId = uid;
+    if (userId == null) throw Exception('Не авторизован');
+    final dest = '$userId/avatar.jpg';
+    await supabase.storage.from('avatars').upload(
+          dest,
+          filePath,
+          fileOptions: const FileOptions(upsert: true),
+        );
+    return supabase.storage.from('avatars').getPublicUrl(dest);
+  }
 
   // ---------- Services (cloud) ----------
   Future<List<CloudServiceItem>> servicesOf(String masterId) async {
@@ -344,7 +401,7 @@ class CloudService {
   Future<List<CloudBooking>> masterBookings() async {
     final rows = await supabase
         .from('appointments')
-        .select('*, client:profiles!appointments_client_id_fkey(name, phone)')
+        .select('*, client:profiles!appointments_client_id_fkey(name, phone), master:profiles!appointments_master_id_fkey(name)')
         .eq('master_id', uid!)
         .order('starts_at');
     return [for (final r in rows) CloudBooking.fromMap(r)];

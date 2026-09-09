@@ -59,6 +59,7 @@ create table if not exists public.master_profiles (
   user_id uuid primary key references public.profiles(id) on delete cascade,
   category text not null default 'Другое',
   description text not null default '',
+  avatar_url text not null default '',
   rating_avg numeric(2,1) not null default 0,
   rating_count int not null default 0,
   created_at timestamptz not null default now()
@@ -206,3 +207,16 @@ create policy "ratings_update" on public.ratings
   for update using (auth.uid() = client_id) with check (auth.uid() = client_id);
 create policy "ratings_delete" on public.ratings
   for delete using (auth.uid() = client_id);
+
+-- ========== УДАЛЕНИЕ АККАУНТА ==========
+create or replace function public.delete_my_account()
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  delete from auth.users where id = auth.uid();
+end;
+$$;
+
+grant execute on function public.delete_my_account() to authenticated;

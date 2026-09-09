@@ -2092,6 +2092,10 @@ class _MainShellState extends State<MainShell> {
     });
   }
 
+  /// Публичный метод для дочерних виджетов (например, MoreTab),
+  /// чтобы принудительно перезагрузить список записей.
+  Future<void> refreshAppointments() => _loadAppointments();
+
   Future<void> _deleteAppointment(int id) async {
     await _db.delete(id);
     await _loadAppointments();
@@ -3470,9 +3474,14 @@ class _MoreTabState extends State<MoreTab> {
               MaterialPageRoute(
                 builder: (context) => MasterBookingsScreen(
                   onBookingChanged: (b) async {
+                    final mainShell =
+                        context.findAncestorStateOfType<_MainShellState>();
                     await widget.database.syncCloudBooking(b, widget.company.id);
                     if (!mounted) return;
                     await widget.onRefreshAppointments();
+                    if (mainShell != null && mainShell.mounted) {
+                      await mainShell.refreshAppointments();
+                    }
                   },
                 ),
               ),

@@ -416,6 +416,25 @@ class CloudService {
     return [for (final r in rows) CloudBooking.fromMap(r)];
   }
 
+  /// Записи конкретного мастера за конкретный день.
+  /// Используется клиентом при выборе свободных часов.
+  Future<List<CloudBooking>> masterBookingsForDay(
+    String masterId,
+    DateTime day,
+  ) async {
+    final start = DateTime(day.year, day.month, day.day);
+    final end = start.add(const Duration(days: 1));
+    final rows = await supabase
+        .from('appointments')
+        .select('*, client:profiles!appointments_client_id_fkey(name, phone), master:profiles!appointments_master_id_fkey(name)')
+        .eq('master_id', masterId)
+        .gte('starts_at', start.toUtc().toIso8601String())
+        .lt('starts_at', end.toUtc().toIso8601String())
+        .neq('status', 'cancelled')
+        .order('starts_at');
+    return [for (final r in rows) CloudBooking.fromMap(r)];
+  }
+
   Future<void> setBookingStatus(int id, String status) =>
       supabase.from('appointments').update({'status': status}).eq('id', id);
 

@@ -379,15 +379,75 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
   final _notes = TextEditingController();
   CloudServiceItem? _service;
   DateTime _date = DateTime.now();
-  TimeOfDay _time = TimeOfDay.now();
+  TimeOfDay _time = const TimeOfDay(hour: 9, minute: 0);
+  DateTime? _selectedSlot;
+  List<DateTime> _slots = [];
+  bool _loadingSlots = false;
   bool _saving = false;
   String? _error;
+
+  static const _workStart = TimeOfDay(hour: 9, minute: 0);
+  static const _workEnd = TimeOfDay(hour: 18, minute: 0);
+  static const _slotStepMinutes = 60;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSlots(_date);
+  }
 
   @override
   void dispose() {
     _customService.dispose();
     _notes.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSlots(DateTime day) async {
+    if (widget.master.userId.isEmpty) return;
+    setState(() => _loadingSlots = true);
+    try {
+      final bookings =
+          await _cloud.masterBookingsForDay(widget.master.userId, day);
+      final duration = _service?.durationMinutes ?? 60;
+      final slots = <DateTime>[];
+      var current = DateTime(
+        day.year,
+        day.month,
+        day.day,
+        _workStart.hour,
+        _workStart.minute,
+      );
+      final end = DateTime(
+        day.year,
+        day.month,
+        day.day,
+        _workEnd.hour,
+        _workEnd.minute,
+      ).subtract(Duration(minutes: duration));
+      while (!current.isAfter(end)) {
+        final slotEnd = current.add(Duration(minutes: duration));
+        final overlap = bookings.any((b) {
+          final bStart = b.startsAt;
+          final bEnd = bStart.add(Duration(minutes: b.durationMinutes));
+          return current.isBefore(bEnd) && bStart.isBefore(slotEnd);
+        });
+        if (!overlap) slots.add(current);
+        current = current.add(const Duration(minutes: _slotStepMinutes));
+      }
+      if (!mounted) return;
+      setState(() {
+        _slots = slots;
+        _selectedSlot = slots.firstOrNull;
+        _loadingSlots = false;
+        if (_selectedSlot != null) {
+          _time = TimeOfDay.fromDateTime(_selectedSlot!);
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingSlots = false);
+    }
   }
 
   Future<void> _pickDate() async {
@@ -397,12 +457,14 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
-    if (picked != null && mounted) setState(() => _date = picked);
+    if (picked != null && mounted) {
+      setState(() => _date = picked);
+      await _loadSlots(picked);
+    }
   }
 
   Future<void> _pickTime() async {
-    final picked =
-        await showTimePicker(context: context, initialTime: _time);
+    final picked = await showTimePicker(context: context, initialTime: _time);
     if (picked != null && mounted) setState(() => _time = picked);
   }
 
@@ -485,7 +547,10 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                         child: Text('— Своя услуга —'),
                       ),
                     ],
-                    onChanged: (v) => setState(() => _service = v),
+                    onChanged: (v) {
+                      setState(() => _service = v);
+                      _loadSlots(_date);
+                    },
                   ),
                 ),
               ),
@@ -511,15 +576,59 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _pickTime,
-                    icon: const Icon(Icons.access_time, size: 18),
-                    label: Text(timeText),
+                if (_slots.isEmpty)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickTime,
+                      icon: const Icon(Icons.access_time, size: 18),
+                      label: Text(timeText),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      child: Text(timeText),
+                    ),
                   ),
-                ),
               ],
             ),
+            const SizedBox(height: 12),
+            if (_loadingSlots)
+              const Center(child: CircularProgressIndicator())
+            else if (_slots.isEmpty)
+              const Text('Свободных часов на эту дату нет.')
+            else
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Свободные часы:'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final slot in _slots)
+                        ChoiceChip(
+                          label: Text(
+                            '${slot.hour.toString().padLeft(2, '0')}:${slot.minute.toString().padLeft(2, '0')}',
+                          ),
+                          selected: _selectedSlot == slot,
+                          onSelected: (_) {
+                            setState(() {
+                              _selectedSlot = slot;
+                              _time = TimeOfDay.fromDateTime(slot);
+                            });
+                          },
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             const SizedBox(height: 12),
             TextField(
               controller: _notes,

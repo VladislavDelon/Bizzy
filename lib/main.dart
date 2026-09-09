@@ -1,7 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:bizzy_app/cloud/auth_screens.dart';
+import 'package:bizzy_app/cloud/client_app.dart';
+import 'package:bizzy_app/cloud/cloud_service.dart';
+import 'package:bizzy_app/cloud/master_screens.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -18,6 +23,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -70,8 +76,16 @@ Future<void> _loadCurrency() async {
   _currency.value = Currency.fromString(prefs.getString('bizzy_currency'));
 }
 
+const _supabaseUrl = 'https://ngnikkkjxyfhnnwqbzma.supabase.co';
+const _supabasePublishableKey =
+    'sb_publishable_K_sBU9qflN7ybTtSSXtjTw_H6CtqpNO';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(
+    url: _supabaseUrl,
+    publishableKey: _supabasePublishableKey,
+  );
   await initializeDateFormatting('ru_RU', null);
   await _loadTheme();
   await _loadCurrency();
@@ -100,7 +114,9 @@ class BizzyApp extends StatelessWidget {
           GlobalWidgetsLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
         ],
-        home: AuthGate(database: database, updateService: updateService),
+        home: database == null
+            ? CloudGate(updateService: updateService)
+            : AuthGate(database: database, updateService: updateService),
       ),
     );
   }
@@ -836,6 +852,26 @@ class AppointmentsDatabase {
       'salt': salt,
     });
     return User(id: id, login: trimmed);
+  }
+
+  /// Находит или создаёт локального пользователя для облачного аккаунта.
+  /// Пароль генерируется случайный — вход в такой аккаунт только через облако.
+  Future<User> getOrCreateCloudUser(String login) async {
+    final db = await database;
+    final trimmed = login.trim();
+    final rows = await db.query(
+      'users',
+      where: 'login = ?',
+      whereArgs: [trimmed],
+    );
+    if (rows.isNotEmpty) {
+      final row = rows.first;
+      return User(id: row['id'] as int, login: trimmed);
+    }
+    final password = base64Url.encode(
+      List<int>.generate(24, (_) => Random.secure().nextInt(256)),
+    );
+    return createUser(trimmed, password);
   }
 
   Future<User?> authenticate(String login, String password) async {
@@ -2911,11 +2947,26 @@ class _ServicesTabState extends State<ServicesTab> {
           await widget.database.getServices(widget.company.id);
       if (!mounted) return;
       setState(() => _services = services);
+      _syncToCloud(services);
     } catch (_) {
       if (!mounted) return;
       setState(() => _failed = true);
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Публикует локальные услуги в облако, чтобы их видели клиенты.
+  /// Работает только при облачном входе (мастер через Supabase).
+  Future<void> _syncToCloud(List<Service> services) async {
+    if (!cloudSignedIn) return;
+    try {
+      await CloudService().replaceMyServices([
+        for (final s in services)
+          (name: s.name, price: s.price, durationMinutes: s.durationMinutes),
+      ]);
+    } catch (_) {
+      // Без интернета просто пропускаем — услуги синхронизируются позже.
     }
   }
 
@@ -3171,6 +3222,28 @@ class _MoreTabState extends State<MoreTab> {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
+        if (cloudSignedIn) ...[
+          ListTile(
+            leading: const Icon(Icons.event_note_outlined),
+            title: const Text('Заявки клиентов'),
+            subtitle: const Text('Записи из каталога Bizzy'),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (context) => const MasterBookingsScreen(),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.storefront_outlined),
+            title: const Text('Профиль мастера'),
+            subtitle: const Text('Категория и описание для клиентов'),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (context) => const MasterProfileScreen(),
+              ),
+            ),
+          ),
+        ],
         ListTile(
           leading: const Icon(Icons.badge_outlined),
           title: const Text('Мастера'),
@@ -4332,6 +4405,317 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
         ),
         TextButton(onPressed: _save, child: const Text('Сохранить')),
       ],
+    );
+  }
+}
+
+/// Облачный шлюз: решает, куда попадает пользователь —
+/// клиент, мастер или экран выбора роли.
+class CloudGate extends StatefulWidget {
+  const CloudGate({super.key, this.updateService});
+
+  final UpdateService? updateService;
+
+  @override
+  State<CloudGate> createState() => _CloudGateState();
+}
+
+class _CloudGateState extends State<CloudGate> {
+  final _cloud = CloudService();
+  final _db = AppointmentsDatabase();
+  StreamSubscription<AuthState>? _sub;
+  Session? _session;
+  CloudProfile? _profile;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _session = _cloud.session;
+    _sub = _cloud.authChanges.listen((event) {
+      if (!mounted) return;
+      setState(() {
+        _session = event.session;
+        _profile = null;
+        _loading = _session != null;
+        _error = null;
+      });
+      _loadProfile();
+    });
+    _loadProfile();
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadProfile() async {
+    if (_session == null) {
+      if (mounted) {
+        setState(() {
+          _profile = null;
+          _loading = false;
+        });
+      }
+      return;
+    }
+    try {
+      var profile = await _cloud.myProfile();
+      if (profile == null) {
+        // Триггер мог не сработать — создаём профиль сами.
+        final meta = _session!.user.userMetadata ?? const {};
+        profile = await _cloud.ensureProfile(
+          role: meta['role'] as String? ?? 'client',
+          name: meta['name'] as String? ?? '',
+          phone: meta['phone'] as String? ?? '',
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _profile = profile;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Не удалось загрузить профиль. Проверьте интернет.';
+      });
+    }
+  }
+
+  Future<void> _signOut() async {
+    await _cloud.signOut();
+    await SessionStore().clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_session == null) {
+      return const RoleSelectScreen();
+    }
+    if (_error != null) {
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_error!, textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () {
+                    setState(() {
+                      _loading = true;
+                      _error = null;
+                    });
+                    _loadProfile();
+                  },
+                  child: const Text('Повторить'),
+                ),
+                TextButton(
+                  onPressed: _signOut,
+                  child: const Text('Выйти'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    final profile = _profile;
+    if (profile == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (profile.isMaster) {
+      return _MasterBridge(
+        database: _db,
+        profile: profile,
+        updateService: widget.updateService,
+        onSignOut: _signOut,
+      );
+    }
+    return ClientHome(profile: profile, onSignOut: _signOut);
+  }
+}
+
+/// Мостик: после облачного входа мастера создаём/находим
+/// локального пользователя и открываем привычный интерфейс.
+class _MasterBridge extends StatefulWidget {
+  const _MasterBridge({
+    required this.database,
+    required this.profile,
+    required this.updateService,
+    required this.onSignOut,
+  });
+
+  final AppointmentsDatabase database;
+  final CloudProfile profile;
+  final UpdateService? updateService;
+  final Future<void> Function() onSignOut;
+
+  @override
+  State<_MasterBridge> createState() => _MasterBridgeState();
+}
+
+class _MasterBridgeState extends State<_MasterBridge> {
+  User? _user;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _prepare();
+  }
+
+  Future<void> _prepare() async {
+    try {
+      final email = supabase.auth.currentUser?.email ?? widget.profile.id;
+      final user =
+          await widget.database.getOrCreateCloudUser('sb:$email');
+      if (!mounted) return;
+      setState(() => _user = user);
+      // Если у мастера ещё нет облачного профиля — предлагаем заполнить.
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        try {
+          final card = await CloudService().myMasterCard();
+          if (card == null && mounted) {
+            await Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (context) =>
+                    const MasterProfileScreen(isFirstSetup: true),
+              ),
+            );
+          }
+        } catch (_) {
+          // Без профиля мастера тоже можно работать локально.
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Не удалось открыть рабочее место');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_error!),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => widget.onSignOut(),
+                child: const Text('Выйти'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final user = _user;
+    if (user == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    return LocalSessionGate(
+      database: widget.database,
+      user: user,
+      updateService: widget.updateService,
+      onSignOut: widget.onSignOut,
+    );
+  }
+}
+
+/// Пропускает мастера через выбор компании в рабочий интерфейс,
+/// минуя локальный экран логина (вход уже сделан через облако).
+class LocalSessionGate extends StatefulWidget {
+  const LocalSessionGate({
+    super.key,
+    required this.database,
+    required this.user,
+    required this.onSignOut,
+    this.updateService,
+  });
+
+  final AppointmentsDatabase database;
+  final User user;
+  final UpdateService? updateService;
+  final Future<void> Function() onSignOut;
+
+  @override
+  State<LocalSessionGate> createState() => _LocalSessionGateState();
+}
+
+class _LocalSessionGateState extends State<LocalSessionGate> {
+  final SessionStore _session = SessionStore();
+  Company? _company;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _restore();
+  }
+
+  Future<void> _restore() async {
+    final user = widget.user;
+    final orphans = await widget.database.claimOrphanCompanies(user.id);
+    var companies = await widget.database.getCompanies(user.id);
+    if (orphans.isNotEmpty) companies = [...orphans, ...companies];
+    final savedId = await _session.companyId;
+    if (!mounted) return;
+    final company =
+        companies.where((c) => c.id == savedId).firstOrNull ??
+            companies.firstOrNull;
+    setState(() {
+      _company = company;
+      _loading = false;
+    });
+    await _session.save(user.id, user.login, company?.id ?? 0);
+  }
+
+  Future<void> _onCompanyChosen(Company company) async {
+    await _session.save(widget.user.id, widget.user.login, company.id);
+    if (mounted) setState(() => _company = company);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_company == null) {
+      return CompanySelectScreen(
+        database: widget.database,
+        userId: widget.user.id,
+        onChosen: _onCompanyChosen,
+      );
+    }
+    return MainShell(
+      database: widget.database,
+      company: _company!,
+      user: widget.user,
+      updateService: widget.updateService,
+      onSwitchCompany: () => setState(() => _company = null),
+      onLogout: () => widget.onSignOut(),
     );
   }
 }

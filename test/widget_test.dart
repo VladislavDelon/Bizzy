@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import 'package:bizzy_app/main.dart';
 
@@ -209,7 +210,12 @@ Future<MemoryDatabase> loggedInDb(WidgetTester tester) async {
 
 void main() {
   setUpAll(() async {
+    SharedPreferences.setMockInitialValues({});
     await initializeDateFormatting('ru_RU', null);
+    await sb.Supabase.initialize(
+      url: 'https://test.supabase.co',
+      publishableKey: 'test',
+    );
   });
 
   setUp(() => SharedPreferences.setMockInitialValues({}));

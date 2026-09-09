@@ -288,6 +288,9 @@ class UpdateService {
       final res = await InstallPlugin.installApk(path);
       if (res is! Map || res['isSuccess'] != true) {
         final message = res is Map ? res['errorMessage'] : res?.toString();
+        if (message?.toLowerCase().contains('cancel') ?? false) {
+          throw const UpdateCancelledException();
+        }
         throw Exception(message ?? 'Не удалось начать установку');
       }
     } finally {
@@ -356,15 +359,24 @@ Future<bool> _ensureInstallPermission(BuildContext context) async {
   return status.isGranted;
 }
 
+class UpdateCancelledException implements Exception {
+  const UpdateCancelledException();
+
+  @override
+  String toString() => 'Установка отменена';
+}
+
 class UpdateResult {
   const UpdateResult({
     this.success = false,
     this.needsRestart = false,
+    this.cancelled = false,
     this.error,
   });
 
   final bool success;
   final bool needsRestart;
+  final bool cancelled;
   final String? error;
 }
 
@@ -403,6 +415,32 @@ Future<void> _showUpdateFlow(
   );
 
   if (!context.mounted || result == null) return;
+
+  if (result.cancelled) {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Установка отменена'),
+        content: const Text(
+          'Вы отменили установку. Попробуете снова?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Позже'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _showUpdateFlow(context, service, update);
+            },
+            child: const Text('Повторить'),
+          ),
+        ],
+      ),
+    );
+    return;
+  }
 
   if (result.success && result.needsRestart) {
     await showDialog<void>(
@@ -465,13 +503,21 @@ Future<void> _showUpdateFlow(
         FilledButton(
           onPressed: () {
             Navigator.of(context).pop();
-            launchUrl(
-              update.releaseUrl,
-              mode: LaunchMode.externalApplication,
-            );
+            _showUpdateFlow(context, service, update);
           },
-          child: const Text('Скачать вручную'),
+          child: const Text('Повторить'),
         ),
+        if (isSignature || (!isPermissionError && !isCancel))
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              launchUrl(
+                update.releaseUrl,
+                mode: LaunchMode.externalApplication,
+              );
+            },
+            child: const Text('Скачать вручную'),
+          ),
       ],
     ),
   );
@@ -519,6 +565,11 @@ class _DownloadUpdateDialogState extends State<DownloadUpdateDialog> {
           );
         }
       }
+    } on UpdateCancelledException {
+      if (!mounted) return;
+      Navigator.of(context).pop(
+        const UpdateResult(cancelled: true),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = 'Ошибка: $e');

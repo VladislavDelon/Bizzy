@@ -2008,6 +2008,7 @@ class MainShell extends StatefulWidget {
     required this.company,
     required this.user,
     this.updateService,
+    this.offlineMode = false,
     required this.onSwitchCompany,
     required this.onLogout,
   });
@@ -2016,6 +2017,7 @@ class MainShell extends StatefulWidget {
   final Company company;
   final User user;
   final UpdateService? updateService;
+  final bool offlineMode;
   final VoidCallback onSwitchCompany;
   final VoidCallback onLogout;
 
@@ -2048,6 +2050,7 @@ class _MainShellState extends State<MainShell> {
 
   Future<void> _checkUpdates() async {
     if (!Platform.isAndroid) return;
+    if (widget.offlineMode) return;
     final service = widget.updateService;
     if (service == null) return;
     try {
@@ -2216,6 +2219,7 @@ class _MainShellState extends State<MainShell> {
         database: _db,
         company: widget.company,
         user: widget.user,
+        offlineMode: widget.offlineMode,
         onRefreshAppointments: _loadAppointments,
         onSwitchCompany: widget.onSwitchCompany,
         onLogout: widget.onLogout,
@@ -3322,6 +3326,7 @@ class MoreTab extends StatefulWidget {
     required this.company,
     required this.user,
     required this.onRefreshAppointments,
+    this.offlineMode = false,
     required this.onSwitchCompany,
     required this.onLogout,
   });
@@ -3330,6 +3335,7 @@ class MoreTab extends StatefulWidget {
   final Company company;
   final User user;
   final Future<void> Function() onRefreshAppointments;
+  final bool offlineMode;
   final VoidCallback onSwitchCompany;
   final VoidCallback onLogout;
 
@@ -3363,6 +3369,15 @@ class _MoreTabState extends State<MoreTab> {
 
   Future<void> _checkUpdates() async {
     if (!Platform.isAndroid) return;
+    if (widget.offlineMode) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => const AlertDialog(
+          content: Text('В офлайн-режиме обновления недоступны'),
+        ),
+      );
+      return;
+    }
     const service = UpdateService();
     try {
       final update = await service.check();
@@ -3422,6 +3437,17 @@ class _MoreTabState extends State<MoreTab> {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
+        if (widget.offlineMode)
+          Card(
+            margin: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            child: ListTile(
+              leading: Icon(Icons.wifi_off,
+                  color: Theme.of(context).colorScheme.error),
+              title: const Text('Офлайн-режим'),
+              subtitle: const Text(
+                  'Нет интернета. Доступны локальные записи и «Мои дела».'),
+            ),
+          ),
         ListTile(
           leading: const Icon(Icons.task_alt),
           title: const Text('Мои дела'),
@@ -3435,7 +3461,7 @@ class _MoreTabState extends State<MoreTab> {
             ),
           ),
         ),
-        if (cloudSignedIn) ...[
+        if (cloudSignedIn && !widget.offlineMode) ...[
           ListTile(
             leading: const Icon(Icons.event_note_outlined),
             title: const Text('Заявки клиентов'),
@@ -4648,7 +4674,10 @@ class _CloudGateState extends State<CloudGate> {
   Session? _session;
   CloudProfile? _profile;
   bool _loading = true;
+  bool _offlineMode = false;
   String? _error;
+
+  static const _profileKey = 'cloud_profile';
 
   @override
   void initState() {
@@ -4661,6 +4690,7 @@ class _CloudGateState extends State<CloudGate> {
         _profile = null;
         _loading = _session != null;
         _error = null;
+        _offlineMode = false;
       });
       _loadProfile();
     });
@@ -4694,6 +4724,8 @@ class _CloudGateState extends State<CloudGate> {
           phone: meta['phone'] as String? ?? '',
         );
       }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_profileKey, jsonEncode(profile.toMap()));
       if (!mounted) return;
       setState(() {
         _profile = profile;
@@ -4718,6 +4750,42 @@ class _CloudGateState extends State<CloudGate> {
     await SessionStore().clear();
   }
 
+  Future<void> _enterOfflineMode() async {
+    if (_session == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final cached = prefs.getString(_profileKey);
+    CloudProfile? profile;
+    if (cached != null && cached.isNotEmpty) {
+      try {
+        profile = CloudProfile.fromMap(
+          jsonDecode(cached) as Map<String, dynamic>,
+        );
+      } catch (_) {}
+    }
+    final authUser = _session!.user;
+    final meta = authUser.userMetadata ?? const {};
+    final role = meta['role'] as String?;
+    if (profile == null && role != null) {
+      profile = CloudProfile(
+        id: authUser.id,
+        role: role,
+        name: meta['name'] as String? ?? '',
+        phone: meta['phone'] as String? ?? '',
+      );
+    }
+    if (profile == null) {
+      if (!mounted) return;
+      setState(() => _error = 'Сперва нужно хотя бы раз войти с интернетом.');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _offlineMode = true;
+      _error = null;
+      _profile = profile;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -4729,6 +4797,7 @@ class _CloudGateState extends State<CloudGate> {
       return const RoleSelectScreen();
     }
     if (_error != null) {
+      final canEnterOffline = _session != null;
       return Scaffold(
         body: Center(
           child: Padding(
@@ -4748,6 +4817,13 @@ class _CloudGateState extends State<CloudGate> {
                   },
                   child: const Text('Повторить'),
                 ),
+                if (canEnterOffline) ...[
+                  const SizedBox(height: 8),
+                  FilledButton.tonal(
+                    onPressed: _enterOfflineMode,
+                    child: const Text('Войти в офлайн-режим'),
+                  ),
+                ],
                 TextButton(
                   onPressed: _signOut,
                   child: const Text('Выйти'),
@@ -4771,6 +4847,20 @@ class _CloudGateState extends State<CloudGate> {
         updateService: widget.updateService,
         onSignOut: _signOut,
         onDeleteAccount: _deleteCloudAccount,
+        offlineMode: _offlineMode,
+      );
+    }
+    if (_offlineMode) {
+      return const Scaffold(
+        body: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Клиентский режим требует интернет.\nПодключитесь к сети и попробуйте снова.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
       );
     }
     return ClientHome(
@@ -4790,6 +4880,7 @@ class _MasterBridge extends StatefulWidget {
     required this.updateService,
     required this.onSignOut,
     required this.onDeleteAccount,
+    this.offlineMode = false,
   });
 
   final AppointmentsDatabase database;
@@ -4797,6 +4888,7 @@ class _MasterBridge extends StatefulWidget {
   final UpdateService? updateService;
   final Future<void> Function() onSignOut;
   final Future<void> Function() onDeleteAccount;
+  final bool offlineMode;
 
   @override
   State<_MasterBridge> createState() => _MasterBridgeState();
@@ -4819,6 +4911,8 @@ class _MasterBridgeState extends State<_MasterBridge> {
           await widget.database.getOrCreateCloudUser('sb:$email');
       if (!mounted) return;
       setState(() => _user = user);
+      // В офлайне не пытаемся синхронизировать облачный профиль.
+      if (widget.offlineMode) return;
       // Если у мастера ещё нет облачного профиля — предлагаем заполнить.
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         try {
@@ -4873,6 +4967,7 @@ class _MasterBridgeState extends State<_MasterBridge> {
       user: user,
       updateService: widget.updateService,
       onSignOut: widget.onSignOut,
+      offlineMode: widget.offlineMode,
     );
   }
 }
@@ -4886,12 +4981,14 @@ class LocalSessionGate extends StatefulWidget {
     required this.user,
     required this.onSignOut,
     this.updateService,
+    this.offlineMode = false,
   });
 
   final AppointmentsDatabase database;
   final User user;
   final UpdateService? updateService;
   final Future<void> Function() onSignOut;
+  final bool offlineMode;
 
   @override
   State<LocalSessionGate> createState() => _LocalSessionGateState();
@@ -4949,6 +5046,7 @@ class _LocalSessionGateState extends State<LocalSessionGate> {
       company: _company!,
       user: widget.user,
       updateService: widget.updateService,
+      offlineMode: widget.offlineMode,
       onSwitchCompany: () => setState(() => _company = null),
       onLogout: () => widget.onSignOut(),
     );

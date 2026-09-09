@@ -34,6 +34,13 @@ class CloudProfile {
         name: map['name'] as String? ?? '',
         phone: map['phone'] as String? ?? '',
       );
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'role': role,
+        'name': name,
+        'phone': phone,
+      };
 }
 
 /// Профиль мастера + имя из `profiles`.

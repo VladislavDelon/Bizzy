@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Точка доступа к Supabase-клиенту.
@@ -298,7 +300,7 @@ class CloudService {
     final dest = '$userId/avatar.jpg';
     await supabase.storage.from('avatars').upload(
           dest,
-          filePath,
+          File(filePath),
           fileOptions: const FileOptions(upsert: true),
         );
     return supabase.storage.from('avatars').getPublicUrl(dest);

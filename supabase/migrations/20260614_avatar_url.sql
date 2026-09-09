@@ -1,36 +1,44 @@
-ALTER TABLE public.master_profiles ADD COLUMN IF NOT EXISTS avatar_url text NOT NULL DEFAULT '';
+-- Выполнить в Supabase SQL Editor для существующего проекта.
 
--- Создать публичный bucket для аватаров (Storage → New bucket):
--- name: avatars
--- Public: true
+-- 1. Добавляем колонку аватара в профиль мастера.
+ALTER TABLE public.master_profiles
+ADD COLUMN IF NOT EXISTS avatar_url text NOT NULL DEFAULT '';
 
--- RLS-политики для bucket `avatars` (чтобы авторизованные пользователи могли загружать свои файлы,
--- а все могли читать).
+-- 2. Создаём публичный bucket для аватаров (id = 'avatars', public = true).
+-- Если bucket уже существует — обновляем флаг public.
 insert into storage.buckets (id, name, public)
 values ('avatars', 'avatars', true)
 on conflict (id) do update set public = true;
 
-create policy if not exists "avatars_select_public"
+-- 3. Политики bucket'а `avatars`.
+-- Все могут читать фото. Авторизованный пользователь может загружать/обновлять/удалять
+-- только файлы в своей папке <user_id>/... .
+
+drop policy if exists "avatars_select_public" on storage.objects;
+create policy "avatars_select_public"
   on storage.objects for select
   using (bucket_id = 'avatars');
 
-create policy if not exists "avatars_insert_own"
+drop policy if exists "avatars_insert_own" on storage.objects;
+create policy "avatars_insert_own"
   on storage.objects for insert
   with check (
     bucket_id = 'avatars'
-    and (storage.foldername(name))[1] = auth.uid()::text
+    and coalesce((storage.foldername(name))[1], '') = auth.uid()::text
   );
 
-create policy if not exists "avatars_update_own"
+drop policy if exists "avatars_update_own" on storage.objects;
+create policy "avatars_update_own"
   on storage.objects for update
   using (
     bucket_id = 'avatars'
-    and (storage.foldername(name))[1] = auth.uid()::text
+    and coalesce((storage.foldername(name))[1], '') = auth.uid()::text
   );
 
-create policy if not exists "avatars_delete_own"
+drop policy if exists "avatars_delete_own" on storage.objects;
+create policy "avatars_delete_own"
   on storage.objects for delete
   using (
     bucket_id = 'avatars'
-    and (storage.foldername(name))[1] = auth.uid()::text
+    and coalesce((storage.foldername(name))[1], '') = auth.uid()::text
   );

@@ -72,6 +72,7 @@ create table if not exists public.services (
   name text not null,
   price numeric not null default 0,
   duration_minutes int not null default 60,
+  published boolean not null default true,
   created_at timestamptz not null default now()
 );
 

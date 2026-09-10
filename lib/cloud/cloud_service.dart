@@ -85,6 +85,7 @@ class CloudServiceItem {
     required this.name,
     required this.price,
     required this.durationMinutes,
+    this.published = true,
   });
 
   final int id;
@@ -92,6 +93,7 @@ class CloudServiceItem {
   final String name;
   final double price;
   final int durationMinutes;
+  final bool published;
 
   factory CloudServiceItem.fromMap(Map<String, dynamic> map) =>
       CloudServiceItem(
@@ -100,6 +102,16 @@ class CloudServiceItem {
         name: map['name'] as String? ?? '',
         price: (map['price'] as num?)?.toDouble() ?? 0,
         durationMinutes: (map['duration_minutes'] as num?)?.toInt() ?? 60,
+        published: (map['published'] as bool?) ?? true,
+      );
+
+  CloudServiceItem copyWith({bool? published}) => CloudServiceItem(
+        id: id,
+        masterId: masterId,
+        name: name,
+        price: price,
+        durationMinutes: durationMinutes,
+        published: published ?? this.published,
       );
 }
 
@@ -314,11 +326,23 @@ class CloudService {
   }
 
   // ---------- Services (cloud) ----------
+  /// Все услуги мастера (для редактирования).
+  Future<List<CloudServiceItem>> myServices() async {
+    final rows = await supabase
+        .from('services')
+        .select()
+        .eq('master_id', uid!)
+        .order('name');
+    return [for (final r in rows) CloudServiceItem.fromMap(r)];
+  }
+
+  /// Опубликованные услуги мастера (видны клиентам).
   Future<List<CloudServiceItem>> servicesOf(String masterId) async {
     final rows = await supabase
         .from('services')
         .select()
         .eq('master_id', masterId)
+        .eq('published', true)
         .order('name');
     return [for (final r in rows) CloudServiceItem.fromMap(r)];
   }
@@ -327,6 +351,7 @@ class CloudService {
     required String name,
     required double price,
     required int durationMinutes,
+    bool published = true,
   }) async {
     final row = await supabase
         .from('services')
@@ -335,6 +360,7 @@ class CloudService {
           'name': name,
           'price': price,
           'duration_minutes': durationMinutes,
+          'published': published,
         })
         .select()
         .single();
@@ -346,6 +372,7 @@ class CloudService {
         'name': s.name,
         'price': s.price,
         'duration_minutes': s.durationMinutes,
+        'published': s.published,
       }).eq('id', s.id);
 
   Future<void> deleteService(int id) =>
@@ -354,7 +381,8 @@ class CloudService {
   /// Полностью перезаписывает список услуг мастера в облаке
   /// (простой способ синхронизации локального справочника).
   Future<void> replaceMyServices(
-    List<({String name, double price, int durationMinutes})> items,
+    List<({String name, double price, int durationMinutes, bool published})>
+        items,
   ) async {
     final id = uid;
     if (id == null) return;
@@ -367,6 +395,7 @@ class CloudService {
           'name': s.name,
           'price': s.price,
           'duration_minutes': s.durationMinutes,
+          'published': s.published,
         },
     ]);
   }

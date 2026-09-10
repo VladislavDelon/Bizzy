@@ -669,6 +669,7 @@ class Service {
   final double price;
   final int durationMinutes;
   final String notes;
+  final bool published;
 
   const Service({
     this.id,
@@ -677,6 +678,7 @@ class Service {
     this.price = 0,
     this.durationMinutes = 60,
     this.notes = '',
+    this.published = true,
   });
 
   Map<String, Object?> toMap() {
@@ -687,6 +689,7 @@ class Service {
       'price': price,
       'durationMinutes': durationMinutes,
       'notes': notes,
+      'published': published ? 1 : 0,
     };
   }
 
@@ -698,6 +701,7 @@ class Service {
       price: (map['price'] as num?)?.toDouble() ?? 0,
       durationMinutes: (map['durationMinutes'] as int?) ?? 60,
       notes: (map['notes'] as String?) ?? '',
+      published: (map['published'] as int?) == 1,
     );
   }
 }
@@ -801,7 +805,7 @@ class AppointmentsDatabase {
     final pathString = p.join(databasesPath, 'bizzy.db');
     return openDatabase(
       pathString,
-      version: 7,
+      version: 8,
       onCreate: (db, version) => _createAll(db),
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -841,6 +845,11 @@ class AppointmentsDatabase {
           );
           await db.execute(
             'CREATE INDEX idx_appointments_external ON appointments(externalId)',
+          );
+        }
+        if (oldVersion < 8) {
+          await db.execute(
+            'ALTER TABLE services ADD COLUMN published INTEGER NOT NULL DEFAULT 1',
           );
         }
       },
@@ -910,7 +919,8 @@ class AppointmentsDatabase {
         name TEXT NOT NULL,
         price REAL NOT NULL DEFAULT 0,
         durationMinutes INTEGER NOT NULL DEFAULT 60,
-        notes TEXT NOT NULL DEFAULT ''
+        notes TEXT NOT NULL DEFAULT '',
+        published INTEGER NOT NULL DEFAULT 1
       )
     ''');
   }
@@ -1177,6 +1187,7 @@ class AppointmentsDatabase {
       'price': service.price,
       'durationMinutes': service.durationMinutes,
       'notes': service.notes.trim(),
+      'published': service.published ? 1 : 0,
     });
     return Service(
       id: id,
@@ -1185,6 +1196,7 @@ class AppointmentsDatabase {
       price: service.price,
       durationMinutes: service.durationMinutes,
       notes: service.notes.trim(),
+      published: service.published,
     );
   }
 
@@ -1197,6 +1209,7 @@ class AppointmentsDatabase {
         'price': service.price,
         'durationMinutes': service.durationMinutes,
         'notes': service.notes.trim(),
+        'published': service.published ? 1 : 0,
       },
       where: 'id = ?',
       whereArgs: [service.id],
@@ -2995,6 +3008,7 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
   final _priceController = TextEditingController();
   final _durationController = TextEditingController();
   final _notesController = TextEditingController();
+  bool _published = true;
   bool _saving = false;
   String? _error;
 
@@ -3006,6 +3020,7 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
     _priceController.text = s?.price.toString() ?? '';
     _durationController.text = (s?.durationMinutes ?? 60).toString();
     _notesController.text = s?.notes ?? '';
+    _published = s?.published ?? true;
   }
 
   @override
@@ -3032,6 +3047,7 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
       price: price,
       durationMinutes: duration,
       notes: _notesController.text,
+      published: _published,
     );
     try {
       final saved = widget.service == null
@@ -3107,6 +3123,15 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
                     if (n == null || n < 1) return 'Введите целое число';
                     return null;
                   },
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  title: const Text('Опубликовать в профиле'),
+                  subtitle: const Text('Клиенты увидят эту услугу'),
+                  value: _published,
+                  onChanged: _saving
+                      ? null
+                      : (v) => setState(() => _published = v),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -3206,7 +3231,12 @@ class _ServicesTabState extends State<ServicesTab> {
     try {
       await CloudService().replaceMyServices([
         for (final s in services)
-          (name: s.name, price: s.price, durationMinutes: s.durationMinutes),
+          (
+            name: s.name,
+            price: s.price,
+            durationMinutes: s.durationMinutes,
+            published: s.published,
+          ),
       ]);
     } catch (_) {
       // Без интернета просто пропускаем — услуги синхронизируются позже.
@@ -3236,6 +3266,27 @@ class _ServicesTabState extends State<ServicesTab> {
     );
     if (!mounted || result == null) return;
     await _load();
+  }
+
+  Future<void> _togglePublished(Service service) async {
+    try {
+      final updated = Service(
+        id: service.id,
+        companyId: service.companyId,
+        name: service.name,
+        price: service.price,
+        durationMinutes: service.durationMinutes,
+        notes: service.notes,
+        published: !service.published,
+      );
+      await widget.database.updateService(updated);
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось изменить публикацию')),
+      );
+    }
   }
 
   Future<void> _deleteService(Service service) async {
@@ -3333,22 +3384,47 @@ class _ServicesTabState extends State<ServicesTab> {
                                       '${service.price.toStringAsFixed(2)} ${currency.symbol} • ${service.durationMinutes} мин',
                                     ),
                                   ),
-                                  trailing: PopupMenuButton<String>(
-                                    onSelected: (value) {
-                                      if (value == 'edit') {
-                                        _editService(service);
-                                      } else if (value == 'delete') {
-                                        _deleteService(service);
-                                      }
-                                    },
-                                    itemBuilder: (context) => const [
-                                      PopupMenuItem(
-                                        value: 'edit',
-                                        child: Text('Редактировать'),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'delete',
-                                        child: Text('Удалить'),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (service.published)
+                                        const Tooltip(
+                                          message: 'Опубликована',
+                                          child: Icon(Icons.visibility,
+                                              color: Colors.green),
+                                        )
+                                      else
+                                        const Tooltip(
+                                          message: 'Не опубликована',
+                                          child: Icon(Icons.visibility_off,
+                                              color: Colors.grey),
+                                        ),
+                                      PopupMenuButton<String>(
+                                        onSelected: (value) {
+                                          if (value == 'edit') {
+                                            _editService(service);
+                                          } else if (value == 'delete') {
+                                            _deleteService(service);
+                                          } else if (value == 'toggle') {
+                                            _togglePublished(service);
+                                          }
+                                        },
+                                        itemBuilder: (context) => [
+                                          const PopupMenuItem(
+                                            value: 'edit',
+                                            child: Text('Редактировать'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'toggle',
+                                            child: Text(service.published
+                                                ? 'Снять с публикации'
+                                                : 'Опубликовать'),
+                                          ),
+                                          const PopupMenuItem(
+                                            value: 'delete',
+                                            child: Text('Удалить'),
+                                          ),
+                                        ],
                                       ),
                                     ],
                                   ),

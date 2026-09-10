@@ -1030,6 +1030,19 @@ class AppointmentsDatabase {
     return Company(id: id, userId: userId, name: trimmed, type: type);
   }
 
+  Future<int> updateCompanyName(int companyId, String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) throw ArgumentError('Название компании обязательно');
+    final db = await database;
+    return db.update(
+      'companies',
+      {'name': trimmed},
+      where: 'id = ?',
+      whereArgs: [companyId],
+      conflictAlgorithm: ConflictAlgorithm.rollback,
+    );
+  }
+
   Future<List<Company>> claimOrphanCompanies(int userId) async {
     final db = await database;
     final orphans = await db.query('companies', where: 'userId = 0');
@@ -1379,7 +1392,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!context.mounted) return;
     if (update == null) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('Обновлений пока нет')),
+        const SnackBar(content: Text('Это актуальная версия')),
       );
       return;
     }
@@ -3421,7 +3434,7 @@ class _MoreTabState extends State<MoreTab> {
         await showDialog<void>(
           context: context,
           builder: (context) => const AlertDialog(
-            content: Text('Обновлений пока нет'),
+            content: Text('Это актуальная версия'),
           ),
         );
         return;
@@ -4930,6 +4943,22 @@ class _MasterBridgeState extends State<_MasterBridge> {
           await widget.database.getOrCreateCloudUser('sb:$email');
       if (!mounted) return;
       setState(() => _user = user);
+
+      // Автоматически подтягиваем название компании из облачного профиля.
+      final companies = await widget.database.getCompanies(user.id);
+      if (companies.isNotEmpty) {
+        await widget.database.updateCompanyName(
+          companies.first.id,
+          widget.profile.name,
+        );
+      } else {
+        await widget.database.createCompany(
+          user.id,
+          widget.profile.name,
+          '',
+        );
+      }
+
       // В офлайне не пытаемся синхронизировать облачный профиль.
       if (widget.offlineMode) return;
       // Если у мастера ещё нет облачного профиля — предлагаем заполнить.

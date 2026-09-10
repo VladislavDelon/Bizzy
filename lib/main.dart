@@ -2081,27 +2081,8 @@ class _MainShellState extends State<MainShell> {
     try {
       final update = await service.check();
       if (!mounted || update == null) return;
-      final shouldInstall = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Доступно обновление'),
-          content: Text(
-            'Вышла новая версия ${update.version}. '
-            'Нажмите «Обновить», чтобы загрузить и установить её.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Позже'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Обновить'),
-            ),
-          ],
-        ),
-      );
-      if (!mounted || shouldInstall != true) return;
+      // Автоматическое обновление: сразу начинаем загрузку и установку.
+      // Пользователь увидит только диалог прогресса и системный диалог установщика.
       await _showUpdateFlow(context, service, update);
     } catch (_) {
       // Нет сети или релиз ещё не опубликован — приложение работает офлайн.

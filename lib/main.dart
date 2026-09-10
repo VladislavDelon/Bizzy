@@ -258,20 +258,45 @@ class UpdateService {
     final dir = await getApplicationDocumentsDirectory();
     final path = '${dir.path}/bizzy_update.apk';
     try {
-      final response = await Dio().download(
-        url.toString(),
-        path,
-        onReceiveProgress: (received, total) {
-          if (total > 0) onProgress(received / total);
-        },
-        options: Options(
-          followRedirects: true,
-          maxRedirects: 5,
-          validateStatus: (s) => s != null && s >= 200 && s < 300,
-        ),
-      );
-      if (response.statusCode != 200) {
-        throw Exception('Сервер вернул ${response.statusCode} при загрузке APK');
+      DioException? lastError;
+      Response? response;
+      for (var attempt = 1; attempt <= 3; attempt++) {
+        try {
+          response = await Dio(
+            BaseOptions(
+              connectTimeout: const Duration(seconds: 30),
+              receiveTimeout: const Duration(minutes: 5),
+              sendTimeout: const Duration(seconds: 30),
+            ),
+          ).download(
+            url.toString(),
+            path,
+            onReceiveProgress: (received, total) {
+              if (total > 0) onProgress(received / total);
+            },
+            options: Options(
+              followRedirects: true,
+              maxRedirects: 5,
+              validateStatus: (s) => s != null && s >= 200 && s < 300,
+            ),
+          );
+          if (response.statusCode == 200) break;
+          lastError = DioException(
+            requestOptions: response.requestOptions,
+            response: response,
+            error: 'Сервер вернул ${response.statusCode}',
+            type: DioExceptionType.badResponse,
+          );
+        } on DioException catch (e) {
+          lastError = e;
+          if (attempt < 3) {
+            await Future<void>.delayed(Duration(seconds: attempt * 2));
+          }
+        }
+      }
+      if (response?.statusCode != 200) {
+        if (lastError != null) throw lastError;
+        throw Exception('Сервер вернул ${response?.statusCode} при загрузке APK');
       }
       final file = File(path);
       if (!file.existsSync()) {
@@ -2224,7 +2249,6 @@ class _MainShellState extends State<MainShell> {
         company: widget.company,
         user: widget.user,
         offlineMode: widget.offlineMode,
-        onRefreshAppointments: _loadAppointments,
         onSwitchCompany: widget.onSwitchCompany,
         onLogout: widget.onLogout,
       ),
@@ -2832,6 +2856,34 @@ class _ClientsTabState extends State<ClientsTab> {
     return Scaffold(
       body: Column(
         children: [
+          if (cloudSignedIn) ...[
+            Card(
+              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: ListTile(
+                leading: const Icon(Icons.event_note_outlined),
+                title: const Text('Заявки клиентов'),
+                subtitle: const Text('Записи из каталога Bizzy'),
+                onTap: () {
+                  final mainShell =
+                      context.findAncestorStateOfType<_MainShellState>();
+                  Navigator.of(context).push<void>(
+                    MaterialPageRoute(
+                      builder: (_) => MasterBookingsScreen(
+                        onBookingChanged: (b) async {
+                          await widget.database
+                              .syncCloudBooking(b, widget.company.id);
+                          if (!mounted) return;
+                          if (mainShell != null && mainShell.mounted) {
+                            await mainShell.refreshAppointments();
+                          }
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Row(
@@ -3329,7 +3381,6 @@ class MoreTab extends StatefulWidget {
     required this.database,
     required this.company,
     required this.user,
-    required this.onRefreshAppointments,
     this.offlineMode = false,
     required this.onSwitchCompany,
     required this.onLogout,
@@ -3338,7 +3389,6 @@ class MoreTab extends StatefulWidget {
   final AppointmentsDatabase database;
   final Company company;
   final User user;
-  final Future<void> Function() onRefreshAppointments;
   final bool offlineMode;
   final VoidCallback onSwitchCompany;
   final VoidCallback onLogout;
@@ -3466,27 +3516,6 @@ class _MoreTabState extends State<MoreTab> {
           ),
         ),
         if (cloudSignedIn && !widget.offlineMode) ...[
-          ListTile(
-            leading: const Icon(Icons.event_note_outlined),
-            title: const Text('Заявки клиентов'),
-            subtitle: const Text('Записи из каталога Bizzy'),
-            onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute(
-                builder: (context) => MasterBookingsScreen(
-                  onBookingChanged: (b) async {
-                    final mainShell =
-                        context.findAncestorStateOfType<_MainShellState>();
-                    await widget.database.syncCloudBooking(b, widget.company.id);
-                    if (!mounted) return;
-                    await widget.onRefreshAppointments();
-                    if (mainShell != null && mainShell.mounted) {
-                      await mainShell.refreshAppointments();
-                    }
-                  },
-                ),
-              ),
-            ),
-          ),
           ListTile(
             leading: const Icon(Icons.storefront_outlined),
             title: const Text('Профиль мастера'),

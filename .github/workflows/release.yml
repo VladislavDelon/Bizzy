@@ -56,10 +56,15 @@ jobs:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
 
+      - name: Prepare release APK
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk ./app-release.apk
+          ls -lh ./app-release.apk
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: Bizzy ${{ github.ref_name }}
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: ./app-release.apk
           generate_release_notes: true

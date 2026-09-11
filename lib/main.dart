@@ -670,6 +670,8 @@ class Service {
   final int durationMinutes;
   final String notes;
   final bool published;
+  final String externalId;
+  final String cloudUpdatedAt;
 
   const Service({
     this.id,
@@ -679,6 +681,8 @@ class Service {
     this.durationMinutes = 60,
     this.notes = '',
     this.published = true,
+    this.externalId = '',
+    this.cloudUpdatedAt = '',
   });
 
   Map<String, Object?> toMap() {
@@ -690,6 +694,8 @@ class Service {
       'durationMinutes': durationMinutes,
       'notes': notes,
       'published': published ? 1 : 0,
+      'externalId': externalId,
+      'cloudUpdatedAt': cloudUpdatedAt,
     };
   }
 
@@ -702,8 +708,33 @@ class Service {
       durationMinutes: (map['durationMinutes'] as int?) ?? 60,
       notes: (map['notes'] as String?) ?? '',
       published: (map['published'] as int?) == 1,
+      externalId: (map['externalId'] as String?) ?? '',
+      cloudUpdatedAt: (map['cloudUpdatedAt'] as String?) ?? '',
     );
   }
+
+  Service copyWith({
+    int? id,
+    int? companyId,
+    String? name,
+    double? price,
+    int? durationMinutes,
+    String? notes,
+    bool? published,
+    String? externalId,
+    String? cloudUpdatedAt,
+  }) =>
+      Service(
+        id: id ?? this.id,
+        companyId: companyId ?? this.companyId,
+        name: name ?? this.name,
+        price: price ?? this.price,
+        durationMinutes: durationMinutes ?? this.durationMinutes,
+        notes: notes ?? this.notes,
+        published: published ?? this.published,
+        externalId: externalId ?? this.externalId,
+        cloudUpdatedAt: cloudUpdatedAt ?? this.cloudUpdatedAt,
+      );
 }
 
 class Appointment {
@@ -718,6 +749,7 @@ class Appointment {
   final int reminderMinutes;
   final String notes;
   final String externalId;
+  final String cloudUpdatedAt;
 
   Appointment({
     this.id,
@@ -731,6 +763,7 @@ class Appointment {
     this.reminderMinutes = 30,
     required this.notes,
     this.externalId = '',
+    this.cloudUpdatedAt = '',
   });
 
   Map<String, Object?> toMap() {
@@ -746,6 +779,7 @@ class Appointment {
       'reminderMinutes': reminderMinutes,
       'notes': notes,
       'externalId': externalId,
+      'cloudUpdatedAt': cloudUpdatedAt,
     };
   }
 
@@ -762,6 +796,7 @@ class Appointment {
       reminderMinutes: (map['reminderMinutes'] as int?) ?? 30,
       notes: map['notes'] as String,
       externalId: (map['externalId'] as String?) ?? '',
+      cloudUpdatedAt: (map['cloudUpdatedAt'] as String?) ?? '',
     );
   }
 }
@@ -779,17 +814,42 @@ enum ContactType {
 }
 
 class Contact {
-  const Contact({required this.id, required this.name, required this.phone});
+  const Contact({
+    required this.id,
+    required this.name,
+    required this.phone,
+    this.externalId = '',
+    this.cloudUpdatedAt = '',
+  });
 
   final int id;
   final String name;
   final String phone;
+  final String externalId;
+  final String cloudUpdatedAt;
 
   factory Contact.fromMap(Map<String, Object?> map) => Contact(
     id: map['id'] as int,
     name: map['name'] as String,
     phone: map['phone'] as String,
+    externalId: (map['externalId'] as String?) ?? '',
+    cloudUpdatedAt: (map['cloudUpdatedAt'] as String?) ?? '',
   );
+
+  Contact copyWith({
+    int? id,
+    String? name,
+    String? phone,
+    String? externalId,
+    String? cloudUpdatedAt,
+  }) =>
+      Contact(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        phone: phone ?? this.phone,
+        externalId: externalId ?? this.externalId,
+        cloudUpdatedAt: cloudUpdatedAt ?? this.cloudUpdatedAt,
+      );
 }
 
 class AppointmentsDatabase {
@@ -805,7 +865,7 @@ class AppointmentsDatabase {
     final pathString = p.join(databasesPath, 'bizzy.db');
     return openDatabase(
       pathString,
-      version: 8,
+      version: 9,
       onCreate: (db, version) => _createAll(db),
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -852,6 +912,32 @@ class AppointmentsDatabase {
             'ALTER TABLE services ADD COLUMN published INTEGER NOT NULL DEFAULT 1',
           );
         }
+        if (oldVersion < 9) {
+          await db.execute(
+            'ALTER TABLE appointments ADD COLUMN cloudUpdatedAt TEXT NOT NULL DEFAULT \'\'',
+          );
+          await db.execute(
+            'ALTER TABLE services ADD COLUMN externalId TEXT NOT NULL DEFAULT \'\'',
+          );
+          await db.execute(
+            'ALTER TABLE services ADD COLUMN cloudUpdatedAt TEXT NOT NULL DEFAULT \'\'',
+          );
+          await db.execute(
+            'CREATE INDEX idx_services_external ON services(companyId, externalId)',
+          );
+          await db.execute(
+            'ALTER TABLE clients ADD COLUMN externalId TEXT NOT NULL DEFAULT \'\'',
+          );
+          await db.execute(
+            'ALTER TABLE clients ADD COLUMN cloudUpdatedAt TEXT NOT NULL DEFAULT \'\'',
+          );
+          await db.execute(
+            'ALTER TABLE masters ADD COLUMN externalId TEXT NOT NULL DEFAULT \'\'',
+          );
+          await db.execute(
+            'ALTER TABLE masters ADD COLUMN cloudUpdatedAt TEXT NOT NULL DEFAULT \'\'',
+          );
+        }
       },
     );
   }
@@ -869,7 +955,8 @@ class AppointmentsDatabase {
         durationMinutes INTEGER NOT NULL DEFAULT 60,
         reminderMinutes INTEGER NOT NULL DEFAULT 30,
         notes TEXT NOT NULL,
-        externalId TEXT NOT NULL DEFAULT ''
+        externalId TEXT NOT NULL DEFAULT '',
+        cloudUpdatedAt TEXT NOT NULL DEFAULT ''
       )
     ''');
     await _createDirectories(db);
@@ -886,6 +973,8 @@ class AppointmentsDatabase {
           companyId INTEGER NOT NULL DEFAULT 0,
           name TEXT NOT NULL,
           phone TEXT NOT NULL DEFAULT '',
+          externalId TEXT NOT NULL DEFAULT '',
+          cloudUpdatedAt TEXT NOT NULL DEFAULT '',
           UNIQUE(companyId, name, phone)
         )
       ''');
@@ -920,7 +1009,9 @@ class AppointmentsDatabase {
         price REAL NOT NULL DEFAULT 0,
         durationMinutes INTEGER NOT NULL DEFAULT 60,
         notes TEXT NOT NULL DEFAULT '',
-        published INTEGER NOT NULL DEFAULT 1
+        published INTEGER NOT NULL DEFAULT 1,
+        externalId TEXT NOT NULL DEFAULT '',
+        cloudUpdatedAt TEXT NOT NULL DEFAULT ''
       )
     ''');
   }
@@ -1095,6 +1186,8 @@ class AppointmentsDatabase {
       await txn.insert(type.table, {
         'companyId': companyId,
         ...values,
+        'externalId': '',
+        'cloudUpdatedAt': DateTime.now().toIso8601String(),
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
       final rows = await txn.query(
         type.table,
@@ -1165,6 +1258,24 @@ class AppointmentsDatabase {
 
   Future<int> delete(int id) async {
     final db = await database;
+    final rows = await db.query(
+      'appointments',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (rows.isNotEmpty) {
+      final externalId = rows.first['externalId'] as String? ?? '';
+      if (externalId.startsWith('master:') && cloudSignedIn) {
+        final cloudId = int.tryParse(externalId.split(':').last);
+        if (cloudId != null) {
+          try {
+            await CloudService().deleteMasterAppointment(cloudId);
+          } catch (_) {
+            // Нет сети — удалим при следующей синхронизации.
+          }
+        }
+      }
+    }
     return db.delete('appointments', where: 'id = ?', whereArgs: [id]);
   }
 
@@ -1188,6 +1299,8 @@ class AppointmentsDatabase {
       'durationMinutes': service.durationMinutes,
       'notes': service.notes.trim(),
       'published': service.published ? 1 : 0,
+      'externalId': service.externalId,
+      'cloudUpdatedAt': service.cloudUpdatedAt,
     });
     return Service(
       id: id,
@@ -1197,6 +1310,8 @@ class AppointmentsDatabase {
       durationMinutes: service.durationMinutes,
       notes: service.notes.trim(),
       published: service.published,
+      externalId: service.externalId,
+      cloudUpdatedAt: service.cloudUpdatedAt,
     );
   }
 
@@ -1210,6 +1325,8 @@ class AppointmentsDatabase {
         'durationMinutes': service.durationMinutes,
         'notes': service.notes.trim(),
         'published': service.published ? 1 : 0,
+        'externalId': service.externalId,
+        'cloudUpdatedAt': service.cloudUpdatedAt,
       },
       where: 'id = ?',
       whereArgs: [service.id],
@@ -1219,6 +1336,454 @@ class AppointmentsDatabase {
   Future<int> deleteService(int id) async {
     final db = await database;
     return db.delete('services', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Двусторонняя синхронизация услуг с облаком.
+  /// Возвращает актуальный локальный список.
+  Future<List<Service>> syncServices(int companyId) async {
+    if (!cloudSignedIn) return getServices(companyId);
+    final db = await database;
+    var local = await getServices(companyId);
+    try {
+      final cloudItems = await CloudService().myServices();
+      final cloudByExternal = <String, CloudServiceItem>{};
+      for (final c in cloudItems) {
+        cloudByExternal['cloud:service:${c.id}'] = c;
+      }
+
+      // 1. Обновляем/добавляем услуги из облака.
+      for (final entry in cloudByExternal.entries) {
+        final ext = entry.key;
+        final cloud = entry.value;
+        final cloudUpdatedAt = cloud.updatedAt ?? DateTime(1970);
+        var existing = await db.query(
+          'services',
+          where: 'companyId = ? AND externalId = ?',
+          whereArgs: [companyId, ext],
+        );
+        // Если по externalId не нашли, ищем по имени, чтобы не дублировать
+        // услуги, созданные на другом устройстве.
+        if (existing.isEmpty) {
+          existing = await db.query(
+            'services',
+            where: 'companyId = ? AND name = ? AND externalId = ?',
+            whereArgs: [companyId, cloud.name, ''],
+          );
+        }
+        if (existing.isEmpty) {
+          await db.insert('services', {
+            'companyId': companyId,
+            'name': cloud.name,
+            'price': cloud.price,
+            'durationMinutes': cloud.durationMinutes,
+            'notes': '',
+            'published': cloud.published ? 1 : 0,
+            'externalId': ext,
+            'cloudUpdatedAt': cloudUpdatedAt.toIso8601String(),
+          });
+        } else {
+          final id = existing.first['id'] as int;
+          final localUpdatedAtStr =
+              existing.first['cloudUpdatedAt'] as String? ?? '';
+          final localUpdatedAt = DateTime.tryParse(localUpdatedAtStr) ??
+              DateTime(1970);
+          if (cloudUpdatedAt.isAfter(localUpdatedAt)) {
+            await db.update(
+              'services',
+              {
+                'name': cloud.name,
+                'price': cloud.price,
+                'durationMinutes': cloud.durationMinutes,
+                'published': cloud.published ? 1 : 0,
+                'cloudUpdatedAt': cloudUpdatedAt.toIso8601String(),
+              },
+              where: 'id = ?',
+              whereArgs: [id],
+            );
+          }
+        }
+      }
+
+      // 2. Удаляем локальные услуги, которых больше нет в облаке.
+      final localWithExternal = await db.query(
+        'services',
+        where: 'companyId = ? AND externalId != ?',
+        whereArgs: [companyId, ''],
+      );
+      for (final row in localWithExternal) {
+        final ext = row['externalId'] as String;
+        if (!cloudByExternal.containsKey(ext)) {
+          await db.delete(
+            'services',
+            where: 'id = ?',
+            whereArgs: [row['id'] as int],
+          );
+        }
+      }
+
+      // 3. Отправляем в облако локальные услуги без externalId.
+      final unsynced = local.where((s) => s.externalId.isEmpty).toList();
+      for (final s in unsynced) {
+        final cloud = await CloudService().addService(
+          name: s.name,
+          price: s.price,
+          durationMinutes: s.durationMinutes,
+          published: s.published,
+        );
+        await db.update(
+          'services',
+          {
+            'externalId': 'cloud:service:${cloud.id}',
+            'cloudUpdatedAt':
+                (cloud.updatedAt ?? DateTime.now()).toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: [s.id],
+        );
+      }
+
+      // 4. Отправляем изменения по услугам, синхронизированным ранее,
+      // если локальная версия новее (cloudUpdatedAt — время локального изменения).
+      final synced = await getServices(companyId);
+      for (final s in synced.where((s) => s.externalId.isNotEmpty)) {
+        final cloud = cloudByExternal[s.externalId];
+        if (cloud == null) continue;
+        final cloudUpdatedAt = cloud.updatedAt ?? DateTime(1970);
+        final localUpdatedAt = DateTime.tryParse(s.cloudUpdatedAt) ??
+            DateTime(1970);
+        if (localUpdatedAt.isAfter(cloudUpdatedAt)) {
+          final cloudId =
+              int.tryParse(s.externalId.split(':').last) ?? cloud.id;
+          final updated = await CloudService().updateService(
+            CloudServiceItem(
+              id: cloudId,
+              masterId: CloudService().uid!,
+              name: s.name,
+              price: s.price,
+              durationMinutes: s.durationMinutes,
+              published: s.published,
+            ),
+          );
+          await db.update(
+            'services',
+            {
+              'cloudUpdatedAt':
+                  (updated.updatedAt ?? DateTime.now()).toIso8601String(),
+            },
+            where: 'id = ?',
+            whereArgs: [s.id],
+          );
+        }
+      }
+    } catch (_) {
+      // Нет сети — работаем с локальными услугами.
+    }
+    return getServices(companyId);
+  }
+
+  /// Двусторонняя синхронизация клиентов/мастеров с облаком.
+  /// Возвращает актуальный локальный список.
+  Future<List<Contact>> syncContacts(
+    ContactType type,
+    int companyId,
+  ) async {
+    if (type != ContactType.client || !cloudSignedIn) {
+      return getContacts(type, companyId);
+    }
+    final db = await database;
+    var local = await getContacts(type, companyId);
+    try {
+      final cloudItems = await CloudService().myClients();
+      final cloudByExternal = <String, CloudClient>{};
+      for (final c in cloudItems) {
+        cloudByExternal['cloud:client:${c.id}'] = c;
+      }
+
+      for (final entry in cloudByExternal.entries) {
+        final ext = entry.key;
+        final cloud = entry.value;
+        final cloudUpdatedAt = cloud.updatedAt ?? DateTime(1970);
+        var existing = await db.query(
+          type.table,
+          where: 'companyId = ? AND externalId = ?',
+          whereArgs: [companyId, ext],
+        );
+        // Если по externalId не нашли, ищем по имени+телефону,
+        // чтобы не дублировать клиентов, добавленных на другом устройстве.
+        if (existing.isEmpty) {
+          existing = await db.query(
+            type.table,
+            where: 'companyId = ? AND name = ? AND phone = ? AND externalId = ?',
+            whereArgs: [companyId, cloud.name, cloud.phone, ''],
+          );
+        }
+        if (existing.isEmpty) {
+          await db.insert(type.table, {
+            'companyId': companyId,
+            'name': cloud.name,
+            'phone': cloud.phone,
+            'externalId': ext,
+            'cloudUpdatedAt': cloudUpdatedAt.toIso8601String(),
+          });
+        } else {
+          final id = existing.first['id'] as int;
+          final localUpdatedAtStr =
+              existing.first['cloudUpdatedAt'] as String? ?? '';
+          final localUpdatedAt = DateTime.tryParse(localUpdatedAtStr) ??
+              DateTime(1970);
+          if (cloudUpdatedAt.isAfter(localUpdatedAt)) {
+            await db.update(
+              type.table,
+              {
+                'name': cloud.name,
+                'phone': cloud.phone,
+                'cloudUpdatedAt': cloudUpdatedAt.toIso8601String(),
+              },
+              where: 'id = ?',
+              whereArgs: [id],
+            );
+          }
+        }
+      }
+
+      final localWithExternal = await db.query(
+        type.table,
+        where: 'companyId = ? AND externalId != ?',
+        whereArgs: [companyId, ''],
+      );
+      for (final row in localWithExternal) {
+        final ext = row['externalId'] as String;
+        if (!cloudByExternal.containsKey(ext)) {
+          await db.delete(
+            type.table,
+            where: 'id = ?',
+            whereArgs: [row['id'] as int],
+          );
+        }
+      }
+
+      final unsynced = local.where((c) => c.externalId.isEmpty).toList();
+      for (final c in unsynced) {
+        final cloud = await CloudService().addClient(
+          name: c.name,
+          phone: c.phone,
+        );
+        await db.update(
+          type.table,
+          {
+            'externalId': 'cloud:client:${cloud.id}',
+            'cloudUpdatedAt':
+                (cloud.updatedAt ?? DateTime.now()).toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: [c.id],
+        );
+      }
+
+      final synced = await getContacts(type, companyId);
+      for (final c in synced.where((c) => c.externalId.isNotEmpty)) {
+        final cloud = cloudByExternal[c.externalId];
+        if (cloud == null) continue;
+        final cloudUpdatedAt = cloud.updatedAt ?? DateTime(1970);
+        final localUpdatedAt = DateTime.tryParse(c.cloudUpdatedAt) ??
+            DateTime(1970);
+        if (localUpdatedAt.isAfter(cloudUpdatedAt)) {
+          final cloudId = int.tryParse(c.externalId.split(':').last) ?? cloud.id;
+          final updated = await CloudService().updateClient(
+            CloudClient(
+              id: cloudId,
+              masterId: CloudService().uid!,
+              name: c.name,
+              phone: c.phone,
+            ),
+          );
+          await db.update(
+            type.table,
+            {
+              'cloudUpdatedAt':
+                  (updated.updatedAt ?? DateTime.now()).toIso8601String(),
+            },
+            where: 'id = ?',
+            whereArgs: [c.id],
+          );
+        }
+      }
+    } catch (_) {
+      // Нет сети — работаем локально.
+    }
+    return getContacts(type, companyId);
+  }
+
+  /// Двусторонняя синхронизация записей с облаком:
+  /// - клиентские заявки, подтверждённые/завершённые;
+  /// - собственные записи мастера.
+  /// Возвращает актуальный локальный список.
+  Future<List<Appointment>> syncAppointments(int companyId) async {
+    if (!cloudSignedIn) return getAll(companyId);
+    final db = await database;
+    try {
+      // 1. Подтверждённые и завершённые клиентские заявки.
+      final bookings = await CloudService().masterBookings();
+      for (final b in bookings) {
+        if (b.status == 'confirmed' || b.status == 'completed') {
+          await syncCloudBooking(b, companyId);
+        }
+      }
+
+      // 2. Собственные записи мастера.
+      final cloudItems = await CloudService().myMasterAppointments();
+      final cloudByExternal = <String, CloudMasterAppointment>{};
+      for (final a in cloudItems) {
+        cloudByExternal['master:${a.id}'] = a;
+      }
+
+      for (final entry in cloudByExternal.entries) {
+        final ext = entry.key;
+        final cloud = entry.value;
+        final cloudUpdatedAt = cloud.updatedAt ?? DateTime(1970);
+        var existing = await db.query(
+          'appointments',
+          where: 'companyId = ? AND externalId = ?',
+          whereArgs: [companyId, ext],
+        );
+        // Ищем по дате/времени, клиенту и услуге, чтобы не дублировать.
+        if (existing.isEmpty) {
+          existing = await db.query(
+            'appointments',
+            where: 'companyId = ? AND dateTime = ? AND clientName = ? AND service = ? AND externalId = ?',
+            whereArgs: [
+              companyId,
+              cloud.startsAt.toIso8601String(),
+              cloud.clientName,
+              cloud.serviceName,
+              '',
+            ],
+          );
+        }
+        if (existing.isEmpty) {
+          await db.insert('appointments', {
+            'companyId': companyId,
+            'clientName': cloud.clientName,
+            'phone': cloud.clientPhone,
+            'service': cloud.serviceName,
+            'master': cloud.masterName,
+            'dateTime': cloud.startsAt.toIso8601String(),
+            'durationMinutes': cloud.durationMinutes,
+            'reminderMinutes': 30,
+            'notes': cloud.notes,
+            'externalId': ext,
+            'cloudUpdatedAt': cloudUpdatedAt.toIso8601String(),
+          });
+        } else {
+          final id = existing.first['id'] as int;
+          final localUpdatedAtStr =
+              existing.first['cloudUpdatedAt'] as String? ?? '';
+          final localUpdatedAt = DateTime.tryParse(localUpdatedAtStr) ??
+              DateTime(1970);
+          if (cloudUpdatedAt.isAfter(localUpdatedAt)) {
+            await db.update(
+              'appointments',
+              {
+                'clientName': cloud.clientName,
+                'phone': cloud.clientPhone,
+                'service': cloud.serviceName,
+                'master': cloud.masterName,
+                'dateTime': cloud.startsAt.toIso8601String(),
+                'durationMinutes': cloud.durationMinutes,
+                'notes': cloud.notes,
+                'cloudUpdatedAt': cloudUpdatedAt.toIso8601String(),
+              },
+              where: 'id = ?',
+              whereArgs: [id],
+            );
+          }
+        }
+      }
+
+      // Удаляем локальные master-записи, которых нет в облаке.
+      final localWithMaster = await db.query(
+        'appointments',
+        where: 'companyId = ? AND externalId LIKE ?',
+        whereArgs: [companyId, 'master:%'],
+      );
+      for (final row in localWithMaster) {
+        final ext = row['externalId'] as String;
+        if (!cloudByExternal.containsKey(ext)) {
+          await db.delete(
+            'appointments',
+            where: 'id = ?',
+            whereArgs: [row['id'] as int],
+          );
+        }
+      }
+
+      // Отправляем в облако локальные записи без externalId (собственные мастера).
+      final local = await getAll(companyId);
+      final unsynced = local
+          .where(
+            (a) => a.externalId.isEmpty,
+          )
+          .toList();
+      for (final a in unsynced) {
+        final cloud = await CloudService().addMasterAppointment(
+          clientName: a.clientName,
+          clientPhone: a.phone,
+          serviceName: a.service,
+          masterName: a.master,
+          startsAt: a.dateTime,
+          durationMinutes: a.durationMinutes,
+          notes: a.notes,
+        );
+        await db.update(
+          'appointments',
+          {
+            'externalId': 'master:${cloud.id}',
+            'cloudUpdatedAt':
+                (cloud.updatedAt ?? DateTime.now()).toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: [a.id],
+        );
+      }
+
+      // Отправляем изменения по синхронизированным master-записям.
+      final synced = await getAll(companyId);
+      for (final a in synced.where((a) => a.externalId.startsWith('master:'))) {
+        final cloud = cloudByExternal[a.externalId];
+        if (cloud == null) continue;
+        final cloudUpdatedAt = cloud.updatedAt ?? DateTime(1970);
+        final localUpdatedAt = DateTime.tryParse(a.cloudUpdatedAt) ??
+            DateTime(1970);
+        if (localUpdatedAt.isAfter(cloudUpdatedAt)) {
+          final cloudId = int.tryParse(a.externalId.split(':').last) ?? cloud.id;
+          final updated = await CloudService().updateMasterAppointment(
+            CloudMasterAppointment(
+              id: cloudId,
+              masterId: CloudService().uid!,
+              clientName: a.clientName,
+              clientPhone: a.phone,
+              serviceName: a.service,
+              masterName: a.master,
+              startsAt: a.dateTime,
+              durationMinutes: a.durationMinutes,
+              notes: a.notes,
+            ),
+          );
+          await db.update(
+            'appointments',
+            {
+              'cloudUpdatedAt':
+                  (updated.updatedAt ?? DateTime.now()).toIso8601String(),
+            },
+            where: 'id = ?',
+            whereArgs: [a.id],
+          );
+        }
+      }
+    } catch (_) {
+      // Нет сети — работаем локально.
+    }
+    return getAll(companyId);
   }
 
   // ---------- Личные дела ----------
@@ -1292,6 +1857,7 @@ class AppointmentsDatabase {
       reminderMinutes: 30,
       notes: booking.notes,
       externalId: 'cloud:${booking.id}',
+      cloudUpdatedAt: DateTime.now().toIso8601String(),
     );
     if (existing.isEmpty) {
       await db.insert('appointments', appointment.toMap());
@@ -1331,16 +1897,34 @@ class AppointmentsDatabase {
     final db = await database;
     return db.update(
       type.table,
-      {'companyId': companyId, 'name': trimmed, 'phone': trimmedPhone},
+      {
+        'companyId': companyId,
+        'name': trimmed,
+        'phone': trimmedPhone,
+        'externalId': contact.externalId,
+        'cloudUpdatedAt': DateTime.now().toIso8601String(),
+      },
       where: 'id = ?',
       whereArgs: [contact.id],
       conflictAlgorithm: ConflictAlgorithm.rollback,
     );
   }
 
-  Future<int> deleteContact(ContactType type, int id) async {
+  Future<int> deleteContact(ContactType type, Contact contact) async {
     final db = await database;
-    return db.delete(type.table, where: 'id = ?', whereArgs: [id]);
+    if (type == ContactType.client &&
+        contact.externalId.isNotEmpty &&
+        cloudSignedIn) {
+      final cloudId = int.tryParse(contact.externalId.split(':').last);
+      if (cloudId != null) {
+        try {
+          await CloudService().deleteClient(cloudId);
+        } catch (_) {
+          // Нет сети — удалим при следующей синхронизации.
+        }
+      }
+    }
+    return db.delete(type.table, where: 'id = ?', whereArgs: [contact.id]);
   }
 }
 
@@ -2082,12 +2666,14 @@ class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   List<Appointment> _allAppointments = [];
   bool _loading = true;
+  int _pendingBookings = 0;
 
   @override
   void initState() {
     super.initState();
     _homeDayNotifier = ValueNotifier(_startOfDay(DateTime.now()));
     _loadAppointments();
+    _loadPendingBookings();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkUpdates();
     });
@@ -2116,7 +2702,7 @@ class _MainShellState extends State<MainShell> {
   }
 
   Future<void> _loadAppointments() async {
-    final appointments = await _db.getAll(widget.company.id);
+    final appointments = await _db.syncAppointments(widget.company.id);
     if (!mounted) return;
     setState(() {
       _allAppointments = appointments;
@@ -2124,9 +2710,24 @@ class _MainShellState extends State<MainShell> {
     });
   }
 
+  Future<void> _loadPendingBookings() async {
+    if (!cloudSignedIn || widget.offlineMode) return;
+    try {
+      final bookings = await CloudService().masterBookings();
+      if (!mounted) return;
+      final pending = bookings.where((b) => b.status == 'pending').length;
+      setState(() => _pendingBookings = pending);
+    } catch (_) {
+      // Нет сети — оставляем старое значение.
+    }
+  }
+
   /// Публичный метод для дочерних виджетов (например, MoreTab),
   /// чтобы принудительно перезагрузить список записей.
-  Future<void> refreshAppointments() => _loadAppointments();
+  Future<void> refreshAppointments() async {
+    await _loadAppointments();
+    await _loadPendingBookings();
+  }
 
   Future<void> _deleteAppointment(int id) async {
     await _db.delete(id);
@@ -2246,6 +2847,7 @@ class _MainShellState extends State<MainShell> {
         database: _db,
         company: widget.company,
         isVisible: _currentIndex == 2,
+        pendingBookings: _pendingBookings,
       ),
       ServicesTab(
         database: _db,
@@ -2310,24 +2912,28 @@ class _MainShellState extends State<MainShell> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) => setState(() => _currentIndex = index),
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.home_filled),
-            label: 'Главная',
+            label: 'Главное',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.calendar_today),
             label: 'Календарь',
           ),
           NavigationDestination(
-            icon: Icon(Icons.people_outline),
+            icon: Badge(
+              isLabelVisible: _pendingBookings > 0,
+              label: Text('$_pendingBookings'),
+              child: const Icon(Icons.people_outline),
+            ),
             label: 'Клиенты',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.spa),
             label: 'Услуги',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.menu),
             label: 'Ещё',
           ),
@@ -2648,6 +3254,12 @@ class _CalendarTabState extends State<CalendarTab> {
                 focusedDay: _focusedDay,
                 selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
                 calendarFormat: _calendarFormat,
+                calendarStyle: const CalendarStyle(
+                  markerDecoration: BoxDecoration(
+                    color: Colors.yellow,
+                    shape: BoxShape.circle,
+                  ),
+                ),
                 eventLoader: (day) => widget.appointments
                     .where((a) => isSameDay(a.dateTime, day))
                     .toList(),
@@ -2709,11 +3321,13 @@ class ClientsTab extends StatefulWidget {
     required this.database,
     required this.company,
     this.isVisible = false,
+    this.pendingBookings = 0,
   });
 
   final AppointmentsDatabase database;
   final Company company;
   final bool isVisible;
+  final int pendingBookings;
 
   @override
   State<ClientsTab> createState() => _ClientsTabState();
@@ -2743,7 +3357,7 @@ class _ClientsTabState extends State<ClientsTab> {
       _failed = false;
     });
     try {
-      final contacts = await widget.database.getContacts(
+      final contacts = await widget.database.syncContacts(
         ContactType.client,
         widget.company.id,
       );
@@ -2803,7 +3417,7 @@ class _ClientsTabState extends State<ClientsTab> {
     final confirmed = await _confirmDelete(context, contact, inAppointments);
     if (!confirmed || !mounted) return;
     try {
-      await widget.database.deleteContact(ContactType.client, contact.id);
+      await widget.database.deleteContact(ContactType.client, contact);
       await _load();
     } catch (_) {
       if (!mounted) return;
@@ -2870,6 +3484,12 @@ class _ClientsTabState extends State<ClientsTab> {
                 leading: const Icon(Icons.event_note_outlined),
                 title: const Text('Заявки клиентов'),
                 subtitle: const Text('Записи из каталога Bizzy'),
+                trailing: widget.pendingBookings > 0
+                    ? Badge(
+                        label: Text('${widget.pendingBookings}'),
+                        child: const SizedBox(width: 24, height: 24),
+                      )
+                    : null,
                 onTap: () {
                   final mainShell =
                       context.findAncestorStateOfType<_MainShellState>();
@@ -3048,6 +3668,8 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
       durationMinutes: duration,
       notes: _notesController.text,
       published: _published,
+      externalId: widget.service?.externalId ?? '',
+      cloudUpdatedAt: DateTime.now().toIso8601String(),
     );
     try {
       final saved = widget.service == null
@@ -3211,35 +3833,14 @@ class _ServicesTabState extends State<ServicesTab> {
       _failed = false;
     });
     try {
-      final services =
-          await widget.database.getServices(widget.company.id);
+      final services = await widget.database.syncServices(widget.company.id);
       if (!mounted) return;
       setState(() => _services = services);
-      _syncToCloud(services);
     } catch (_) {
       if (!mounted) return;
       setState(() => _failed = true);
     } finally {
       if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  /// Публикует локальные услуги в облако, чтобы их видели клиенты.
-  /// Работает только при облачном входе (мастер через Supabase).
-  Future<void> _syncToCloud(List<Service> services) async {
-    if (!cloudSignedIn) return;
-    try {
-      await CloudService().replaceMyServices([
-        for (final s in services)
-          (
-            name: s.name,
-            price: s.price,
-            durationMinutes: s.durationMinutes,
-            published: s.published,
-          ),
-      ]);
-    } catch (_) {
-      // Без интернета просто пропускаем — услуги синхронизируются позже.
     }
   }
 
@@ -3278,6 +3879,8 @@ class _ServicesTabState extends State<ServicesTab> {
         durationMinutes: service.durationMinutes,
         notes: service.notes,
         published: !service.published,
+        externalId: service.externalId,
+        cloudUpdatedAt: DateTime.now().toIso8601String(),
       );
       await widget.database.updateService(updated);
       await _load();
@@ -3309,6 +3912,16 @@ class _ServicesTabState extends State<ServicesTab> {
     );
     if (confirmed != true || !mounted) return;
     try {
+      if (service.externalId.isNotEmpty && cloudSignedIn) {
+        final cloudId = int.tryParse(service.externalId.split(':').last);
+        if (cloudId != null) {
+          try {
+            await CloudService().deleteService(cloudId);
+          } catch (_) {
+            // Нет сети — удалим при следующей синхронизации.
+          }
+        }
+      }
       await widget.database.deleteService(service.id!);
       await _load();
     } catch (_) {
@@ -3684,8 +4297,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
       _failed = false;
     });
     try {
-      final contacts =
-          await widget.database.getContacts(widget.type, widget.companyId);
+      final contacts = await widget.database.syncContacts(
+        widget.type,
+        widget.companyId,
+      );
       if (!mounted) return;
       setState(() => _contacts = contacts);
     } catch (_) {
@@ -3756,7 +4371,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     final confirmed = await _confirmDelete(context, contact, inAppointments);
     if (!confirmed || !mounted) return;
     try {
-      await widget.database.deleteContact(widget.type, contact.id);
+      await widget.database.deleteContact(widget.type, contact);
       await _load();
     } catch (_) {
       if (!mounted) return;
@@ -4356,6 +4971,7 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
   late TimeOfDay _selectedTime;
   int _reminderMinutes = 30;
   int? _appointmentId;
+  String _externalId = '';
   List<Service> _services = [];
   Service? _selectedService;
   bool _loadingServices = true;
@@ -4373,6 +4989,7 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
     super.initState();
     final a = widget.appointment;
     _appointmentId = a?.id;
+    _externalId = a?.externalId ?? '';
     _selectedDate = a?.dateTime ?? widget.initialDate;
     _selectedTime = a != null
         ? TimeOfDay(hour: a.dateTime.hour, minute: a.dateTime.minute)
@@ -4614,6 +5231,8 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
         durationMinutes: duration,
         reminderMinutes: _reminderMinutes,
         notes: _notesController.text.trim(),
+        externalId: _externalId,
+        cloudUpdatedAt: DateTime.now().toIso8601String(),
       ),
     );
   }

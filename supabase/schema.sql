@@ -73,7 +73,18 @@ create table if not exists public.services (
   price numeric not null default 0,
   duration_minutes int not null default 60,
   published boolean not null default true,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ========== КЛИЕНТЫ МАСТЕРА (облако) ==========
+create table if not exists public.master_clients (
+  id bigint generated always as identity primary key,
+  master_id uuid not null references public.profiles(id) on delete cascade,
+  name text not null,
+  phone text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 -- ========== ЗАПИСИ (бронирования) ==========
@@ -89,6 +100,21 @@ create table if not exists public.appointments (
     check (status in ('pending', 'confirmed', 'cancelled', 'completed')),
   notes text not null default '',
   created_at timestamptz not null default now()
+);
+
+-- ========== ЗАПИСИ, СОЗДАННЫЕ МАСТЕРОМ ==========
+create table if not exists public.master_appointments (
+  id bigint generated always as identity primary key,
+  master_id uuid not null references public.profiles(id) on delete cascade,
+  client_name text not null default '',
+  client_phone text not null default '',
+  service_name text not null default '',
+  master_name text not null default '',
+  starts_at timestamptz not null,
+  duration_minutes int not null default 60,
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 -- ========== РЕЙТИНГИ ==========
@@ -150,6 +176,8 @@ create policy "profiles_select_master" on public.profiles
 create policy "profiles_update_own"    on public.profiles
   for update using (auth.uid() = id) with check (auth.uid() = id);
 
+alter table public.master_clients enable row level security;
+
 -- categories: читают все авторизованные.
 drop policy if exists "categories_select" on public.categories;
 create policy "categories_select" on public.categories
@@ -174,6 +202,14 @@ create policy "services_select" on public.services
 create policy "services_write" on public.services
   for all using (auth.uid() = master_id) with check (auth.uid() = master_id);
 
+-- master_clients: читает и пишет только мастер-владелец.
+drop policy if exists "master_clients_select" on public.master_clients;
+drop policy if exists "master_clients_write"  on public.master_clients;
+create policy "master_clients_select" on public.master_clients
+  for select using (auth.uid() = master_id);
+create policy "master_clients_write" on public.master_clients
+  for all using (auth.uid() = master_id) with check (auth.uid() = master_id);
+
 -- appointments: свои записи видят и клиент, и мастер.
 drop policy if exists "appt_select" on public.appointments;
 drop policy if exists "appt_insert" on public.appointments;
@@ -187,6 +223,16 @@ create policy "appt_update" on public.appointments
   for update using (auth.uid() = client_id or auth.uid() = master_id);
 create policy "appt_delete" on public.appointments
   for delete using (auth.uid() = client_id);
+
+alter table public.master_appointments enable row level security;
+
+-- master_appointments: видит и пишет только мастер-владелец.
+drop policy if exists "master_appt_select" on public.master_appointments;
+drop policy if exists "master_appt_write"  on public.master_appointments;
+create policy "master_appt_select" on public.master_appointments
+  for select using (auth.uid() = master_id);
+create policy "master_appt_write" on public.master_appointments
+  for all using (auth.uid() = master_id) with check (auth.uid() = master_id);
 
 -- ratings: читают все, пишет клиент только по своей записи.
 drop policy if exists "ratings_select" on public.ratings;

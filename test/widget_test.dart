@@ -103,8 +103,8 @@ class MemoryDatabase extends AppointmentsDatabase {
   }
 
   @override
-  Future<int> deleteContact(ContactType type, int id) async {
-    contacts[_table(type)]!.removeWhere((c) => c.id == id);
+  Future<int> deleteContact(ContactType type, Contact contact) async {
+    contacts[_table(type)]!.removeWhere((c) => c.id == contact.id);
     return 1;
   }
 
@@ -122,6 +122,9 @@ class MemoryDatabase extends AppointmentsDatabase {
       price: service.price,
       durationMinutes: service.durationMinutes,
       notes: service.notes.trim(),
+      published: service.published,
+      externalId: service.externalId,
+      cloudUpdatedAt: service.cloudUpdatedAt,
     );
     services.add(saved);
     return saved;
@@ -154,6 +157,8 @@ class MemoryDatabase extends AppointmentsDatabase {
       durationMinutes: appointment.durationMinutes,
       reminderMinutes: appointment.reminderMinutes,
       notes: appointment.notes,
+      externalId: appointment.externalId,
+      cloudUpdatedAt: appointment.cloudUpdatedAt,
     );
     appointments.add(saved);
     return saved.id!;

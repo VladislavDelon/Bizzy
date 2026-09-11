@@ -86,6 +86,7 @@ class CloudServiceItem {
     required this.price,
     required this.durationMinutes,
     this.published = true,
+    this.updatedAt,
   });
 
   final int id;
@@ -94,6 +95,7 @@ class CloudServiceItem {
   final double price;
   final int durationMinutes;
   final bool published;
+  final DateTime? updatedAt;
 
   factory CloudServiceItem.fromMap(Map<String, dynamic> map) =>
       CloudServiceItem(
@@ -103,6 +105,9 @@ class CloudServiceItem {
         price: (map['price'] as num?)?.toDouble() ?? 0,
         durationMinutes: (map['duration_minutes'] as num?)?.toInt() ?? 60,
         published: (map['published'] as bool?) ?? true,
+        updatedAt: map['updated_at'] == null
+            ? null
+            : DateTime.parse(map['updated_at'] as String).toLocal(),
       );
 
   CloudServiceItem copyWith({bool? published}) => CloudServiceItem(
@@ -367,13 +372,21 @@ class CloudService {
     return CloudServiceItem.fromMap(row);
   }
 
-  Future<void> updateService(CloudServiceItem s) =>
-      supabase.from('services').update({
-        'name': s.name,
-        'price': s.price,
-        'duration_minutes': s.durationMinutes,
-        'published': s.published,
-      }).eq('id', s.id);
+  Future<CloudServiceItem> updateService(CloudServiceItem s) async {
+    final row = await supabase
+        .from('services')
+        .update({
+          'name': s.name,
+          'price': s.price,
+          'duration_minutes': s.durationMinutes,
+          'published': s.published,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', s.id)
+        .select()
+        .single();
+    return CloudServiceItem.fromMap(row);
+  }
 
   Future<void> deleteService(int id) =>
       supabase.from('services').delete().eq('id', id);
@@ -490,4 +503,177 @@ class CloudService {
         .maybeSingle();
     return (row?['rating'] as num?)?.toInt();
   }
+
+  // ---------- Master clients ----------
+  Future<List<CloudClient>> myClients() async {
+    final rows = await supabase
+        .from('master_clients')
+        .select()
+        .eq('master_id', uid!)
+        .order('name');
+    return [for (final r in rows) CloudClient.fromMap(r)];
+  }
+
+  Future<CloudClient> addClient({
+    required String name,
+    required String phone,
+  }) async {
+    final row = await supabase
+        .from('master_clients')
+        .insert({
+          'master_id': uid,
+          'name': name,
+          'phone': phone,
+        })
+        .select()
+        .single();
+    return CloudClient.fromMap(row);
+  }
+
+  Future<CloudClient> updateClient(CloudClient c) async {
+    final row = await supabase
+        .from('master_clients')
+        .update({
+          'name': c.name,
+          'phone': c.phone,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', c.id)
+        .select()
+        .single();
+    return CloudClient.fromMap(row);
+  }
+
+  Future<void> deleteClient(int id) =>
+      supabase.from('master_clients').delete().eq('id', id);
+
+  // ---------- Master appointments ----------
+  Future<List<CloudMasterAppointment>> myMasterAppointments() async {
+    final rows = await supabase
+        .from('master_appointments')
+        .select()
+        .eq('master_id', uid!)
+        .order('starts_at');
+    return [for (final r in rows) CloudMasterAppointment.fromMap(r)];
+  }
+
+  Future<CloudMasterAppointment> addMasterAppointment({
+    required String clientName,
+    required String clientPhone,
+    required String serviceName,
+    required String masterName,
+    required DateTime startsAt,
+    required int durationMinutes,
+    String notes = '',
+  }) async {
+    final row = await supabase
+        .from('master_appointments')
+        .insert({
+          'master_id': uid,
+          'client_name': clientName,
+          'client_phone': clientPhone,
+          'service_name': serviceName,
+          'master_name': masterName,
+          'starts_at': startsAt.toUtc().toIso8601String(),
+          'duration_minutes': durationMinutes,
+          'notes': notes,
+        })
+        .select()
+        .single();
+    return CloudMasterAppointment.fromMap(row);
+  }
+
+  Future<CloudMasterAppointment> updateMasterAppointment(
+    CloudMasterAppointment a,
+  ) async {
+    final row = await supabase
+        .from('master_appointments')
+        .update({
+          'client_name': a.clientName,
+          'client_phone': a.clientPhone,
+          'service_name': a.serviceName,
+          'master_name': a.masterName,
+          'starts_at': a.startsAt.toUtc().toIso8601String(),
+          'duration_minutes': a.durationMinutes,
+          'notes': a.notes,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', a.id)
+        .select()
+        .single();
+    return CloudMasterAppointment.fromMap(row);
+  }
+
+  Future<void> deleteMasterAppointment(int id) =>
+      supabase.from('master_appointments').delete().eq('id', id);
+}
+
+/// Клиент мастера в облаке.
+class CloudClient {
+  const CloudClient({
+    required this.id,
+    required this.masterId,
+    required this.name,
+    required this.phone,
+    this.updatedAt,
+  });
+
+  final int id;
+  final String masterId;
+  final String name;
+  final String phone;
+  final DateTime? updatedAt;
+
+  factory CloudClient.fromMap(Map<String, dynamic> map) => CloudClient(
+        id: (map['id'] as num).toInt(),
+        masterId: map['master_id'] as String,
+        name: map['name'] as String? ?? '',
+        phone: map['phone'] as String? ?? '',
+        updatedAt: map['updated_at'] == null
+            ? null
+            : DateTime.parse(map['updated_at'] as String).toLocal(),
+      );
+}
+
+/// Запись, созданная мастером самостоятельно (не клиентская заявка).
+class CloudMasterAppointment {
+  const CloudMasterAppointment({
+    required this.id,
+    required this.masterId,
+    required this.clientName,
+    required this.clientPhone,
+    required this.serviceName,
+    required this.masterName,
+    required this.startsAt,
+    required this.durationMinutes,
+    this.notes = '',
+    this.updatedAt,
+  });
+
+  final int id;
+  final String masterId;
+  final String clientName;
+  final String clientPhone;
+  final String serviceName;
+  final String masterName;
+  final DateTime startsAt;
+  final int durationMinutes;
+  final String notes;
+  final DateTime? updatedAt;
+
+  factory CloudMasterAppointment.fromMap(Map<String, dynamic> map) =>
+      CloudMasterAppointment(
+        id: (map['id'] as num).toInt(),
+        masterId: map['master_id'] as String,
+        clientName: map['client_name'] as String? ?? '',
+        clientPhone: map['client_phone'] as String? ?? '',
+        serviceName: map['service_name'] as String? ?? '',
+        masterName: map['master_name'] as String? ?? '',
+        startsAt: DateTime.parse(map['starts_at'] as String).toLocal(),
+        durationMinutes: (map['duration_minutes'] as num?)?.toInt() ?? 60,
+        notes: map['notes'] as String? ?? '',
+        updatedAt: map['updated_at'] == null
+            ? null
+            : DateTime.parse(map['updated_at'] as String).toLocal(),
+      );
 }

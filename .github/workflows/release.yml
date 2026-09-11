@@ -41,7 +41,9 @@ jobs:
         run: flutter test
 
       - name: Build release APK
-        run: flutter build apk --release 2>&1 | tee build/build-apk.log
+        run: |
+          set -o pipefail
+          flutter build apk --release 2>&1 | tee build/build-apk.log
 
       - name: Upload build log
         if: always()
@@ -56,15 +58,18 @@ jobs:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Prepare release APK
+      - name: Prepare release files
+        if: always()
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk ./app-release.apk
-          ls -lh ./app-release.apk
+          mkdir -p release-files
+          [ -f build/app/outputs/flutter-apk/app-release.apk ] && cp build/app/outputs/flutter-apk/app-release.apk release-files/app-release.apk
+          [ -f build/build-apk.log ] && cp build/build-apk.log release-files/build-apk.log
+          ls -lh release-files/
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: Bizzy ${{ github.ref_name }}
-          files: ./app-release.apk
+          files: release-files/*
           generate_release_notes: true

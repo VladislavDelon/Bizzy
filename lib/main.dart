@@ -207,6 +207,44 @@ class AppUpdate {
   final Uri releaseUrl;
 }
 
+class UpdateLog {
+  static const _fileName = 'bizzy_update.log';
+
+  static Future<String> _path() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return '${dir.path}/$_fileName';
+  }
+
+  static Future<void> clear() async {
+    try {
+      final file = File(await _path());
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+
+  static Future<String> read() async {
+    try {
+      final file = File(await _path());
+      if (!await file.exists()) return '';
+      return await file.readAsString();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  static Future<void> write(String message) async {
+    try {
+      final file = File(await _path());
+      final now = DateTime.now().toLocal();
+      final line =
+          '[${now.toIso8601String()}] $message\n';
+      await file.writeAsString(line, mode: FileMode.append, flush: true);
+    } catch (_) {
+      // Не блокируем обновление из-за ошибки лога.
+    }
+  }
+}
+
 class UpdateService {
   const UpdateService({this.owner = 'VladislavDelon', this.repo = 'Bizzy'});
 
@@ -214,23 +252,31 @@ class UpdateService {
   final String repo;
 
   Future<AppUpdate?> check() async {
+    await UpdateLog.write('Проверка обновлений...');
     final info = await PackageInfo.fromPlatform();
+    final current = '${info.version}+${info.buildNumber}';
+    await UpdateLog.write('Текущая версия: $current');
     final uri = Uri.parse(
       'https://api.github.com/repos/$owner/$repo/releases/latest',
     );
+    await UpdateLog.write('Запрос к GitHub API: $uri');
     final response = await http
         .get(uri, headers: {'Accept': 'application/vnd.github+json'})
         .timeout(const Duration(seconds: 10));
     if (response.statusCode != 200) {
-      throw Exception(
-        'GitHub API вернул ${response.statusCode}: ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}',
-      );
+      final message =
+          'GitHub API вернул ${response.statusCode}: ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}';
+      await UpdateLog.write('Ошибка проверки: $message');
+      throw Exception(message);
     }
 
     final data = jsonDecode(response.body) as Map<String, Object?>;
     final tag = (data['tag_name'] as String? ?? '').replaceFirst('v', '');
-    final current = '${info.version}+${info.buildNumber}';
-    if (tag.isEmpty || !_isNewer(tag, current)) return null;
+    await UpdateLog.write('Удалённая версия: $tag');
+    if (tag.isEmpty || !_isNewer(tag, current)) {
+      await UpdateLog.write('Обновление не требуется (текущая актуальна)');
+      return null;
+    }
 
     final releaseUrl = Uri.parse(data['html_url'] as String? ?? '');
     Uri downloadUrl = releaseUrl;
@@ -255,12 +301,14 @@ class UpdateService {
     if (!Platform.isAndroid) {
       throw UnsupportedError('Обновления APK доступны только на Android');
     }
+    await UpdateLog.write('Начало загрузки APK: $url');
     final dir = await getApplicationDocumentsDirectory();
     final path = '${dir.path}/bizzy_update.apk';
     try {
       DioException? lastError;
       Response? response;
       for (var attempt = 1; attempt <= 3; attempt++) {
+        await UpdateLog.write('Попытка загрузки $attempt/3');
         try {
           response = await Dio(
             BaseOptions(
@@ -280,7 +328,10 @@ class UpdateService {
               validateStatus: (s) => s != null && s >= 200 && s < 300,
             ),
           );
-          if (response.statusCode == 200) break;
+          if (response.statusCode == 200) {
+            await UpdateLog.write('Загрузка успешна (200)');
+            break;
+          }
           lastError = DioException(
             requestOptions: response.requestOptions,
             response: response,
@@ -289,6 +340,7 @@ class UpdateService {
           );
         } on DioException catch (e) {
           lastError = e;
+          await UpdateLog.write('Ошибка Dio на попытке $attempt: $e');
           if (attempt < 3) {
             await Future<void>.delayed(Duration(seconds: attempt * 2));
           }
@@ -303,21 +355,34 @@ class UpdateService {
         throw Exception('APK не загрузился');
       }
       final length = await file.length();
+      await UpdateLog.write('APK загружен, размер: $length байт');
       if (length < 1024) {
         throw Exception('APK загружен, но файл слишком мал — возможно, ссылка ведёт не на APK');
       }
       final header = await file.openRead(0, 4).first;
-      if (header.isEmpty || String.fromCharCodes(header).startsWith('PK') == false) {
+      final isApk =
+          header.isNotEmpty && String.fromCharCodes(header).startsWith('PK');
+      await UpdateLog.write('Заголовок APK: ${header.isEmpty ? 'пусто' : String.fromCharCodes(header)}');
+      if (!isApk) {
         throw Exception('Загруженный файл не похож на APK (плохая ссылка или redirect)');
       }
+      await UpdateLog.write('Запуск установки APK...');
       final res = await InstallPlugin.installApk(path);
+      await UpdateLog.write('Результат установки: $res');
       if (res is! Map || res['isSuccess'] != true) {
         final message = res is Map ? res['errorMessage'] : res?.toString();
         if (message?.toLowerCase().contains('cancel') ?? false) {
+          await UpdateLog.write('Установка отменена пользователем');
           throw const UpdateCancelledException();
         }
         throw Exception(message ?? 'Не удалось начать установку');
       }
+      await UpdateLog.write('Установка успешно начата');
+    } on UpdateCancelledException {
+      rethrow;
+    } catch (e, s) {
+      await UpdateLog.write('Ошибка загрузки/установки: $e\n$s');
+      rethrow;
     } finally {
       try {
         final file = File(path);
@@ -413,6 +478,7 @@ Future<void> _showUpdateFlow(
   if (!Platform.isAndroid) return;
   final hasPermission = await _ensureInstallPermission(context);
   if (!hasPermission) {
+    await UpdateLog.write('Нет разрешения на установку APK');
     if (context.mounted) {
       await showDialog<void>(
         context: context,
@@ -468,6 +534,8 @@ Future<void> _showUpdateFlow(
   }
 
   if (result.success && result.needsRestart) {
+    await UpdateLog.write('APK установлен, требуется перезапуск');
+    if (!context.mounted) return;
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -496,6 +564,8 @@ Future<void> _showUpdateFlow(
 
   if (result.success) return;
 
+  await UpdateLog.write('Ошибка установки: ${result.error}');
+  if (!context.mounted) return;
   final error = result.error?.toLowerCase() ?? '';
   final isPermissionError = error.contains('permission') ||
       error.contains('разрешение') ||
@@ -2693,11 +2763,33 @@ class _MainShellState extends State<MainShell> {
     try {
       final update = await service.check();
       if (!mounted || update == null) return;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Доступна версия ${update.version}. Начинаю загрузку...'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      await UpdateLog.write('Найдено обновление ${update.version}, начинаем загрузку');
+      if (!mounted) return;
       // Автоматическое обновление: сразу начинаем загрузку и установку.
       // Пользователь увидит только диалог прогресса и системный диалог установщика.
       await _showUpdateFlow(context, service, update);
-    } catch (_) {
-      // Нет сети или релиз ещё не опубликован — приложение работает офлайн.
+    } on UpdateCancelledException {
+      await UpdateLog.write('Обновление отменено');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Установка обновления отменена')),
+        );
+      }
+    } catch (e, s) {
+      await UpdateLog.write('Ошибка автообновления: $e\n$s');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось обновить Bizzy. Лог сохранён.')),
+        );
+      }
     }
   }
 
@@ -4168,6 +4260,36 @@ class _MoreTabState extends State<MoreTab> {
     }
   }
 
+  Future<void> _showUpdateLog() async {
+    final log = await UpdateLog.read();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Лог обновлений'),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            log.isEmpty ? 'Лог пуст' : log,
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Закрыть'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: log));
+              if (context.mounted) Navigator.of(context).pop();
+            },
+            child: const Text('Копировать'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final version = '${_info.version}${_info.buildNumber.isNotEmpty ? '+${_info.buildNumber}' : ''}';
@@ -4249,6 +4371,12 @@ class _MoreTabState extends State<MoreTab> {
             leading: const Icon(Icons.system_update),
             title: const Text('Проверить обновления'),
             onTap: _checkUpdates,
+          ),
+        if (Platform.isAndroid)
+          ListTile(
+            leading: const Icon(Icons.article_outlined),
+            title: const Text('Лог обновлений'),
+            onTap: _showUpdateLog,
           ),
         const Divider(),
         ListTile(

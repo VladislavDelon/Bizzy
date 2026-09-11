@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../notifications/push_service.dart';
 import 'cloud_service.dart';
 
 /// Экран профиля мастера: категория, описание, рейтинг.
@@ -401,6 +402,31 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
       await _cloud.setBookingStatus(b.id, status);
       final updated = b.copyWith(status: status);
       await widget.onBookingChanged?.call(updated);
+      if (b.clientId.isNotEmpty) {
+        final (title, body) = switch (status) {
+          'confirmed' => (
+              'Запись подтверждена',
+              'Мастер принял заявку на ${b.serviceName}'
+            ),
+          'cancelled' => (
+              'Запись отменена',
+              'Мастер отменил заявку на ${b.serviceName}'
+            ),
+          'completed' => (
+              'Запись завершена',
+              'Мастер завершил приём на ${b.serviceName}'
+            ),
+          _ => (null, null),
+        };
+        if (title != null && body != null) {
+          await PushNotificationService.sendPush(
+            toUserId: b.clientId,
+            title: title,
+            body: body,
+            data: {'appointment_id': b.id, 'status': status},
+          );
+        }
+      }
       await _load();
     } catch (_) {
       if (!mounted) return;

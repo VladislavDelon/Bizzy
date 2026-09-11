@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../notifications/push_service.dart';
 import 'cloud_service.dart';
 
 /// Главный экран клиента: каталог мастеров, мои записи, профиль.
@@ -487,13 +488,20 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
       _time.minute,
     );
     try {
-      await _cloud.bookAppointment(
+      final booking = await _cloud.bookAppointment(
         masterId: widget.master.userId,
         serviceId: _service?.id,
         serviceName: _service?.name ?? custom,
         startsAt: startsAt,
         durationMinutes: _service?.durationMinutes ?? 60,
         notes: _notes.text.trim(),
+      );
+      await PushNotificationService.sendPush(
+        toUserId: booking.masterId,
+        title: 'Новая заявка',
+        body:
+            '${booking.clientName.isEmpty ? 'Клиент' : booking.clientName} записался на ${booking.serviceName}',
+        data: {'appointment_id': booking.id, 'status': 'pending'},
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);

@@ -36,3 +36,14 @@ Flutter-приложение: календарь записей (sqflite) + сп
 - Приложение при запуске проверяет /releases/latest через UpdateService в main.dart
   и предлагает скачать и установить APK поверх через `install_plugin_v3` и `dio`
   (прогресс-бар, без открытия браузера).
+
+## Push-уведомления (с v1.8.0)
+- Используются `firebase_core` + `firebase_messaging`.
+- FCM-токены хранятся в таблице `fcm_tokens` Supabase.
+- Для отправки push используется Edge Function `send-push`.
+  Ей нужна переменная окружения `FCM_SERVER_KEY` из Firebase Console
+  (Cloud Messaging → Server key).
+- Для Android: заменить заглушку `android/app/google-services.json` на настоящий
+  файл из Firebase проекта.
+- Локальные напоминания о записях работают через `flutter_local_notifications`
+  и не требуют Firebase.

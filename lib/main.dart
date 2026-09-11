@@ -7,6 +7,7 @@ import 'package:bizzy_app/cloud/auth_screens.dart';
 import 'package:bizzy_app/cloud/client_app.dart';
 import 'package:bizzy_app/cloud/cloud_service.dart';
 import 'package:bizzy_app/cloud/master_screens.dart';
+import 'package:bizzy_app/notifications/push_service.dart';
 import 'package:bizzy_app/tasks/notification_service.dart';
 import 'package:bizzy_app/tasks/task_model.dart';
 import 'package:bizzy_app/tasks/tasks_screen.dart';
@@ -93,6 +94,7 @@ Future<void> main() async {
   await initializeDateFormatting('ru_RU', null);
   await _loadTheme();
   await _loadCurrency();
+  await PushNotificationService.init();
   runApp(const BizzyApp());
 }
 
@@ -852,6 +854,35 @@ class Appointment {
       'cloudUpdatedAt': cloudUpdatedAt,
     };
   }
+
+  Appointment copyWith({
+    int? id,
+    int? companyId,
+    String? clientName,
+    String? phone,
+    String? service,
+    String? master,
+    DateTime? dateTime,
+    int? durationMinutes,
+    int? reminderMinutes,
+    String? notes,
+    String? externalId,
+    String? cloudUpdatedAt,
+  }) =>
+      Appointment(
+        id: id ?? this.id,
+        companyId: companyId ?? this.companyId,
+        clientName: clientName ?? this.clientName,
+        phone: phone ?? this.phone,
+        service: service ?? this.service,
+        master: master ?? this.master,
+        dateTime: dateTime ?? this.dateTime,
+        durationMinutes: durationMinutes ?? this.durationMinutes,
+        reminderMinutes: reminderMinutes ?? this.reminderMinutes,
+        notes: notes ?? this.notes,
+        externalId: externalId ?? this.externalId,
+        cloudUpdatedAt: cloudUpdatedAt ?? this.cloudUpdatedAt,
+      );
 
   factory Appointment.fromMap(Map<String, Object?> map) {
     return Appointment(
@@ -2822,6 +2853,7 @@ class _MainShellState extends State<MainShell> {
   }
 
   Future<void> _deleteAppointment(int id) async {
+    await PushNotificationService.cancelAppointmentReminder(id);
     await _db.delete(id);
     await _loadAppointments();
   }
@@ -2876,12 +2908,22 @@ class _MainShellState extends State<MainShell> {
       if (confirmed != true) return;
     }
 
-    if (appointment.id == null) {
-      await _db.insert(appointment);
-    } else {
+    final id = appointment.id ?? await _db.insert(appointment);
+    if (appointment.id != null) {
       await _db.update(appointment);
     }
     await _loadAppointments();
+    final saved = appointment.id != null
+        ? appointment
+        : appointment.copyWith(id: id);
+    await PushNotificationService.cancelAppointmentReminder(saved.id);
+    await PushNotificationService.scheduleAppointmentReminder(
+      id: saved.id,
+      dateTime: saved.dateTime,
+      reminderMinutes: saved.reminderMinutes,
+      clientName: saved.clientName,
+      service: saved.service,
+    );
   }
 
   Future<void> _showAppointmentDialog({

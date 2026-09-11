@@ -12,21 +12,20 @@ val newBuildDir: Directory =
 rootProject.layout.buildDirectory.value(newBuildDir)
 
 subprojects {
+    afterEvaluate {
+        val ext = extensions.findByName("android") ?: return@afterEvaluate
+        (ext as? com.android.build.gradle.BaseExtension)?.apply {
+            setCompileSdkVersion(34)
+            compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+        }
+    }
+
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
-}
-subprojects {
     project.evaluationDependsOn(":app")
-}
-
-// Все Android-модули (включая плагины) используют compileSdk 34.
-subprojects {
-    plugins.withType<com.android.build.gradle.AppPlugin> {
-        (extensions["android"] as com.android.build.gradle.BaseExtension).compileSdkVersion(34)
-    }
-    plugins.withType<com.android.build.gradle.LibraryPlugin> {
-        (extensions["android"] as com.android.build.gradle.BaseExtension).compileSdkVersion(34)
-    }
 }
 
 tasks.register<Delete>("clean") {

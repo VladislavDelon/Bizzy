@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Точка доступа к Supabase-клиенту.
@@ -10,6 +11,88 @@ SupabaseClient get supabase => Supabase.instance.client;
 bool get cloudSignedIn =>
     Supabase.instance.isInitialized &&
     Supabase.instance.client.auth.currentUser != null;
+
+// ---------- Безопасный парсинг ответов Supabase ----------
+String _parseString(dynamic value, {String fallback = ''}) {
+  if (value == null) return fallback;
+  if (value is String) return value;
+  return value.toString();
+}
+
+int _parseInt(dynamic value, {int fallback = 0}) {
+  if (value == null) return fallback;
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? fallback;
+  return fallback;
+}
+
+double _parseDouble(dynamic value, {double fallback = 0}) {
+  if (value == null) return fallback;
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value) ?? fallback;
+  return fallback;
+}
+
+bool _parseBool(dynamic value, {bool fallback = false}) {
+  if (value == null) return fallback;
+  if (value is bool) return value;
+  if (value is num) return value.toInt() == 1;
+  if (value is String) {
+    final s = value.trim().toLowerCase();
+    return s == 'true' || s == '1' || s == 'yes' || s == 't';
+  }
+  return fallback;
+}
+
+DateTime? _parseDateTime(dynamic value) {
+  if (value == null) return null;
+  if (value is DateTime) return value.toLocal();
+  if (value is String) {
+    final dt = DateTime.tryParse(value);
+    return dt?.toLocal();
+  }
+  return null;
+}
+
+/// Файловый лог для диагностики облачной синхронизации.
+class SyncLog {
+  static const _fileName = 'bizzy_sync.log';
+
+  static Future<String> _path() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return '${dir.path}/$_fileName';
+  }
+
+  static Future<String> read() async {
+    try {
+      final file = File(await _path());
+      if (!await file.exists()) return '';
+      return await file.readAsString();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  static Future<void> clear() async {
+    try {
+      final file = File(await _path());
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+
+  static Future<void> write(String tag, String message) async {
+    try {
+      final file = File(await _path());
+      final now = DateTime.now().toLocal().toIso8601String();
+      final line = '[$now] [$tag] $message\n';
+      await file.writeAsString(line, mode: FileMode.append, flush: true);
+    } catch (_) {
+      // Не блокируем работу при ошибке записи лога.
+    }
+  }
+}
 
 /// Профиль пользователя из облачной таблицы `profiles`.
 class CloudProfile {
@@ -29,10 +112,10 @@ class CloudProfile {
   bool get isClient => role == 'client';
 
   factory CloudProfile.fromMap(Map<String, dynamic> map) => CloudProfile(
-        id: map['id'] as String,
-        role: map['role'] as String? ?? 'client',
-        name: map['name'] as String? ?? '',
-        phone: map['phone'] as String? ?? '',
+        id: _parseString(map['id']),
+        role: _parseString(map['role'], fallback: 'client'),
+        name: _parseString(map['name']),
+        phone: _parseString(map['phone']),
       );
 
   Map<String, dynamic> toMap() => {
@@ -66,13 +149,13 @@ class MasterCard {
   factory MasterCard.fromMap(Map<String, dynamic> map) {
     final profile = map['profiles'];
     return MasterCard(
-      userId: map['user_id'] as String,
-      name: profile is Map ? (profile['name'] as String? ?? '') : '',
-      category: map['category'] as String? ?? 'Другое',
-      description: map['description'] as String? ?? '',
-      avatarUrl: map['avatar_url'] as String? ?? '',
-      ratingAvg: (map['rating_avg'] as num?)?.toDouble() ?? 0,
-      ratingCount: (map['rating_count'] as num?)?.toInt() ?? 0,
+      userId: _parseString(map['user_id']),
+      name: profile is Map ? _parseString(profile['name']) : '',
+      category: _parseString(map['category'], fallback: 'Другое'),
+      description: _parseString(map['description']),
+      avatarUrl: _parseString(map['avatar_url']),
+      ratingAvg: _parseDouble(map['rating_avg']),
+      ratingCount: _parseInt(map['rating_count']),
     );
   }
 }
@@ -99,15 +182,13 @@ class CloudServiceItem {
 
   factory CloudServiceItem.fromMap(Map<String, dynamic> map) =>
       CloudServiceItem(
-        id: (map['id'] as num).toInt(),
-        masterId: map['master_id'] as String,
-        name: map['name'] as String? ?? '',
-        price: (map['price'] as num?)?.toDouble() ?? 0,
-        durationMinutes: (map['duration_minutes'] as num?)?.toInt() ?? 60,
-        published: (map['published'] as bool?) ?? true,
-        updatedAt: map['updated_at'] == null
-            ? null
-            : DateTime.parse(map['updated_at'] as String).toLocal(),
+        id: _parseInt(map['id']),
+        masterId: _parseString(map['master_id']),
+        name: _parseString(map['name']),
+        price: _parseDouble(map['price']),
+        durationMinutes: _parseInt(map['duration_minutes'], fallback: 60),
+        published: _parseBool(map['published'], fallback: true),
+        updatedAt: _parseDateTime(map['updated_at']),
       );
 
   CloudServiceItem copyWith({bool? published}) => CloudServiceItem(
@@ -185,21 +266,18 @@ class CloudBooking {
     final client = map['client'];
     final master = map['master'];
     return CloudBooking(
-      id: (map['id'] as num).toInt(),
-      clientId: map['client_id'] as String,
-      masterId: map['master_id'] as String,
-      serviceId: (map['service_id'] as num?)?.toInt(),
-      serviceName: map['service_name'] as String? ?? '',
-      startsAt: DateTime.parse(map['starts_at'] as String).toLocal(),
-      durationMinutes: (map['duration_minutes'] as num?)?.toInt() ?? 60,
-      status: map['status'] as String? ?? 'pending',
-      notes: map['notes'] as String? ?? '',
-      clientName:
-          client is Map ? (client['name'] as String? ?? '') : '',
-      clientPhone:
-          client is Map ? (client['phone'] as String? ?? '') : '',
-      masterName:
-          master is Map ? (master['name'] as String? ?? '') : '',
+      id: _parseInt(map['id']),
+      clientId: _parseString(map['client_id']),
+      masterId: _parseString(map['master_id']),
+      serviceId: map['service_id'] == null ? null : _parseInt(map['service_id']),
+      serviceName: _parseString(map['service_name']),
+      startsAt: _parseDateTime(map['starts_at']) ?? DateTime.now(),
+      durationMinutes: _parseInt(map['duration_minutes'], fallback: 60),
+      status: _parseString(map['status'], fallback: 'pending'),
+      notes: _parseString(map['notes']),
+      clientName: client is Map ? _parseString(client['name']) : '',
+      clientPhone: client is Map ? _parseString(client['phone']) : '',
+      masterName: master is Map ? _parseString(master['name']) : '',
     );
   }
 }
@@ -625,13 +703,11 @@ class CloudClient {
   final DateTime? updatedAt;
 
   factory CloudClient.fromMap(Map<String, dynamic> map) => CloudClient(
-        id: (map['id'] as num).toInt(),
-        masterId: map['master_id'] as String,
-        name: map['name'] as String? ?? '',
-        phone: map['phone'] as String? ?? '',
-        updatedAt: map['updated_at'] == null
-            ? null
-            : DateTime.parse(map['updated_at'] as String).toLocal(),
+        id: _parseInt(map['id']),
+        masterId: _parseString(map['master_id']),
+        name: _parseString(map['name']),
+        phone: _parseString(map['phone']),
+        updatedAt: _parseDateTime(map['updated_at']),
       );
 }
 
@@ -663,17 +739,15 @@ class CloudMasterAppointment {
 
   factory CloudMasterAppointment.fromMap(Map<String, dynamic> map) =>
       CloudMasterAppointment(
-        id: (map['id'] as num).toInt(),
-        masterId: map['master_id'] as String,
-        clientName: map['client_name'] as String? ?? '',
-        clientPhone: map['client_phone'] as String? ?? '',
-        serviceName: map['service_name'] as String? ?? '',
-        masterName: map['master_name'] as String? ?? '',
-        startsAt: DateTime.parse(map['starts_at'] as String).toLocal(),
-        durationMinutes: (map['duration_minutes'] as num?)?.toInt() ?? 60,
-        notes: map['notes'] as String? ?? '',
-        updatedAt: map['updated_at'] == null
-            ? null
-            : DateTime.parse(map['updated_at'] as String).toLocal(),
+        id: _parseInt(map['id']),
+        masterId: _parseString(map['master_id']),
+        clientName: _parseString(map['client_name']),
+        clientPhone: _parseString(map['client_phone']),
+        serviceName: _parseString(map['service_name']),
+        masterName: _parseString(map['master_name']),
+        startsAt: _parseDateTime(map['starts_at']) ?? DateTime.now(),
+        durationMinutes: _parseInt(map['duration_minutes'], fallback: 60),
+        notes: _parseString(map['notes']),
+        updatedAt: _parseDateTime(map['updated_at']),
       );
 }

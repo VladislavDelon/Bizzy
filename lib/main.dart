@@ -1628,8 +1628,9 @@ class AppointmentsDatabase {
           );
         }
       }
-    } catch (_) {
-      // Нет сети — работаем с локальными услугами.
+    } on Exception catch (e, st) {
+      await SyncLog.write('services', 'Ошибка синхронизации услуг: $e\n$st');
+      // Нет сети/ошибка Supabase — работаем с локальными услугами.
     }
     return getServices(companyId);
   }
@@ -1761,8 +1762,9 @@ class AppointmentsDatabase {
           );
         }
       }
-    } catch (_) {
-      // Нет сети — работаем локально.
+    } on Exception catch (e, st) {
+      await SyncLog.write('contacts', 'Ошибка синхронизации контактов: $e\n$st');
+      // Нет сети/ошибка Supabase — работаем локально.
     }
     return getContacts(type, companyId);
   }
@@ -1933,8 +1935,9 @@ class AppointmentsDatabase {
           );
         }
       }
-    } catch (_) {
-      // Нет сети — работаем локально.
+    } on Exception catch (e, st) {
+      await SyncLog.write('appointments', 'Ошибка синхронизации записей: $e\n$st');
+      // Нет сети/ошибка Supabase — работаем локально.
     }
     return getAll(companyId);
   }
@@ -5853,7 +5856,7 @@ class _MasterBridgeState extends State<_MasterBridge> {
       setState(() => _user = user);
 
       // Автоматически подтягиваем название компании из облачного профиля.
-      final companies = await widget.database.getCompanies(user.id);
+      var companies = await widget.database.getCompanies(user.id);
       if (companies.isNotEmpty) {
         await widget.database.updateCompanyName(
           companies.first.id,
@@ -5865,6 +5868,17 @@ class _MasterBridgeState extends State<_MasterBridge> {
           widget.profile.name,
           '',
         );
+        companies = await widget.database.getCompanies(user.id);
+      }
+
+      // Сразу подтягиваем облачные справочники, чтобы после
+      // переустановки услуги и клиенты были видны сразу.
+      if (!widget.offlineMode && companies.isNotEmpty) {
+        final companyId = companies.first.id;
+        await Future.wait([
+          widget.database.syncServices(companyId),
+          widget.database.syncContacts(ContactType.client, companyId),
+        ]);
       }
 
       // В офлайне не пытаемся синхронизировать облачный профиль.

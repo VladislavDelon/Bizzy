@@ -25,6 +25,19 @@ Flutter-приложение: календарь записей (sqflite) + сп
 - Если Gradle-задача падает с "PowerShell executable not found", перед сборкой добавить в PATH:
   `$env:PATH = "C:\Windows\System32\WindowsPowerShell\v1.0;$env:PATH"`.
 
+## Подпись релизных APK
+
+- GitHub Actions (`.github/workflows/release.yml`) ищет секреты `KEYSTORE_BASE64`,
+  `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
+- Если секреты не заданы, CI собирает APK с автоматическим debug-ключом раннера.
+  Debug-ключ разный на каждом раннере, поэтому **обновление поверх старого APK
+  будет невозможно** — Android ругается на разную подпись.
+- Для стабильных обновлений нужен один и тот же release-keystore, загруженный
+  в GitHub Secrets. Файл с секретами и сам `.jks` не должны попадать в репозиторий.
+- Сгенерированный keystore и инструкции: `C:\Users\ASRock\Desktop\Bizzy\bizzy-release-secrets.txt`.
+- После смены ключа пользователь должен один раз удалить приложение и поставить
+  новый APK вручную; дальнейшие обновления поверх уже будут работать.
+
 ## Git / релизы
 - Репозиторий: https://github.com/VladislavDelon/Bizzy (public, ветка main).
 - На этой машине есть только mingit из SDK — для push/pull использовать полный Git:

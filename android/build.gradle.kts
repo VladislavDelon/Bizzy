@@ -1,3 +1,6 @@
+import com.android.build.api.dsl.CommonExtension
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 allprojects {
     repositories {
         google()
@@ -13,12 +16,16 @@ rootProject.layout.buildDirectory.value(newBuildDir)
 
 subprojects {
     afterEvaluate {
-        val ext = extensions.findByName("android") ?: return@afterEvaluate
-        (ext as? com.android.build.gradle.BaseExtension)?.apply {
-            setCompileSdkVersion(34)
-            compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_17
-                targetCompatibility = JavaVersion.VERSION_17
+        val ext = extensions.findByName("android") as? CommonExtension
+        ext?.apply {
+            compileSdk = 35
+            compileOptions.sourceCompatibility = JavaVersion.VERSION_17
+            compileOptions.targetCompatibility = JavaVersion.VERSION_17
+        }
+
+        tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+            compilerOptions {
+                jvmTarget.set(JvmTarget.JVM_17)
             }
         }
     }

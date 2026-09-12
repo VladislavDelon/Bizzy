@@ -373,23 +373,14 @@ class UpdateService {
       await UpdateLog.write('Результат установки: $res');
       if (res is! Map || res['isSuccess'] != true) {
         final message = res is Map ? res['errorMessage'] : res?.toString();
-        if (message?.toLowerCase().contains('cancel') ?? false) {
-          await UpdateLog.write('Установка отменена пользователем');
-          throw const UpdateCancelledException();
-        }
-        throw Exception(message ?? 'Не удалось начать установку');
+        final error = message ?? 'Не удалось начать установку';
+        await UpdateLog.write('Ошибка установщика: $error');
+        throw Exception(error);
       }
       await UpdateLog.write('Установка успешно начата');
-    } on UpdateCancelledException {
-      rethrow;
     } catch (e, s) {
       await UpdateLog.write('Ошибка загрузки/установки: $e\n$s');
       rethrow;
-    } finally {
-      try {
-        final file = File(path);
-        if (await file.exists()) await file.delete();
-      } catch (_) {}
     }
   }
 
@@ -472,6 +463,36 @@ class UpdateResult {
   final String? error;
 }
 
+Future<void> _showUpdateLogDialog(BuildContext context) async {
+  final log = await UpdateLog.read();
+  if (!context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Лог обновлений'),
+      content: SingleChildScrollView(
+        child: SelectableText(
+          log.isEmpty ? 'Лог пуст' : log,
+          style: const TextStyle(fontSize: 12),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Закрыть'),
+        ),
+        FilledButton(
+          onPressed: () async {
+            await Clipboard.setData(ClipboardData(text: log));
+            if (context.mounted) Navigator.of(context).pop();
+          },
+          child: const Text('Копировать'),
+        ),
+      ],
+    ),
+  );
+}
+
 Future<void> _showUpdateFlow(
   BuildContext context,
   UpdateService service,
@@ -508,32 +529,6 @@ Future<void> _showUpdateFlow(
   );
 
   if (!context.mounted || result == null) return;
-
-  if (result.cancelled) {
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Установка отменена'),
-        content: const Text(
-          'Вы отменили установку. Попробуете снова?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Позже'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _showUpdateFlow(context, service, update);
-            },
-            child: const Text('Повторить'),
-          ),
-        ],
-      ),
-    );
-    return;
-  }
 
   if (result.success && result.needsRestart) {
     await UpdateLog.write('APK установлен, требуется перезапуск');
@@ -573,19 +568,18 @@ Future<void> _showUpdateFlow(
       error.contains('разрешение') ||
       error.contains('unknown source') ||
       error.contains('неизвестных');
-  final isCancel = error.contains('cancel') || error.contains('отмена');
   final isSignature = error.contains('install failed') ||
       error.contains('not installed') ||
       error.contains('не установлено') ||
-      error.contains('install error');
+      error.contains('install error') ||
+      error.contains('blocked') ||
+      error.contains('заблокирован');
 
-  final content = isCancel
-      ? 'Установка была отменена.'
-      : isPermissionError
-          ? 'Не удалось получить разрешение на установку. Включите «Установка из неизвестных источников» для Bizzy.'
-          : isSignature
-              ? 'Установщик Android отказал. Вероятно, APK подписан другим ключом, чем установленная версия, или установщик не смог обновить приложение. Скачайте APK вручную и установите поверх.'
-              : (result.error ?? 'Не удалось обновить. Проверьте подключение к интернету, свободное место и разрешения.');
+  final content = isPermissionError
+      ? 'Не удалось получить разрешение на установку. Включите «Установка из неизвестных источников» для Bizzy.'
+      : isSignature
+          ? 'Установщик Android отказал. Вероятно, APK подписан другим ключом, чем установленная версия, или установщик не смог обновить приложение. Скачайте APK вручную и установите поверх.'
+          : (result.error ?? 'Не удалось обновить. Проверьте подключение к интернету, свободное место и разрешения.');
 
   await showDialog<void>(
     context: context,
@@ -597,6 +591,13 @@ Future<void> _showUpdateFlow(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Закрыть'),
         ),
+        TextButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+            _showUpdateLogDialog(context);
+          },
+          child: const Text('Лог'),
+        ),
         FilledButton(
           onPressed: () {
             Navigator.of(context).pop();
@@ -604,17 +605,16 @@ Future<void> _showUpdateFlow(
           },
           child: const Text('Повторить'),
         ),
-        if (isSignature || (!isPermissionError && !isCancel))
-          FilledButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              launchUrl(
-                update.releaseUrl,
-                mode: LaunchMode.externalApplication,
-              );
-            },
-            child: const Text('Скачать вручную'),
-          ),
+        FilledButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+            launchUrl(
+              update.releaseUrl,
+              mode: LaunchMode.externalApplication,
+            );
+          },
+          child: const Text('Скачать вручную'),
+        ),
       ],
     ),
   );
@@ -662,11 +662,6 @@ class _DownloadUpdateDialogState extends State<DownloadUpdateDialog> {
           );
         }
       }
-    } on UpdateCancelledException {
-      if (!mounted) return;
-      Navigator.of(context).pop(
-        const UpdateResult(cancelled: true),
-      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = 'Ошибка: $e');
@@ -2085,29 +2080,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _checkForUpdate(BuildContext context) async {
     if (!Platform.isAndroid) return;
-    final messenger = ScaffoldMessenger.of(context);
     final update = await const UpdateService().check();
     if (!context.mounted) return;
     if (update == null) {
-      messenger.showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Это актуальная версия')),
       );
       return;
     }
-    final ok = await showDialog<bool>(
+    final shouldInstall = await showDialog<bool>(
       context: context,
-      barrierDismissible: false,
-      builder: (context) => DownloadUpdateDialog(
-        service: const UpdateService(),
-        downloadUrl: update.downloadUrl,
+      builder: (context) => AlertDialog(
+        title: const Text('Доступно обновление'),
+        content: Text(
+          'Вышла новая версия ${update.version}. '
+          'Нажмите «Обновить», чтобы загрузить и установить её.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Позже'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Обновить'),
+          ),
+        ],
       ),
     );
-    if (!context.mounted) return;
-    if (ok != true) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Не удалось загрузить обновление')),
-      );
-    }
+    if (!context.mounted || shouldInstall != true) return;
+    await _showUpdateFlow(context, const UpdateService(), update);
   }
 
   @override
@@ -2191,6 +2193,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onPressed: () => _checkForUpdate(context),
                       icon: const Icon(Icons.system_update),
                       label: const Text('Проверить обновления'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showUpdateLogDialog(context),
+                      icon: const Icon(Icons.article_outlined),
+                      label: const Text('Лог обновлений'),
                     ),
                   ),
                 ],
@@ -4303,33 +4314,8 @@ class _MoreTabState extends State<MoreTab> {
   }
 
   Future<void> _showUpdateLog() async {
-    final log = await UpdateLog.read();
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Лог обновлений'),
-        content: SingleChildScrollView(
-          child: SelectableText(
-            log.isEmpty ? 'Лог пуст' : log,
-            style: const TextStyle(fontSize: 12),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Закрыть'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: log));
-              if (context.mounted) Navigator.of(context).pop();
-            },
-            child: const Text('Копировать'),
-          ),
-        ],
-      ),
-    );
+    await _showUpdateLogDialog(context);
   }
 
   @override

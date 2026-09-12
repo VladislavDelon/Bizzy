@@ -4,8 +4,85 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'cloud_service.dart';
 
 /// Экран «Вы клиент или мастер?» — показывается, когда нет сессии.
-class RoleSelectScreen extends StatelessWidget {
+class RoleSelectScreen extends StatefulWidget {
   const RoleSelectScreen({super.key});
+
+  @override
+  State<RoleSelectScreen> createState() => _RoleSelectScreenState();
+}
+
+class _RoleSelectScreenState extends State<RoleSelectScreen>
+    with TickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _logoScale;
+  late final Animation<double> _welcomeOpacity;
+  late final Animation<Offset> _welcomeSlide;
+  late final Animation<double> _questionOpacity;
+  late final Animation<double> _cardsOpacity;
+  late final Animation<Offset> _cardsSlide;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
+
+    _logoScale = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.0, 0.45, curve: Curves.elasticOut),
+      ),
+    );
+
+    _welcomeOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.35, 0.65, curve: Curves.easeOut),
+      ),
+    );
+    _welcomeSlide = Tween<Offset>(
+      begin: const Offset(0, 0.2),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.35, 0.65, curve: Curves.easeOutCubic),
+      ),
+    );
+
+    _questionOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.55, 0.75, curve: Curves.easeOut),
+      ),
+    );
+
+    _cardsOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.65, 0.95, curve: Curves.easeOut),
+      ),
+    );
+    _cardsSlide = Tween<Offset>(
+      begin: const Offset(0, 0.15),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.65, 0.95, curve: Curves.easeOutCubic),
+      ),
+    );
+
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   Future<void> _pick(BuildContext context, String role) async {
     await Navigator.of(context).push<void>(
@@ -18,55 +95,129 @@ class RoleSelectScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final background = scheme.brightness == Brightness.light
+        ? [Colors.white, scheme.primary.withValues(alpha: 0.08)]
+        : [Colors.black, scheme.primary.withValues(alpha: 0.12)];
+
     return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Spacer(),
-              Center(
-                child: Image.asset(
-                  'assets/icons/logo.png',
-                  width: 140,
-                  height: 140,
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) => Icon(
-                    Icons.calendar_month,
-                    size: 120,
-                    color: scheme.primary,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: background,
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Spacer(),
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) {
+                    return Transform.scale(
+                      scale: _logoScale.value,
+                      child: child,
+                    );
+                  },
+                  child: Center(
+                    child: Image.asset(
+                      'assets/icons/logo.png',
+                      width: 140,
+                      height: 140,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => Icon(
+                        Icons.calendar_month,
+                        size: 120,
+                        color: scheme.primary,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Bizzy',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Кто вы?',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const Spacer(),
-              _RoleCard(
-                icon: Icons.person_search,
-                title: 'Я клиент',
-                subtitle: 'Ищу мастера и хочу записываться на услуги',
-                onTap: () => _pick(context, 'client'),
-              ),
-              const SizedBox(height: 16),
-              _RoleCard(
-                icon: Icons.content_cut,
-                title: 'Я мастер',
-                subtitle: 'Оказываю услуги и веду записи клиентов',
-                onTap: () => _pick(context, 'master'),
-              ),
-              const Spacer(),
-            ],
+                const SizedBox(height: 32),
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) {
+                    return Opacity(
+                      opacity: _welcomeOpacity.value,
+                      child: FractionalTranslation(
+                        translation: _welcomeSlide.value,
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: Column(
+                    children: [
+                      Text(
+                        'Добро пожаловать в',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      Text(
+                        'Bizzy',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineLarge
+                            ?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: scheme.primary,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 40),
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) {
+                    return Opacity(
+                      opacity: _questionOpacity.value,
+                      child: child,
+                    );
+                  },
+                  child: Text(
+                    'Кто вы?',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) {
+                    return Opacity(
+                      opacity: _cardsOpacity.value,
+                      child: FractionalTranslation(
+                        translation: _cardsSlide.value,
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: Column(
+                    children: [
+                      _RoleCard(
+                        icon: Icons.person_search,
+                        title: 'Я клиент',
+                        subtitle: 'Ищу мастера и хочу записываться на услуги',
+                        onTap: () => _pick(context, 'client'),
+                      ),
+                      const SizedBox(height: 16),
+                      _RoleCard(
+                        icon: Icons.content_cut,
+                        title: 'Я мастер',
+                        subtitle: 'Оказываю услуги и веду записи клиентов',
+                        onTap: () => _pick(context, 'master'),
+                      ),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+              ],
+            ),
           ),
         ),
       ),

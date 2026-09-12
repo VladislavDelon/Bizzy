@@ -126,13 +126,17 @@ class CloudProfile {
       };
 }
 
-/// Профиль мастера + имя из `profiles`.
+/// Профиль мастера + имя/телефон из `profiles`.
 class MasterCard {
   const MasterCard({
     required this.userId,
     required this.name,
+    required this.phone,
     required this.category,
     required this.description,
+    required this.address,
+    required this.social,
+    required this.phonePublic,
     required this.avatarUrl,
     required this.ratingAvg,
     required this.ratingCount,
@@ -140,8 +144,12 @@ class MasterCard {
 
   final String userId;
   final String name;
+  final String phone;
   final String category;
   final String description;
+  final String address;
+  final String social;
+  final bool phonePublic;
   final String avatarUrl;
   final double ratingAvg;
   final int ratingCount;
@@ -151,13 +159,44 @@ class MasterCard {
     return MasterCard(
       userId: _parseString(map['user_id']),
       name: profile is Map ? _parseString(profile['name']) : '',
+      phone: profile is Map ? _parseString(profile['phone']) : '',
       category: _parseString(map['category'], fallback: 'Другое'),
       description: _parseString(map['description']),
+      address: _parseString(map['address']),
+      social: _parseString(map['social']),
+      phonePublic: _parseBool(map['phone_public'], fallback: false),
       avatarUrl: _parseString(map['avatar_url']),
       ratingAvg: _parseDouble(map['rating_avg']),
       ratingCount: _parseInt(map['rating_count']),
     );
   }
+
+  MasterCard copyWith({
+    String? userId,
+    String? name,
+    String? phone,
+    String? category,
+    String? description,
+    String? address,
+    String? social,
+    bool? phonePublic,
+    String? avatarUrl,
+    double? ratingAvg,
+    int? ratingCount,
+  }) =>
+      MasterCard(
+        userId: userId ?? this.userId,
+        name: name ?? this.name,
+        phone: phone ?? this.phone,
+        category: category ?? this.category,
+        description: description ?? this.description,
+        address: address ?? this.address,
+        social: social ?? this.social,
+        phonePublic: phonePublic ?? this.phonePublic,
+        avatarUrl: avatarUrl ?? this.avatarUrl,
+        ratingAvg: ratingAvg ?? this.ratingAvg,
+        ratingCount: ratingCount ?? this.ratingCount,
+      );
 }
 
 /// Услуга мастера в облаке.
@@ -282,6 +321,43 @@ class CloudBooking {
   }
 }
 
+/// Отзыв мастера о клиенте (виден другим мастерам).
+class ClientReview {
+  const ClientReview({
+    required this.id,
+    required this.clientId,
+    required this.masterId,
+    required this.masterName,
+    required this.bookingId,
+    required this.rating,
+    required this.comment,
+    this.createdAt,
+  });
+
+  final int id;
+  final String clientId;
+  final String masterId;
+  final String masterName;
+  final int bookingId;
+  final int rating;
+  final String comment;
+  final DateTime? createdAt;
+
+  factory ClientReview.fromMap(Map<String, dynamic> map) {
+    final profile = map['profiles'];
+    return ClientReview(
+      id: _parseInt(map['id']),
+      clientId: _parseString(map['client_id']),
+      masterId: _parseString(map['master_id']),
+      masterName: profile is Map ? _parseString(profile['name']) : '',
+      bookingId: _parseInt(map['booking_id']),
+      rating: _parseInt(map['rating'], fallback: 0),
+      comment: _parseString(map['comment']),
+      createdAt: _parseDateTime(map['created_at']),
+    );
+  }
+}
+
 /// Облачный сервис: авторизация + данные.
 class CloudService {
   // ---------- Auth ----------
@@ -355,7 +431,7 @@ class CloudService {
   // ---------- Master profiles ----------
   Future<List<MasterCard>> masters({String? category}) async {
     var query = supabase.from('master_profiles').select(
-        'user_id, category, description, avatar_url, rating_avg, rating_count, profiles!inner(name)');
+        'user_id, category, description, address, social, phone_public, avatar_url, rating_avg, rating_count, profiles!inner(name, phone)');
     if (category != null && category.isNotEmpty) {
       query = query.eq('category', category);
     }
@@ -367,7 +443,7 @@ class CloudService {
     final row = await supabase
         .from('master_profiles')
         .select(
-            'user_id, category, description, avatar_url, rating_avg, rating_count, profiles!inner(name)')
+            'user_id, category, description, address, social, phone_public, avatar_url, rating_avg, rating_count, profiles!inner(name, phone)')
         .eq('user_id', masterId)
         .maybeSingle();
     return row == null ? null : MasterCard.fromMap(row);
@@ -382,12 +458,18 @@ class CloudService {
   Future<void> upsertMasterProfile({
     required String category,
     required String description,
+    String address = '',
+    String social = '',
+    bool phonePublic = false,
     String avatarUrl = '',
   }) =>
       supabase.from('master_profiles').upsert({
         'user_id': uid,
         'category': category,
         'description': description,
+        'address': address,
+        'social': social,
+        'phone_public': phonePublic,
         'avatar_url': avatarUrl,
       });
 
@@ -580,6 +662,50 @@ class CloudService {
         .eq('appointment_id', appointmentId)
         .maybeSingle();
     return (row?['rating'] as num?)?.toInt();
+  }
+
+  // ---------- Client reviews (master -> client) ----------
+  Future<List<ClientReview>> clientReviews(String clientId) async {
+    final rows = await supabase
+        .from('client_reviews')
+        .select(
+            'id, client_id, master_id, booking_id, rating, comment, created_at, profiles!inner(name)')
+        .eq('client_id', clientId)
+        .order('created_at', ascending: false);
+    return [for (final r in rows) ClientReview.fromMap(r)];
+  }
+
+  Future<List<ClientReview>> myClientReviews() async {
+    final id = uid;
+    if (id == null) return [];
+    final rows = await supabase
+        .from('client_reviews')
+        .select(
+            'id, client_id, master_id, booking_id, rating, comment, created_at, profiles!inner(name)')
+        .eq('master_id', id)
+        .order('created_at', ascending: false);
+    return [for (final r in rows) ClientReview.fromMap(r)];
+  }
+
+  Future<ClientReview> addClientReview({
+    required String clientId,
+    required int bookingId,
+    required int rating,
+    String comment = '',
+  }) async {
+    final row = await supabase
+        .from('client_reviews')
+        .insert({
+          'client_id': clientId,
+          'master_id': uid,
+          'booking_id': bookingId,
+          'rating': rating,
+          'comment': comment,
+        })
+        .select(
+            'id, client_id, master_id, booking_id, rating, comment, created_at, profiles!inner(name)')
+        .single();
+    return ClientReview.fromMap(row);
   }
 
   // ---------- Master clients ----------

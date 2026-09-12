@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../notifications/push_service.dart';
 import 'cloud_service.dart';
+import 'master_public_profile.dart';
 
 /// Экран профиля мастера: категория, описание, рейтинг.
 /// Показывается мастеру при первом входе и из «Ещё».
@@ -29,9 +30,12 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _descController = TextEditingController();
+  final _addressController = TextEditingController();
+  final _socialController = TextEditingController();
   List<String> _categories = [];
   String? _category;
   String _avatarUrl = '';
+  bool _phonePublic = false;
   bool _pickingAvatar = false;
   double _ratingAvg = 0;
   int _ratingCount = 0;
@@ -50,6 +54,8 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
     _nameController.dispose();
     _phoneController.dispose();
     _descController.dispose();
+    _addressController.dispose();
+    _socialController.dispose();
     super.dispose();
   }
 
@@ -65,6 +71,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _phoneController.text = profile?.phone ?? '';
         _category = card?.category ?? categories.firstOrNull;
         _descController.text = card?.description ?? '';
+        _addressController.text = card?.address ?? '';
+        _socialController.text = card?.social ?? '';
+        _phonePublic = card?.phonePublic ?? false;
         _avatarUrl = card?.avatarUrl ?? '';
         _ratingAvg = card?.ratingAvg ?? 0;
         _ratingCount = card?.ratingCount ?? 0;
@@ -140,6 +149,39 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
     }
   }
 
+  Future<void> _preview() async {
+    final previewCard = MasterCard(
+      userId: _cloud.uid ?? '',
+      name: _nameController.text.trim(),
+      phone: _phoneController.text.trim(),
+      category: _category ?? 'Другое',
+      description: _descController.text.trim(),
+      address: _addressController.text.trim(),
+      social: _socialController.text.trim(),
+      phonePublic: _phonePublic,
+      avatarUrl: _avatarUrl,
+      ratingAvg: _ratingAvg,
+      ratingCount: _ratingCount,
+    );
+    List<CloudServiceItem> services = [];
+    try {
+      services = await _cloud.myServices();
+      services = services.where((s) => s.published).toList();
+    } catch (_) {
+      // Если нет сети — предпросмотр без услуг.
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => MasterPublicProfileView(
+          master: previewCard,
+          services: services,
+          isPreview: true,
+        ),
+      ),
+    );
+  }
+
   Future<void> _save() async {
     if (_saving) return;
     if (_category == null) {
@@ -158,6 +200,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       await _cloud.upsertMasterProfile(
         category: _category!,
         description: _descController.text.trim(),
+        address: _addressController.text.trim(),
+        social: _socialController.text.trim(),
+        phonePublic: _phonePublic,
         avatarUrl: _avatarUrl,
       );
       if (!mounted) return;
@@ -310,12 +355,42 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  controller: _addressController,
+                  textCapitalization: TextCapitalization.sentences,
+                  minLines: 2,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Адрес',
+                    hintText: 'Город, улица, кабинет…',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _socialController,
+                  decoration: const InputDecoration(
+                    labelText: 'Соцсети',
+                    hintText: 'Instagram, Telegram, VK…',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  title: const Text('Показывать телефон клиентам'),
+                  subtitle: const Text('Номер будет виден в вашей карточке'),
+                  value: _phonePublic,
+                  onChanged: _saving
+                      ? null
+                      : (v) => setState(() => _phonePublic = v),
+                ),
+                const SizedBox(height: 12),
+                TextField(
                   controller: _descController,
                   minLines: 3,
                   maxLines: 6,
                   decoration: const InputDecoration(
                     labelText: 'О себе',
-                    hintText: 'Опыт, адрес, особенности…',
+                    hintText: 'Опыт, особенности…',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -327,6 +402,12 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                   ),
                 ],
                 const SizedBox(height: 24),
+                FilledButton.tonalIcon(
+                  onPressed: _saving ? null : _preview,
+                  icon: const Icon(Icons.visibility),
+                  label: const Text('Посмотреть, как видят клиенты'),
+                ),
+                const SizedBox(height: 12),
                 FilledButton.icon(
                   onPressed: _saving ? null : _save,
                   icon: _saving
@@ -371,6 +452,7 @@ class MasterBookingsScreen extends StatefulWidget {
 class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
   final _cloud = CloudService();
   List<CloudBooking> _bookings = [];
+  List<ClientReview> _myClientReviews = [];
   bool _loading = true;
   bool _failed = false;
 
@@ -380,20 +462,31 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
     _load();
   }
 
+  Set<int> get _reviewedBookingIds =>
+      _myClientReviews.map((r) => r.bookingId).toSet();
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _failed = false;
     });
     try {
-      final bookings = await _cloud.masterBookings();
+      final results = await Future.wait([
+        _cloud.masterBookings(),
+        _cloud.myClientReviews(),
+      ]);
       if (!mounted) return;
-      setState(() => _bookings = bookings);
+      setState(() {
+        _bookings = results[0] as List<CloudBooking>;
+        _myClientReviews = results[1] as List<ClientReview>;
+        _loading = false;
+      });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _failed = true);
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      setState(() {
+        _failed = true;
+        _loading = false;
+      });
     }
   }
 
@@ -461,6 +554,31 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
     final uri = Uri.parse('tel:$phone');
     await launchUrl(uri);
   }
+
+  Future<void> _openClient(CloudBooking b) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => ClientDetailScreen(
+          clientId: b.clientId,
+          clientName: b.clientName,
+          clientPhone: b.clientPhone,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _rateClient(CloudBooking b) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => RateClientDialog(booking: b),
+    );
+    if (ok == true) await _load();
+  }
+
+  bool _canReviewClient(CloudBooking b) =>
+      b.status == 'completed' &&
+      b.clientId.isNotEmpty &&
+      !_reviewedBookingIds.contains(b.id);
 
   @override
   Widget build(BuildContext context) {
@@ -585,6 +703,18 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
                                                 _call(b.clientPhone),
                                             icon: const Icon(Icons.call),
                                           ),
+                                        if (b.clientId.isNotEmpty)
+                                          IconButton(
+                                            tooltip: 'Профиль клиента',
+                                            onPressed: () => _openClient(b),
+                                            icon: const Icon(Icons.person),
+                                          ),
+                                        if (_canReviewClient(b))
+                                          FilledButton.tonalIcon(
+                                            onPressed: () => _rateClient(b),
+                                            icon: const Icon(Icons.star),
+                                            label: const Text('Оценить клиента'),
+                                          ),
                                       ],
                                     ),
                                   ],
@@ -594,6 +724,287 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
                           },
                         ),
                 ),
+    );
+  }
+}
+
+/// Карточка клиента с отзывами от других мастеров.
+class ClientDetailScreen extends StatefulWidget {
+  const ClientDetailScreen({
+    super.key,
+    required this.clientId,
+    required this.clientName,
+    required this.clientPhone,
+  });
+
+  final String clientId;
+  final String clientName;
+  final String clientPhone;
+
+  @override
+  State<ClientDetailScreen> createState() => _ClientDetailScreenState();
+}
+
+class _ClientDetailScreenState extends State<ClientDetailScreen> {
+  final _cloud = CloudService();
+  List<ClientReview> _reviews = [];
+  bool _loading = true;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    try {
+      final reviews = await _cloud.clientReviews(widget.clientId);
+      if (!mounted) return;
+      setState(() {
+        _reviews = reviews;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _failed = true;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _call() async {
+    if (widget.clientPhone.isEmpty) return;
+    final uri = Uri.parse('tel:${widget.clientPhone}');
+    await launchUrl(uri);
+  }
+
+  String _fmt(DateTime dt) =>
+      '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year}';
+
+  @override
+  Widget build(BuildContext context) {
+    final name = widget.clientName.isEmpty ? 'Клиент' : widget.clientName;
+    final average = _reviews.isEmpty
+        ? 0.0
+        : _reviews.map((r) => r.rating).reduce((a, b) => a + b) /
+            _reviews.length;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(name),
+        actions: [
+          if (widget.clientPhone.isNotEmpty)
+            IconButton(
+              tooltip: 'Позвонить',
+              onPressed: _call,
+              icon: const Icon(Icons.call),
+            ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _failed
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Не удалось загрузить отзывы'),
+                      TextButton(
+                        onPressed: _load,
+                        child: const Text('Повторить'),
+                      ),
+                    ],
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.person_outline),
+                          title: Text(name),
+                          subtitle: widget.clientPhone.isEmpty
+                              ? null
+                              : Text(widget.clientPhone),
+                        ),
+                      ),
+                      if (_reviews.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            const Icon(Icons.star, color: Colors.amber),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${average.toStringAsFixed(1)} • ${_reviews.length} оценок',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      if (_reviews.isEmpty)
+                        const Text(
+                          'Отзывов пока нет.\nКогда мастера оставят оценки — '
+                          'они появятся здесь.',
+                          textAlign: TextAlign.center,
+                        ),
+                      for (final r in _reviews)
+                        Card(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        r.masterName.isEmpty
+                                            ? 'Мастер'
+                                            : r.masterName,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleSmall,
+                                      ),
+                                    ),
+                                    Text(_fmt(r.createdAt ?? DateTime.now())),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    for (var i = 1; i <= 5; i++)
+                                      Icon(
+                                        i <= r.rating
+                                            ? Icons.star
+                                            : Icons.star_border,
+                                        size: 16,
+                                        color: Colors.amber,
+                                      ),
+                                  ],
+                                ),
+                                if (r.comment.isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  Text(r.comment),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 80),
+                    ],
+                  ),
+                ),
+    );
+  }
+}
+
+/// Диалог оценки клиента мастером.
+class RateClientDialog extends StatefulWidget {
+  const RateClientDialog({super.key, required this.booking});
+
+  final CloudBooking booking;
+
+  @override
+  State<RateClientDialog> createState() => _RateClientDialogState();
+}
+
+class _RateClientDialogState extends State<RateClientDialog> {
+  final _cloud = CloudService();
+  final _comment = TextEditingController();
+  int _rating = 5;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _comment.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_saving) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await _cloud.addClientReview(
+        clientId: widget.booking.clientId,
+        bookingId: widget.booking.id,
+        rating: _rating,
+        comment: _comment.text.trim(),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = 'Не удалось отправить оценку';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Оцените клиента'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(widget.booking.clientName.isEmpty
+              ? 'Клиент'
+              : widget.booking.clientName),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 1; i <= 5; i++)
+                IconButton(
+                  onPressed: () => setState(() => _rating = i),
+                  icon: Icon(
+                    i <= _rating ? Icons.star : Icons.star_border,
+                    color: Colors.amber,
+                    size: 36,
+                  ),
+                ),
+            ],
+          ),
+          TextField(
+            controller: _comment,
+            decoration: const InputDecoration(
+              labelText: 'Комментарий (необязательно)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Позже'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _submit,
+          child: const Text('Отправить'),
+        ),
+      ],
     );
   }
 }

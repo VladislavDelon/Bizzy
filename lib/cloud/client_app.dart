@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../notifications/push_service.dart';
 import 'cloud_service.dart';
+import 'master_public_profile.dart';
 
 /// Главный экран клиента: каталог мастеров, мои записи, профиль.
 class ClientHome extends StatefulWidget {
@@ -254,26 +255,36 @@ class MasterDetailScreen extends StatefulWidget {
 
 class _MasterDetailScreenState extends State<MasterDetailScreen> {
   final _cloud = CloudService();
+  MasterCard? _master;
   List<CloudServiceItem> _services = [];
   bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
+    _master = widget.master;
     _load();
   }
 
   Future<void> _load() async {
     try {
-      final services = await _cloud.servicesOf(widget.master.userId);
+      final results = await Future.wait([
+        _cloud.masterCard(widget.master.userId),
+        _cloud.servicesOf(widget.master.userId),
+      ]);
       if (!mounted) return;
       setState(() {
-        _services = services;
+        _master = (results[0] as MasterCard?) ?? widget.master;
+        _services = results[1] as List<CloudServiceItem>;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() {
+        _error = 'Не удалось загрузить профиль мастера';
+        _loading = false;
+      });
     }
   }
 
@@ -281,80 +292,38 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) =>
-          BookAppointmentDialog(master: widget.master, services: _services),
+          BookAppointmentDialog(master: _master ?? widget.master, services: _services),
     );
     if (result == true && mounted) Navigator.of(context).pop(true);
   }
 
   @override
   Widget build(BuildContext context) {
-    final m = widget.master;
-    return Scaffold(
-      appBar: AppBar(title: Text(m.name.isEmpty ? 'Мастер' : m.name)),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Row(
-                  children: [
-                    _masterAvatar(context, widget.master, 32),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(m.name.isEmpty ? 'Мастер' : m.name,
-                              style:
-                                  Theme.of(context).textTheme.titleLarge),
-                          Text(m.category),
-                          Row(
-                            children: [
-                              const Icon(Icons.star,
-                                  size: 16, color: Colors.amber),
-                              const SizedBox(width: 4),
-                              Text(
-                                m.ratingCount == 0
-                                    ? 'Пока без оценок'
-                                    : '${m.ratingAvg.toStringAsFixed(1)} • оценок: ${m.ratingCount}',
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                if (m.description.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text(m.description),
-                ],
-                const SizedBox(height: 24),
-                Text(
-                  'Услуги',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                if (_services.isEmpty)
-                  const Text('Услуги ещё не добавлены'),
-                for (final s in _services)
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.spa),
-                      title: Text(s.name),
-                      subtitle: Text('${s.durationMinutes} мин'),
-                      trailing: Text(s.price.toStringAsFixed(0)),
-                    ),
-                  ),
-                const SizedBox(height: 80),
-              ],
-            ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: null,
-        onPressed: _book,
-        icon: const Icon(Icons.event_available),
-        label: const Text('Записаться'),
-      ),
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Ошибка')),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_error!),
+              const SizedBox(height: 12),
+              TextButton(onPressed: _load, child: const Text('Повторить')),
+            ],
+          ),
+        ),
+      );
+    }
+    return MasterPublicProfileView(
+      master: _master ?? widget.master,
+      services: _services,
+      onBook: _book,
+      onRefresh: _load,
     );
   }
 }
@@ -708,11 +677,34 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
         _bookings = bookings;
         _myRatings = ratings;
       });
+      await _scheduleReminders(bookings);
     } catch (_) {
       if (!mounted) return;
       setState(() => _failed = true);
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _scheduleReminders(List<CloudBooking> bookings) async {
+    const reminderMinutes = 30;
+    final now = DateTime.now();
+    for (final b in bookings) {
+      if (b.status == 'cancelled' || b.status == 'completed') {
+        await PushNotificationService.cancelCloudReminder(b.id);
+        continue;
+      }
+      if (b.startsAt.isAfter(now)) {
+        await PushNotificationService.scheduleCloudReminder(
+          id: b.id,
+          dateTime: b.startsAt,
+          reminderMinutes: reminderMinutes,
+          title: 'Скоро запись',
+          body: '${b.serviceName} • ${_fmt(b.startsAt)}',
+        );
+      } else {
+        await PushNotificationService.cancelCloudReminder(b.id);
+      }
     }
   }
 

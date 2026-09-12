@@ -4,12 +4,14 @@ import 'dart:io';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../cloud/cloud_service.dart';
+import 'notifications_screen.dart';
 
 /// Глобальный обработчик фоновых сообщений FCM.
 /// Должен быть top-level или static, иначе плагин его не найдёт.
@@ -58,7 +60,9 @@ Future<void> _showLocalNotification({
 class PushNotificationService {
   static final _messaging = FirebaseMessaging.instance;
   static final _local = FlutterLocalNotificationsPlugin();
+  static final navigatorKey = GlobalKey<NavigatorState>();
   static bool _init = false;
+  static bool pendingNotification = false;
   static String? _fcmToken;
 
   static Future<void> init() async {
@@ -90,7 +94,7 @@ class PushNotificationService {
       await _local.initialize(
         settings: initSettings,
         onDidReceiveNotificationResponse: (details) {
-          // TODO: обработать tap, открыть нужный экран.
+          _openNotificationsScreen();
         },
       );
 
@@ -122,6 +126,17 @@ class PushNotificationService {
         _fcmToken = token;
         if (cloudSignedIn) await _saveToken(token);
       });
+
+      // Когда приложение свёрнуто и пользователь тапнул по FCM-уведомлению.
+      FirebaseMessaging.onMessageOpenedApp.listen((_) {
+        _openNotificationsScreen();
+      });
+
+      // Если приложение было убито и запущено из уведомления.
+      final initial = await _messaging.getInitialMessage();
+      if (initial != null) {
+        _openNotificationsScreen();
+      }
     } catch (e) {
       debugPrint('PushNotificationService init error: $e');
     }
@@ -141,6 +156,21 @@ class PushNotificationService {
         onConflict: 'user_id,token',
       );
     } catch (_) {}
+  }
+
+  /// Открывает экран ближайших записей при нажатии на уведомление.
+  static void _openNotificationsScreen() {
+    final state = navigatorKey.currentState;
+    if (state == null) {
+      pendingNotification = true;
+      return;
+    }
+    pendingNotification = false;
+    state.push(
+      MaterialPageRoute<void>(
+        builder: (context) => const NotificationsScreen(),
+      ),
+    );
   }
 
   /// Отправляет push другому пользователю через Edge Function.
@@ -211,6 +241,53 @@ class PushNotificationService {
     if (id == null) return;
     try {
       await _local.cancel(id: id + 1000000);
+    } catch (_) {}
+  }
+
+  /// Напоминание для облачной записи (с собственным ID, чтобы не пересекаться
+  /// с локальными записями и делами).
+  static Future<void> scheduleCloudReminder({
+    required int id,
+    required DateTime dateTime,
+    required int reminderMinutes,
+    required String title,
+    required String body,
+  }) async {
+    if (reminderMinutes <= 0) return;
+    final notifyAt = dateTime.toUtc().subtract(Duration(minutes: reminderMinutes));
+    if (notifyAt.isBefore(DateTime.now().toUtc())) return;
+
+    final tzDate = tz.TZDateTime.from(notifyAt, tz.UTC);
+
+    const androidDetails = AndroidNotificationDetails(
+      'bizzy_appointments',
+      'Bizzy — записи',
+      channelDescription: 'Напоминания о записях',
+      importance: Importance.high,
+      priority: Priority.high,
+      icon: '@mipmap/launcher_icon',
+    );
+    const details = NotificationDetails(
+      android: androidDetails,
+      iOS: _iosDetails,
+    );
+
+    try {
+      await _local.zonedSchedule(
+        id: id + 2000000,
+        title: title,
+        body: body,
+        scheduledDate: tzDate,
+        notificationDetails: details,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        payload: jsonEncode({'appointment_id': id, 'cloud': true}),
+      );
+    } catch (_) {}
+  }
+
+  static Future<void> cancelCloudReminder(int id) async {
+    try {
+      await _local.cancel(id: id + 2000000);
     } catch (_) {}
   }
 }

@@ -7,6 +7,7 @@ import 'package:bizzy_app/cloud/auth_screens.dart';
 import 'package:bizzy_app/cloud/client_app.dart';
 import 'package:bizzy_app/cloud/cloud_service.dart';
 import 'package:bizzy_app/cloud/master_screens.dart';
+import 'package:bizzy_app/notifications/notifications_screen.dart';
 import 'package:bizzy_app/notifications/push_service.dart';
 import 'package:bizzy_app/services/install_service.dart';
 import 'package:bizzy_app/tasks/notification_service.dart';
@@ -107,10 +108,26 @@ class BizzyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (PushNotificationService.pendingNotification) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (PushNotificationService.pendingNotification) {
+          final state = PushNotificationService.navigatorKey.currentState;
+          if (state != null) {
+            PushNotificationService.pendingNotification = false;
+            state.push(
+              MaterialPageRoute<void>(
+                builder: (context) => const NotificationsScreen(),
+              ),
+            );
+          }
+        }
+      });
+    }
     return ListenableBuilder(
       listenable: _themeMode,
       builder: (context, child) => MaterialApp(
         title: 'Bizzy',
+        navigatorKey: PushNotificationService.navigatorKey,
         themeMode: _themeMode.value,
         theme: _bizzyTheme(Brightness.light),
         darkTheme: _bizzyTheme(Brightness.dark),
@@ -1777,11 +1794,14 @@ class AppointmentsDatabase {
     if (!cloudSignedIn) return getAll(companyId);
     final db = await database;
     try {
-      // 1. Подтверждённые и завершённые клиентские заявки.
+      // 1. Клиентские заявки: подтверждённые/завершённые — в календарь,
+      //    отменённые — удаляем, pending — игнорируем.
       final bookings = await CloudService().masterBookings();
       for (final b in bookings) {
         if (b.status == 'confirmed' || b.status == 'completed') {
           await syncCloudBooking(b, companyId);
+        } else if (b.status == 'cancelled') {
+          await deleteCloudBooking(b.id);
         }
       }
 
@@ -2902,6 +2922,22 @@ class _MainShellState extends State<MainShell> {
       _allAppointments = appointments;
       _loading = false;
     });
+    await _scheduleReminders(appointments);
+  }
+
+  Future<void> _scheduleReminders(List<Appointment> appointments) async {
+    final now = DateTime.now();
+    for (final a in appointments) {
+      if (a.dateTime.isAfter(now) && a.reminderMinutes > 0) {
+        await PushNotificationService.scheduleAppointmentReminder(
+          id: a.id,
+          dateTime: a.dateTime,
+          reminderMinutes: a.reminderMinutes,
+          clientName: a.clientName,
+          service: a.service,
+        );
+      }
+    }
   }
 
   Future<void> _loadPendingBookings() async {
@@ -3018,11 +3054,9 @@ class _MainShellState extends State<MainShell> {
   }
 
   void _showNotificationDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (context) => const AlertDialog(
-        title: Text('Уведомления'),
-        content: Text('Push-уведомления пока не реализованы'),
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => const NotificationsScreen(),
       ),
     );
   }
@@ -3880,6 +3914,27 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
       final saved = widget.service == null
           ? await widget.database.createService(service)
           : await widget.database.updateService(service).then((_) => service);
+      // Сразу заливаем в облако, чтобы клиенты видели без ожидания синхронизации.
+      if (cloudSignedIn && saved.published) {
+        try {
+          final cloud = await CloudService().addService(
+            name: saved.name,
+            price: saved.price,
+            durationMinutes: saved.durationMinutes,
+            published: saved.published,
+          );
+          final synced = saved.copyWith(
+            externalId: 'cloud:service:${cloud.id}',
+            cloudUpdatedAt: (cloud.updatedAt ?? DateTime.now()).toIso8601String(),
+          );
+          await widget.database.updateService(synced);
+          if (!mounted) return;
+          Navigator.of(context).pop(synced);
+          return;
+        } catch (_) {
+          // Нет сети — синхронизируем позже.
+        }
+      }
       if (!mounted) return;
       Navigator.of(context).pop(saved);
     } catch (_) {

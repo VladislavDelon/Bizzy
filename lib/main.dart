@@ -8,6 +8,7 @@ import 'package:bizzy_app/cloud/client_app.dart';
 import 'package:bizzy_app/cloud/cloud_service.dart';
 import 'package:bizzy_app/cloud/master_screens.dart';
 import 'package:bizzy_app/notifications/push_service.dart';
+import 'package:bizzy_app/services/install_service.dart';
 import 'package:bizzy_app/tasks/notification_service.dart';
 import 'package:bizzy_app/tasks/task_model.dart';
 import 'package:bizzy_app/tasks/tasks_screen.dart';
@@ -304,6 +305,19 @@ class UpdateService {
       throw UnsupportedError('Обновления APK доступны только на Android');
     }
     await UpdateLog.write('Начало загрузки APK: $url');
+    final deviceInfo = await InstallService.getDeviceInfo();
+    await UpdateLog.write('Устройство: $deviceInfo');
+    final packageInfo = await PackageInfo.fromPlatform();
+    final currentPackage = packageInfo.packageName;
+    await UpdateLog.write(
+      'Текущее приложение: $currentPackage, '
+      'версия ${packageInfo.version}+${packageInfo.buildNumber}',
+    );
+    final installPermission = await Permission.requestInstallPackages.status;
+    await UpdateLog.write(
+      'Разрешение REQUEST_INSTALL_PACKAGES: ${installPermission.isGranted} (status=${installPermission.name})',
+    );
+
     final dir = await getApplicationDocumentsDirectory();
     final path = '${dir.path}/bizzy_update.apk';
     try {
@@ -357,7 +371,7 @@ class UpdateService {
         throw Exception('APK не загрузился');
       }
       final length = await file.length();
-      await UpdateLog.write('APK загружен, размер: $length байт');
+      await UpdateLog.write('APK сохранён по пути: $path, размер: $length байт');
       if (length < 1024) {
         throw Exception('APK загружен, но файл слишком мал — возможно, ссылка ведёт не на APK');
       }
@@ -368,9 +382,33 @@ class UpdateService {
       if (!isApk) {
         throw Exception('Загруженный файл не похож на APK (плохая ссылка или redirect)');
       }
-      await UpdateLog.write('Запуск установки APK...');
+
+      await UpdateLog.write('Чтение информации из APK...');
+      final apkInfo = await InstallService.getApkInfo(path);
+      await UpdateLog.write('Данные нового APK: $apkInfo');
+      if (apkInfo != null) {
+        if (apkInfo.packageName.isNotEmpty &&
+            apkInfo.packageName != currentPackage) {
+          throw Exception(
+            'APK предназначен для пакета ${apkInfo.packageName}, '
+            'а текущее приложение — $currentPackage.',
+          );
+        }
+        final installedSignature =
+            await InstallService.getInstalledSignature(currentPackage);
+        await UpdateLog.write('Подпись установленного приложения: $installedSignature');
+        await UpdateLog.write('Подпись нового APK: ${apkInfo.signatureSha256}');
+        if (installedSignature != null &&
+            installedSignature.isNotEmpty &&
+            apkInfo.signatureSha256.isNotEmpty &&
+            installedSignature != apkInfo.signatureSha256) {
+          throw const SignatureMismatchException();
+        }
+      }
+
+      await UpdateLog.write('Запуск InstallPlugin.installApk...');
       final res = await InstallPlugin.installApk(path);
-      await UpdateLog.write('Результат установки: $res');
+      await UpdateLog.write('Результат установки (InstallPlugin): $res');
       if (res is! Map || res['isSuccess'] != true) {
         final message = res is Map ? res['errorMessage'] : res?.toString();
         final error = message ?? 'Не удалось начать установку';
@@ -447,6 +485,14 @@ class UpdateCancelledException implements Exception {
 
   @override
   String toString() => 'Установка отменена';
+}
+
+class SignatureMismatchException implements Exception {
+  const SignatureMismatchException();
+
+  @override
+  String toString() =>
+      'APK подписан другим ключом, чем текущая версия приложения.';
 }
 
 class UpdateResult {
@@ -568,7 +614,9 @@ Future<void> _showUpdateFlow(
       error.contains('разрешение') ||
       error.contains('unknown source') ||
       error.contains('неизвестных');
-  final isSignature = error.contains('install failed') ||
+  final isSignature = error.contains('подписан') ||
+      error.contains('другим ключом') ||
+      error.contains('install failed') ||
       error.contains('not installed') ||
       error.contains('не установлено') ||
       error.contains('install error') ||
@@ -578,8 +626,8 @@ Future<void> _showUpdateFlow(
   final content = isPermissionError
       ? 'Не удалось получить разрешение на установку. Включите «Установка из неизвестных источников» для Bizzy.'
       : isSignature
-          ? 'Установщик Android отказал. Вероятно, APK подписан другим ключом, чем установленная версия, или установщик не смог обновить приложение. Скачайте APK вручную и установите поверх.'
-          : (result.error ?? 'Не удалось обновить. Проверьте подключение к интернету, свободное место и разрешения.');
+          ? 'Установка невозможна: APK подписан другим ключом, чем установленная версия. Скорее всего, вы ставили старую версию вручную или с другого компьютера. Удалите приложение и установите новый APK из релиза.'
+          : 'Не удалось обновить. ${result.error ?? 'Проверьте подключение, свободное место и разрешения.'}';
 
   await showDialog<void>(
     context: context,
@@ -598,6 +646,15 @@ Future<void> _showUpdateFlow(
           },
           child: const Text('Лог'),
         ),
+        if (!isSignature)
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              final dir = await getApplicationDocumentsDirectory();
+              await InstallService.openApk('${dir.path}/bizzy_update.apk');
+            },
+            child: const Text('Открыть установщик'),
+          ),
         FilledButton(
           onPressed: () {
             Navigator.of(context).pop();

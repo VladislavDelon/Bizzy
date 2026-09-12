@@ -18,7 +18,7 @@ subprojects {
     afterEvaluate {
         val ext = extensions.findByName("android") as? CommonExtension
         ext?.apply {
-            compileSdk = 35
+            compileSdk = 36
             compileOptions.sourceCompatibility = JavaVersion.VERSION_17
             compileOptions.targetCompatibility = JavaVersion.VERSION_17
         }

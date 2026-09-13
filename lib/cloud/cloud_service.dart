@@ -320,8 +320,8 @@ class CloudBooking {
       );
 
   factory CloudBooking.fromMap(Map<String, dynamic> map) {
-    final client = map['client'];
-    final master = map['master'];
+    final client = _pickProfileMap(map['client']);
+    final master = _pickProfileMap(map['master']);
     return CloudBooking(
       id: _parseInt(map['id']),
       clientId: _parseString(map['client_id']),
@@ -332,9 +332,9 @@ class CloudBooking {
       durationMinutes: _parseInt(map['duration_minutes'], fallback: 60),
       status: _parseString(map['status'], fallback: 'pending'),
       notes: _parseString(map['notes']),
-      clientName: client is Map ? _parseString(client['name']) : '',
-      clientPhone: client is Map ? _parseString(client['phone']) : '',
-      masterName: master is Map ? _parseString(master['name']) : '',
+      clientName: client != null ? _parseString(client['name']) : '',
+      clientPhone: client != null ? _parseString(client['phone']) : '',
+      masterName: master != null ? _parseString(master['name']) : '',
     );
   }
 }
@@ -647,26 +647,14 @@ class CloudService {
     return [for (final r in rows) CloudServiceItem.fromMap(r)];
   }
 
-  /// Опубликованные услуги мастера (видны клиентам).
+  /// Услуги мастера (видны клиентам после фильтрации по published).
   Future<List<CloudServiceItem>> servicesOf(String masterId) async {
-    try {
-      final rows = await supabase
-          .from('services')
-          .select()
-          .eq('master_id', masterId)
-          .eq('published', true)
-          .order('name');
-      return [for (final r in rows) CloudServiceItem.fromMap(r)];
-    } on PostgrestException catch (e) {
-      await SyncLog.write('servicesOf', 'published filter error: $e');
-      // Если колонки `published` ещё нет — показываем все услуги.
-      final rows = await supabase
-          .from('services')
-          .select()
-          .eq('master_id', masterId)
-          .order('name');
-      return [for (final r in rows) CloudServiceItem.fromMap(r)];
-    }
+    final rows = await supabase
+        .from('services')
+        .select()
+        .eq('master_id', masterId)
+        .order('name');
+    return [for (final r in rows) CloudServiceItem.fromMap(r)];
   }
 
   Future<CloudServiceItem> addService({
@@ -826,7 +814,7 @@ class CloudService {
     final rows = await supabase
         .from('client_reviews')
         .select(
-            'id, client_id, master_id, booking_id, rating, comment, created_at, profiles!inner(name)')
+            'id, client_id, master_id, booking_id, rating, comment, created_at, profiles!client_reviews_master_id_fkey(name)')
         .eq('client_id', clientId)
         .order('created_at', ascending: false);
     return [for (final r in rows) ClientReview.fromMap(r)];
@@ -838,7 +826,7 @@ class CloudService {
     final rows = await supabase
         .from('client_reviews')
         .select(
-            'id, client_id, master_id, booking_id, rating, comment, created_at, profiles!inner(name)')
+            'id, client_id, master_id, booking_id, rating, comment, created_at')
         .eq('master_id', id)
         .order('created_at', ascending: false);
     return [for (final r in rows) ClientReview.fromMap(r)];
@@ -860,7 +848,7 @@ class CloudService {
           'comment': comment,
         })
         .select(
-            'id, client_id, master_id, booking_id, rating, comment, created_at, profiles!inner(name)')
+            'id, client_id, master_id, booking_id, rating, comment, created_at')
         .single();
     return ClientReview.fromMap(row);
   }

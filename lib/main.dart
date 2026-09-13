@@ -56,6 +56,22 @@ enum Currency {
 
 final ValueNotifier<Currency> _currency = ValueNotifier(Currency.kzt);
 
+Widget _priceText(
+  double price, {
+  String prefix = '',
+  TextStyle? style,
+}) {
+  return ValueListenableBuilder<Currency>(
+    valueListenable: _currency,
+    builder: (context, currency, _) => Text(
+      prefix.isEmpty
+          ? '${price.toStringAsFixed(0)} ${currency.symbol}'
+          : '$prefix ${price.toStringAsFixed(0)} ${currency.symbol}',
+      style: style,
+    ),
+  );
+}
+
 ThemeMode _themeModeFromString(String? value) {
   return switch (value) {
     'light' => ThemeMode.light,
@@ -525,6 +541,10 @@ class UpdateResult {
   final bool cancelled;
   final String? error;
 }
+
+/// Предотвращает повторную автопроверку обновлений в одном запуске,
+/// если она уже выполнялась на стартовом экране.
+bool _startupUpdateCheckedThisLaunch = false;
 
 Future<void> _showUpdateLogDialog(BuildContext context) async {
   final log = await UpdateLog.read();
@@ -2679,19 +2699,19 @@ class _AuthScreenState extends State<AuthScreen> {
       child: Center(
         child: Image.asset(
           'assets/icons/logo.png',
-          width: 160,
-          height: 160,
+          width: 220,
+          height: 220,
           fit: BoxFit.contain,
           errorBuilder: (context, error, stackTrace) => Container(
-            width: 160,
-            height: 160,
+            width: 220,
+            height: 220,
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.primaryContainer,
               shape: BoxShape.circle,
             ),
             child: Icon(
               Icons.calendar_month,
-              size: 96,
+              size: 120,
               color: Theme.of(context).colorScheme.primary,
             ),
           ),
@@ -3078,6 +3098,12 @@ class _MainShellState extends State<MainShell> {
     if (widget.offlineMode) return;
     final service = widget.updateService;
     if (service == null) return;
+    if (_startupUpdateCheckedThisLaunch) {
+      await UpdateLog.write(
+        'Автопроверка обновлений при входе пропущена — уже проверяли на старте',
+      );
+      return;
+    }
     try {
       final update = await service.check();
       if (!mounted || update == null) return;
@@ -3302,34 +3328,42 @@ class _MainShellState extends State<MainShell> {
       appBar: AppBar(
         automaticallyImplyLeading: false,
         centerTitle: false,
-        title: Image.asset(
-          'assets/icons/logo.png',
-          height: 40,
-          errorBuilder: (context, error, stackTrace) => Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  shape: BoxShape.circle,
+        title: Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Image.asset(
+            'assets/icons/logo.png',
+            height: 36,
+            errorBuilder: (context, error, stackTrace) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.calendar_month,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                 ),
-                child: Icon(
-                  Icons.calendar_month,
-                  color: Theme.of(context).colorScheme.primary,
+                const SizedBox(width: 8),
+                const Text(
+                  'Bizzy',
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                'Bizzy',
-                style: TextStyle(
-                  color: Colors.black,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
         actions: [
@@ -4039,9 +4073,10 @@ class _ClientsTabState extends State<ClientsTab> {
                                       if (contact.phone.isNotEmpty)
                                         Text(contact.phone),
                                       if (contact.lastService.isNotEmpty)
-                                        Text(
-                                          'Последняя: ${contact.lastService} '
-                                          '• ${contact.lastPrice.toStringAsFixed(0)} ₽',
+                                        _priceText(
+                                          contact.lastPrice,
+                                          prefix:
+                                              'Последняя: ${contact.lastService} •',
                                           style: TextStyle(
                                             color: Theme.of(context)
                                                 .colorScheme
@@ -4173,9 +4208,10 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                               if (contact.phone.isNotEmpty)
                                 Text(contact.phone),
                               if (contact.lastService.isNotEmpty)
-                                Text(
-                                  'Последняя: ${contact.lastService} '
-                                  '• ${contact.lastPrice.toStringAsFixed(0)} ₽',
+                                _priceText(
+                                  contact.lastPrice,
+                                  prefix:
+                                      'Последняя: ${contact.lastService} •',
                                   style: TextStyle(
                                     color:
                                         Theme.of(context).colorScheme.primary,
@@ -4206,7 +4242,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                         children: [
                           Text(_fmt(a.dateTime)),
                           if (a.servicePrice > 0)
-                            Text('Цена: ${a.servicePrice.toStringAsFixed(0)} ₽'),
+                            _priceText(a.servicePrice, prefix: 'Цена:'),
                           if (a.notes.isNotEmpty) Text('Примечание: ${a.notes}'),
                         ],
                       ),
@@ -6027,6 +6063,154 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
   }
 }
 
+/// Стартовый экран: сначала логотип, потом проверка обновлений,
+/// а если обновлений нет — передаёт управление CloudGate.
+class StartupScreen extends StatefulWidget {
+  const StartupScreen({super.key, required this.onDone});
+
+  final VoidCallback onDone;
+
+  @override
+  State<StartupScreen> createState() => _StartupScreenState();
+}
+
+enum _StartupStep { loading, checking, updating }
+
+class _StartupScreenState extends State<StartupScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _logoController;
+  late final Animation<double> _logoScale;
+  _StartupStep _step = _StartupStep.loading;
+
+  @override
+  void initState() {
+    super.initState();
+    _logoController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _logoScale = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _logoController,
+        curve: Curves.elasticOut,
+      ),
+    );
+    _logoController.addStatusListener(_onAnimationStatus);
+    _logoController.forward();
+  }
+
+  void _onAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.completed) {
+      _onLogoComplete();
+    }
+  }
+
+  Future<void> _onLogoComplete() async {
+    if (!mounted) return;
+    _startupUpdateCheckedThisLaunch = true;
+    if (!Platform.isAndroid) {
+      widget.onDone();
+      return;
+    }
+    setState(() => _step = _StartupStep.checking);
+    try {
+      const service = UpdateService();
+      final update = await service.check();
+      if (!mounted) return;
+      if (update != null) {
+        setState(() => _step = _StartupStep.updating);
+        await _showUpdateFlow(context, service, update);
+      }
+      if (mounted) widget.onDone();
+    } catch (e, s) {
+      await UpdateLog.write('Ошибка стартовой проверки обновлений: $e\n$s');
+      if (mounted) widget.onDone();
+    }
+  }
+
+  @override
+  void dispose() {
+    _logoController.removeStatusListener(_onAnimationStatus);
+    _logoController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final background = scheme.brightness == Brightness.light
+        ? [Colors.white, scheme.primary.withValues(alpha: 0.08)]
+        : [Colors.black, scheme.primary.withValues(alpha: 0.12)];
+    final statusText = switch (_step) {
+      _StartupStep.loading => '',
+      _StartupStep.checking => 'Проверка обновлений...',
+      _StartupStep.updating => 'Загрузка обновления...',
+    };
+
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: background,
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Spacer(),
+                AnimatedBuilder(
+                  animation: _logoController,
+                  builder: (context, child) {
+                    return Transform.scale(
+                      scale: _logoScale.value,
+                      child: child,
+                    );
+                  },
+                  child: Center(
+                    child: Image.asset(
+                      'assets/icons/logo.png',
+                      width: 220,
+                      height: 220,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => Icon(
+                        Icons.calendar_month,
+                        size: 180,
+                        color: scheme.primary,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+                if (_step != _StartupStep.loading) ...[
+                  const Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    statusText,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                ],
+                const Spacer(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Облачный шлюз: решает, куда попадает пользователь —
 /// клиент, мастер или экран выбора роли.
 class CloudGate extends StatefulWidget {
@@ -6047,6 +6231,7 @@ class _CloudGateState extends State<CloudGate> {
   bool _loading = true;
   bool _offlineMode = false;
   String? _error;
+  bool _startupCompleted = false;
 
   static const _profileKey = 'cloud_profile';
 
@@ -6054,6 +6239,7 @@ class _CloudGateState extends State<CloudGate> {
   void initState() {
     super.initState();
     _session = _cloud.session;
+    _loading = _session != null;
     _sub = _cloud.authChanges.listen((event) {
       if (!mounted) return;
       setState(() {
@@ -6165,7 +6351,14 @@ class _CloudGateState extends State<CloudGate> {
       );
     }
     if (_session == null) {
-      return const RoleSelectScreen();
+      if (!_startupCompleted) {
+        return StartupScreen(
+          onDone: () {
+            if (mounted) setState(() => _startupCompleted = true);
+          },
+        );
+      }
+      return const RoleSelectScreen(skipLogo: true);
     }
     if (_error != null) {
       final canEnterOffline = _session != null;

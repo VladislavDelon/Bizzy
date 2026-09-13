@@ -532,17 +532,21 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
       _failed = false;
     });
     try {
-      final results = await Future.wait([
-        _cloud.masterBookings(),
-        _cloud.myClientReviews(),
-      ]);
+      final bookings = await _cloud.masterBookings();
+      List<ClientReview> reviews = [];
+      try {
+        reviews = await _cloud.myClientReviews();
+      } catch (e, st) {
+        await SyncLog.write('myClientReviews', '$e\n$st');
+      }
       if (!mounted) return;
       setState(() {
-        _bookings = results[0] as List<CloudBooking>;
-        _myClientReviews = results[1] as List<ClientReview>;
+        _bookings = bookings;
+        _myClientReviews = reviews;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e, st) {
+      await SyncLog.write('masterBookings', '$e\n$st');
       if (!mounted) return;
       setState(() {
         _failed = true;

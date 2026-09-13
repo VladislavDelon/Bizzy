@@ -278,10 +278,17 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
         _cloud.masterCard(widget.master.userId),
         _cloud.servicesOf(widget.master.userId),
       ]);
+      final rawServices = results[1] as List<CloudServiceItem>;
+      await SyncLog.write(
+        'master_detail',
+        'masterId=${widget.master.userId}, '
+        'services=${rawServices.length}, '
+        'published=${rawServices.where((s) => s.published).length}',
+      );
       if (!mounted) return;
       setState(() {
         _master = (results[0] as MasterCard?) ?? widget.master;
-        _services = results[1] as List<CloudServiceItem>;
+        _services = rawServices.where((s) => s.published).toList();
         _loading = false;
       });
     } catch (e, st) {

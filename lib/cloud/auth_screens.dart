@@ -5,7 +5,10 @@ import 'cloud_service.dart';
 
 /// Экран «Вы клиент или мастер?» — показывается, когда нет сессии.
 class RoleSelectScreen extends StatefulWidget {
-  const RoleSelectScreen({super.key});
+  const RoleSelectScreen({super.key, this.skipLogo = false});
+
+  /// Если true, логотип не анимируется — экран сразу показывает приветствие.
+  final bool skipLogo;
 
   @override
   State<RoleSelectScreen> createState() => _RoleSelectScreenState();
@@ -27,6 +30,7 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
+      value: widget.skipLogo ? 0.35 : 0.0,
     );
 
     _logoScale = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -98,6 +102,19 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
     final background = scheme.brightness == Brightness.light
         ? [Colors.white, scheme.primary.withValues(alpha: 0.08)]
         : [Colors.black, scheme.primary.withValues(alpha: 0.12)];
+    final logo = Center(
+      child: Image.asset(
+        'assets/icons/logo.png',
+        width: 220,
+        height: 220,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) => Icon(
+          Icons.calendar_month,
+          size: 180,
+          color: scheme.primary,
+        ),
+      ),
+    );
 
     return Scaffold(
       body: Container(
@@ -115,28 +132,18 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Spacer(),
-                AnimatedBuilder(
-                  animation: _controller,
-                  builder: (context, child) {
-                    return Transform.scale(
-                      scale: _logoScale.value,
-                      child: child,
-                    );
-                  },
-                  child: Center(
-                    child: Image.asset(
-                      'assets/icons/logo.png',
-                      width: 140,
-                      height: 140,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) => Icon(
-                        Icons.calendar_month,
-                        size: 120,
-                        color: scheme.primary,
+                widget.skipLogo
+                    ? logo
+                    : AnimatedBuilder(
+                        animation: _controller,
+                        builder: (context, child) {
+                          return Transform.scale(
+                            scale: _logoScale.value,
+                            child: child,
+                          );
+                        },
+                        child: logo,
                       ),
-                    ),
-                  ),
-                ),
                 const SizedBox(height: 32),
                 AnimatedBuilder(
                   animation: _controller,

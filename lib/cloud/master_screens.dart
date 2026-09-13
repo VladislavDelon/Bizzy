@@ -341,6 +341,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                       value: _category,
                       isExpanded: true,
                       isDense: true,
+                      hint: const Text('Выберите категорию'),
                       items: _categories
                           .map(
                             (c) => DropdownMenuItem(
@@ -349,7 +350,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                             ),
                           )
                           .toList(),
-                      onChanged: (v) => setState(() => _category = v),
+                      onChanged: _saving
+                          ? null
+                          : (v) => setState(() => _category = v),
                     ),
                   ),
                 ),

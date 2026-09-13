@@ -423,9 +423,22 @@ class CloudService {
 
   // ---------- Categories ----------
   Future<List<String>> categories() async {
-    final rows =
-        await supabase.from('categories').select('name').order('name');
-    return [for (final r in rows) r['name'] as String];
+    try {
+      final rows =
+          await supabase.from('categories').select('name').order('name');
+      final list = [for (final r in rows) r['name'] as String];
+      if (list.isNotEmpty) return list;
+    } catch (_) {}
+    return const [
+      'Массажист',
+      'Маникюр',
+      'Педикюр',
+      'Парикмахер',
+      'Бровист',
+      'Косметолог',
+      'Мастер по ресницам',
+      'Другое',
+    ];
   }
 
   // ---------- Master profiles ----------

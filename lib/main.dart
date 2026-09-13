@@ -774,10 +774,13 @@ class _DownloadUpdateDialogState extends State<DownloadUpdateDialog> {
 }
 
 class User {
-  const User({required this.id, required this.login});
+  const User({required this.id, required this.login, this.name = ''});
 
   final int id;
   final String login;
+  final String name;
+
+  String get displayName => name.trim().isNotEmpty ? name.trim() : login;
 }
 
 class Company {
@@ -891,6 +894,8 @@ class Appointment {
   final String notes;
   final String externalId;
   final String cloudUpdatedAt;
+  final String clientId;
+  final double servicePrice;
 
   Appointment({
     this.id,
@@ -905,6 +910,8 @@ class Appointment {
     required this.notes,
     this.externalId = '',
     this.cloudUpdatedAt = '',
+    this.clientId = '',
+    this.servicePrice = 0,
   });
 
   Map<String, Object?> toMap() {
@@ -921,6 +928,8 @@ class Appointment {
       'notes': notes,
       'externalId': externalId,
       'cloudUpdatedAt': cloudUpdatedAt,
+      'clientId': clientId,
+      'servicePrice': servicePrice,
     };
   }
 
@@ -937,6 +946,8 @@ class Appointment {
     String? notes,
     String? externalId,
     String? cloudUpdatedAt,
+    String? clientId,
+    double? servicePrice,
   }) =>
       Appointment(
         id: id ?? this.id,
@@ -951,6 +962,8 @@ class Appointment {
         notes: notes ?? this.notes,
         externalId: externalId ?? this.externalId,
         cloudUpdatedAt: cloudUpdatedAt ?? this.cloudUpdatedAt,
+        clientId: clientId ?? this.clientId,
+        servicePrice: servicePrice ?? this.servicePrice,
       );
 
   factory Appointment.fromMap(Map<String, Object?> map) {
@@ -967,6 +980,8 @@ class Appointment {
       notes: map['notes'] as String,
       externalId: (map['externalId'] as String?) ?? '',
       cloudUpdatedAt: (map['cloudUpdatedAt'] as String?) ?? '',
+      clientId: (map['clientId'] as String?) ?? '',
+      servicePrice: (map['servicePrice'] as num?)?.toDouble() ?? 0,
     );
   }
 }
@@ -990,6 +1005,11 @@ class Contact {
     required this.phone,
     this.externalId = '',
     this.cloudUpdatedAt = '',
+    this.avatarUrl = '',
+    this.lastService = '',
+    this.lastPrice = 0,
+    this.lastDate = '',
+    this.clientId = '',
   });
 
   final int id;
@@ -997,6 +1017,11 @@ class Contact {
   final String phone;
   final String externalId;
   final String cloudUpdatedAt;
+  final String avatarUrl;
+  final String lastService;
+  final double lastPrice;
+  final String lastDate;
+  final String clientId;
 
   factory Contact.fromMap(Map<String, Object?> map) => Contact(
     id: map['id'] as int,
@@ -1004,6 +1029,11 @@ class Contact {
     phone: map['phone'] as String,
     externalId: (map['externalId'] as String?) ?? '',
     cloudUpdatedAt: (map['cloudUpdatedAt'] as String?) ?? '',
+    avatarUrl: (map['avatarUrl'] as String?) ?? '',
+    lastService: (map['lastService'] as String?) ?? '',
+    lastPrice: (map['lastPrice'] as num?)?.toDouble() ?? 0,
+    lastDate: (map['lastDate'] as String?) ?? '',
+    clientId: (map['clientId'] as String?) ?? '',
   );
 
   Contact copyWith({
@@ -1012,6 +1042,11 @@ class Contact {
     String? phone,
     String? externalId,
     String? cloudUpdatedAt,
+    String? avatarUrl,
+    String? lastService,
+    double? lastPrice,
+    String? lastDate,
+    String? clientId,
   }) =>
       Contact(
         id: id ?? this.id,
@@ -1019,6 +1054,11 @@ class Contact {
         phone: phone ?? this.phone,
         externalId: externalId ?? this.externalId,
         cloudUpdatedAt: cloudUpdatedAt ?? this.cloudUpdatedAt,
+        avatarUrl: avatarUrl ?? this.avatarUrl,
+        lastService: lastService ?? this.lastService,
+        lastPrice: lastPrice ?? this.lastPrice,
+        lastDate: lastDate ?? this.lastDate,
+        clientId: clientId ?? this.clientId,
       );
 }
 
@@ -1035,7 +1075,7 @@ class AppointmentsDatabase {
     final pathString = p.join(databasesPath, 'bizzy.db');
     return openDatabase(
       pathString,
-      version: 9,
+      version: 10,
       onCreate: (db, version) => _createAll(db),
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -1108,6 +1148,31 @@ class AppointmentsDatabase {
             'ALTER TABLE masters ADD COLUMN cloudUpdatedAt TEXT NOT NULL DEFAULT \'\'',
           );
         }
+        if (oldVersion < 10) {
+          await db.execute(
+            'ALTER TABLE appointments ADD COLUMN clientId TEXT NOT NULL DEFAULT \'\'',
+          );
+          await db.execute(
+            'ALTER TABLE appointments ADD COLUMN servicePrice REAL NOT NULL DEFAULT 0',
+          );
+          for (final table in ['clients', 'masters']) {
+            await db.execute(
+              'ALTER TABLE $table ADD COLUMN avatarUrl TEXT NOT NULL DEFAULT \'\'',
+            );
+            await db.execute(
+              'ALTER TABLE $table ADD COLUMN lastService TEXT NOT NULL DEFAULT \'\'',
+            );
+            await db.execute(
+              'ALTER TABLE $table ADD COLUMN lastPrice REAL NOT NULL DEFAULT 0',
+            );
+            await db.execute(
+              'ALTER TABLE $table ADD COLUMN lastDate TEXT NOT NULL DEFAULT \'\'',
+            );
+            await db.execute(
+              'ALTER TABLE $table ADD COLUMN clientId TEXT NOT NULL DEFAULT \'\'',
+            );
+          }
+        }
       },
     );
   }
@@ -1126,7 +1191,9 @@ class AppointmentsDatabase {
         reminderMinutes INTEGER NOT NULL DEFAULT 30,
         notes TEXT NOT NULL,
         externalId TEXT NOT NULL DEFAULT '',
-        cloudUpdatedAt TEXT NOT NULL DEFAULT ''
+        cloudUpdatedAt TEXT NOT NULL DEFAULT '',
+        clientId TEXT NOT NULL DEFAULT '',
+        servicePrice REAL NOT NULL DEFAULT 0
       )
     ''');
     await _createDirectories(db);
@@ -1145,6 +1212,11 @@ class AppointmentsDatabase {
           phone TEXT NOT NULL DEFAULT '',
           externalId TEXT NOT NULL DEFAULT '',
           cloudUpdatedAt TEXT NOT NULL DEFAULT '',
+          avatarUrl TEXT NOT NULL DEFAULT '',
+          lastService TEXT NOT NULL DEFAULT '',
+          lastPrice REAL NOT NULL DEFAULT 0,
+          lastDate TEXT NOT NULL DEFAULT '',
+          clientId TEXT NOT NULL DEFAULT '',
           UNIQUE(companyId, name, phone)
         )
       ''');
@@ -1340,6 +1412,78 @@ class AppointmentsDatabase {
     return contacts;
   }
 
+  /// Создаёт или обновляет клиента в справочнике на основе записи.
+  /// Используется clientId, если он есть, иначе имя + телефон.
+  Future<void> _upsertClientFromAppointment(Appointment a) async {
+    final db = await database;
+    final name = a.clientName.trim();
+    final phone = a.phone.trim();
+    if (name.isEmpty) return;
+
+    List<Map<String, Object?>> existing;
+    if (a.clientId.isNotEmpty) {
+      existing = await db.query(
+        'clients',
+        where: 'companyId = ? AND clientId = ?',
+        whereArgs: [a.companyId, a.clientId],
+      );
+    } else {
+      existing = await db.query(
+        'clients',
+        where: 'companyId = ? AND name = ? AND phone = ?',
+        whereArgs: [a.companyId, name, phone],
+      );
+    }
+
+    final lastDate = a.dateTime.toIso8601String();
+    final values = {
+      'companyId': a.companyId,
+      'name': name,
+      'phone': phone,
+      'lastService': a.service,
+      'lastPrice': a.servicePrice,
+      'lastDate': lastDate,
+      'clientId': a.clientId,
+      'cloudUpdatedAt': DateTime.now().toIso8601String(),
+    };
+
+    if (existing.isEmpty) {
+      await db.insert('clients', {
+        ...values,
+        'externalId': '',
+        'avatarUrl': '',
+      });
+    } else {
+      final id = existing.first['id'] as int;
+      final oldDate = existing.first['lastDate'] as String? ?? '';
+      final oldDateTime = DateTime.tryParse(oldDate) ?? DateTime(1970);
+      if (a.dateTime.isAfter(oldDateTime)) {
+        await db.update(
+          'clients',
+          values,
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
+    }
+  }
+
+  /// Все услуги, которые получал клиент, с ценами и примечаниями.
+  Future<List<Appointment>> getClientAppointments(
+    int companyId,
+    String name,
+    String phone,
+  ) async {
+    final db = await database;
+    final maps = await db.query(
+      'appointments',
+      where: 'companyId = ? AND clientName = ? AND phone = ?',
+      whereArgs: [companyId, name.trim(), phone.trim()],
+      orderBy: 'dateTime DESC',
+    );
+    return maps.map(Appointment.fromMap).toList();
+  }
+
   Future<Contact> saveContact(
     ContactType type,
     int companyId,
@@ -1370,17 +1514,27 @@ class AppointmentsDatabase {
 
   Future<int> insert(Appointment appointment) async {
     final db = await database;
-    return db.insert('appointments', appointment.toMap());
+    final price =
+        await _servicePriceForName(appointment.companyId, appointment.service);
+    final withPrice = appointment.copyWith(servicePrice: price);
+    final id = await db.insert('appointments', withPrice.toMap());
+    await _upsertClientFromAppointment(withPrice.copyWith(id: id));
+    return id;
   }
 
   Future<int> update(Appointment appointment) async {
     final db = await database;
-    return db.update(
+    final price =
+        await _servicePriceForName(appointment.companyId, appointment.service);
+    final withPrice = appointment.copyWith(servicePrice: price);
+    final result = await db.update(
       'appointments',
-      appointment.toMap()..remove('id'),
+      withPrice.toMap()..remove('id'),
       where: 'id = ?',
       whereArgs: [appointment.id],
     );
+    await _upsertClientFromAppointment(withPrice);
+    return result;
   }
 
   Future<List<Appointment>> getAll(int companyId) async {
@@ -1458,6 +1612,18 @@ class AppointmentsDatabase {
       orderBy: 'name',
     );
     return maps.map(Service.fromMap).toList();
+  }
+
+  Future<double> _servicePriceForName(int companyId, String name) async {
+    final db = await database;
+    final rows = await db.query(
+      'services',
+      where: 'companyId = ? AND name = ?',
+      whereArgs: [companyId, name.trim()],
+      limit: 1,
+    );
+    if (rows.isEmpty) return 0;
+    return (rows.first['price'] as num?)?.toDouble() ?? 0;
   }
 
   Future<Service> createService(Service service) async {
@@ -1695,6 +1861,11 @@ class AppointmentsDatabase {
             'phone': cloud.phone,
             'externalId': ext,
             'cloudUpdatedAt': cloudUpdatedAt.toIso8601String(),
+            'avatarUrl': '',
+            'lastService': '',
+            'lastPrice': 0,
+            'lastDate': '',
+            'clientId': '',
           });
         } else {
           final id = existing.first['id'] as int;
@@ -1735,6 +1906,24 @@ class AppointmentsDatabase {
 
       final unsynced = local.where((c) => c.externalId.isEmpty).toList();
       for (final c in unsynced) {
+        // Если в облаке уже есть клиент с таким именем и телефоном,
+        // привязываемся к существующей записи, чтобы не дублировать.
+        final existingCloud = cloudItems
+            .where((x) => x.name == c.name && x.phone == c.phone)
+            .firstOrNull;
+        if (existingCloud != null) {
+          await db.update(
+            type.table,
+            {
+              'externalId': 'cloud:client:${existingCloud.id}',
+              'cloudUpdatedAt':
+                  (existingCloud.updatedAt ?? DateTime.now()).toIso8601String(),
+            },
+            where: 'id = ?',
+            whereArgs: [c.id],
+          );
+          continue;
+        }
         final cloud = await CloudService().addClient(
           name: c.name,
           phone: c.phone,
@@ -2020,6 +2209,8 @@ class AppointmentsDatabase {
       where: 'externalId = ?',
       whereArgs: ['cloud:${booking.id}'],
     );
+    final servicePrice =
+        await _servicePriceForName(companyId, booking.serviceName);
     final appointment = Appointment(
       companyId: companyId,
       clientName: booking.clientName.isEmpty
@@ -2034,6 +2225,8 @@ class AppointmentsDatabase {
       notes: booking.notes,
       externalId: 'cloud:${booking.id}',
       cloudUpdatedAt: DateTime.now().toIso8601String(),
+      clientId: booking.clientId,
+      servicePrice: servicePrice,
     );
     if (existing.isEmpty) {
       await db.insert('appointments', appointment.toMap());
@@ -2045,6 +2238,9 @@ class AppointmentsDatabase {
         where: 'id = ?',
         whereArgs: [id],
       );
+    }
+    if (booking.status == 'completed') {
+      await _upsertClientFromAppointment(appointment);
     }
   }
 
@@ -3291,7 +3487,7 @@ class _HomeTabState extends State<HomeTab> {
                   children: [
                     TextSpan(text: '$greeting, '),
                     TextSpan(
-                      text: widget.user.login,
+                      text: widget.user.displayName,
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     const TextSpan(text: '! ✨'),
@@ -3601,6 +3797,11 @@ class _ClientsTabState extends State<ClientsTab> {
         widget.company.id,
       );
       if (!mounted) return;
+      contacts.sort((a, b) {
+        final da = DateTime.tryParse(a.lastDate) ?? DateTime(1970);
+        final db = DateTime.tryParse(b.lastDate) ?? DateTime(1970);
+        return db.compareTo(da);
+      });
       setState(() => _contacts = contacts);
     } catch (_) {
       if (!mounted) return;
@@ -3664,6 +3865,18 @@ class _ClientsTabState extends State<ClientsTab> {
         const SnackBar(content: Text('Не удалось удалить клиента')),
       );
     }
+  }
+
+  Future<void> _openClientDetail(Contact contact) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => ClientDetailScreen(
+          database: widget.database,
+          companyId: widget.company.id,
+          contact: contact,
+        ),
+      ),
+    );
   }
 
   Future<bool> _isContactUsed(Contact contact) async {
@@ -3804,30 +4017,60 @@ class _ClientsTabState extends State<ClientsTab> {
                             itemCount: contacts.length,
                             itemBuilder: (context, index) {
                               final contact = contacts[index];
-                              return ListTile(
-                                leading: const Icon(Icons.person_outline),
-                                title: Text(contact.name),
-                                subtitle: contact.phone.isEmpty
-                                    ? null
-                                    : Text(contact.phone),
-                                trailing: PopupMenuButton<String>(
-                                  onSelected: (value) {
-                                    if (value == 'edit') {
-                                      _editClient(contact);
-                                    } else if (value == 'delete') {
-                                      _deleteClient(contact);
-                                    }
-                                  },
-                                  itemBuilder: (context) => const [
-                                    PopupMenuItem(
-                                      value: 'edit',
-                                      child: Text('Редактировать'),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'delete',
-                                      child: Text('Удалить'),
-                                    ),
-                                  ],
+                              return Card(
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
+                                child: ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundImage: contact.avatarUrl.isNotEmpty
+                                        ? NetworkImage(contact.avatarUrl)
+                                        : null,
+                                    child: contact.avatarUrl.isEmpty
+                                        ? const Icon(Icons.person_outline)
+                                        : null,
+                                  ),
+                                  title: Text(contact.name),
+                                  subtitle: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (contact.phone.isNotEmpty)
+                                        Text(contact.phone),
+                                      if (contact.lastService.isNotEmpty)
+                                        Text(
+                                          'Последняя: ${contact.lastService} '
+                                          '• ${contact.lastPrice.toStringAsFixed(0)} ₽',
+                                          style: TextStyle(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  trailing: PopupMenuButton<String>(
+                                    onSelected: (value) {
+                                      if (value == 'edit') {
+                                        _editClient(contact);
+                                      } else if (value == 'delete') {
+                                        _deleteClient(contact);
+                                      }
+                                    },
+                                    itemBuilder: (context) => const [
+                                      PopupMenuItem(
+                                        value: 'edit',
+                                        child: Text('Редактировать'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'delete',
+                                        child: Text('Удалить'),
+                                      ),
+                                    ],
+                                  ),
+                                  onTap: () => _openClientDetail(contact),
                                 ),
                               );
                             },
@@ -3841,6 +4084,136 @@ class _ClientsTabState extends State<ClientsTab> {
         icon: const Icon(Icons.add),
         label: const Text('Добавить клиента'),
       ),
+    );
+  }
+}
+
+class ClientDetailScreen extends StatefulWidget {
+  const ClientDetailScreen({
+    super.key,
+    required this.database,
+    required this.companyId,
+    required this.contact,
+  });
+
+  final AppointmentsDatabase database;
+  final int companyId;
+  final Contact contact;
+
+  @override
+  State<ClientDetailScreen> createState() => _ClientDetailScreenState();
+}
+
+class _ClientDetailScreenState extends State<ClientDetailScreen> {
+  List<Appointment> _appointments = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final list = await widget.database.getClientAppointments(
+        widget.companyId,
+        widget.contact.name,
+        widget.contact.phone,
+      );
+      if (!mounted) return;
+      setState(() {
+        _appointments = list;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  String _fmt(DateTime dt) {
+    return '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} '
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final contact = widget.contact;
+    return Scaffold(
+      appBar: AppBar(title: Text(contact.name)),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 36,
+                          backgroundImage: contact.avatarUrl.isNotEmpty
+                              ? NetworkImage(contact.avatarUrl)
+                              : null,
+                          child: contact.avatarUrl.isEmpty
+                              ? const Icon(Icons.person, size: 36)
+                              : null,
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                contact.name,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                              if (contact.phone.isNotEmpty)
+                                Text(contact.phone),
+                              if (contact.lastService.isNotEmpty)
+                                Text(
+                                  'Последняя: ${contact.lastService} '
+                                  '• ${contact.lastPrice.toStringAsFixed(0)} ₽',
+                                  style: TextStyle(
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'История услуг',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                if (_appointments.isEmpty)
+                  const Center(child: Text('Записей пока нет')),
+                for (final a in _appointments)
+                  Card(
+                    child: ListTile(
+                      title: Text(a.service),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_fmt(a.dateTime)),
+                          if (a.servicePrice > 0)
+                            Text('Цена: ${a.servicePrice.toStringAsFixed(0)} ₽'),
+                          if (a.notes.isNotEmpty) Text('Примечание: ${a.notes}'),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
     );
   }
 }
@@ -5908,7 +6281,13 @@ class _MasterBridgeState extends State<_MasterBridge> {
       final user =
           await widget.database.getOrCreateCloudUser('sb:$email');
       if (!mounted) return;
-      setState(() => _user = user);
+      setState(
+        () => _user = User(
+          id: user.id,
+          login: user.login,
+          name: widget.profile.name,
+        ),
+      );
 
       // Автоматически подтягиваем название компании из облачного профиля.
       var companies = await widget.database.getCompanies(user.id);

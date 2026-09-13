@@ -29,6 +29,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   final _cloud = CloudService();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
   final _descController = TextEditingController();
   final _addressController = TextEditingController();
   final _socialController = TextEditingController();
@@ -53,6 +56,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmController.dispose();
     _descController.dispose();
     _addressController.dispose();
     _socialController.dispose();
@@ -69,6 +75,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _categories = categories;
         _nameController.text = profile?.name ?? '';
         _phoneController.text = profile?.phone ?? '';
+        _emailController.text = supabase.auth.currentUser?.email ?? '';
         _category = card?.category ?? categories.firstOrNull;
         _descController.text = card?.description ?? '';
         _addressController.text = card?.address ?? '';
@@ -188,14 +195,37 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       setState(() => _error = 'Выберите категорию');
       return;
     }
+    final password = _passwordController.text;
+    final confirm = _confirmController.text;
+    if (password.isNotEmpty && password != confirm) {
+      setState(() => _error = 'Пароли не совпадают');
+      return;
+    }
+    if (password.isNotEmpty && password.length < 6) {
+      setState(() => _error = 'Пароль должен быть не короче 6 символов');
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
+      final email = _emailController.text.trim();
+      final currentEmail = supabase.auth.currentUser?.email ?? '';
+      final needEmail = !widget.isFirstSetup &&
+          email.isNotEmpty &&
+          email != currentEmail;
+      if (needEmail || password.isNotEmpty) {
+        await _cloud.updateAuth(
+          email: needEmail ? email : null,
+          password: password.isNotEmpty ? password : null,
+        );
+      }
+
       await _cloud.updateMyProfile(
         name: _nameController.text.trim(),
         phone: _phoneController.text.trim(),
+        avatarUrl: _avatarUrl,
       );
       await _cloud.upsertMasterProfile(
         category: _category!,
@@ -210,11 +240,12 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         const SnackBar(content: Text('Профиль сохранён')),
       );
       Navigator.of(context).pop();
-    } catch (_) {
+    } catch (e) {
+      await SyncLog.write('master_profile_edit', e.toString());
       if (!mounted) return;
       setState(() {
         _saving = false;
-        _error = 'Не удалось сохранить профиль';
+        _error = 'Не удалось сохранить: $e';
       });
     }
   }
@@ -324,6 +355,33 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                   keyboardType: TextInputType.phone,
                   decoration: const InputDecoration(
                     labelText: 'Телефон для клиентов',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
+                    labelText: 'Email / логин',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _passwordController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Новый пароль (оставьте пустым, чтобы не менять)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _confirmController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Повторите новый пароль',
                     border: OutlineInputBorder(),
                   ),
                 ),

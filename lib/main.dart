@@ -6238,6 +6238,7 @@ class _CloudGateState extends State<CloudGate> {
       profile: profile,
       onSignOut: _signOut,
       onDeleteAccount: _deleteCloudAccount,
+      onProfileUpdated: _loadProfile,
     );
   }
 }

@@ -56,6 +56,17 @@ DateTime? _parseDateTime(dynamic value) {
   return null;
 }
 
+/// Вытаскивает Map из одиночного объекта или первого элемента списка.
+/// Нужно, потому что Supabase в embedded-запросах может вернуть Map или List.
+Map<String, dynamic>? _pickProfileMap(dynamic value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is List && value.isNotEmpty) {
+    final first = value.first;
+    if (first is Map<String, dynamic>) return first;
+  }
+  return null;
+}
+
 /// Файловый лог для диагностики облачной синхронизации.
 class SyncLog {
   static const _fileName = 'bizzy_sync.log';
@@ -101,12 +112,14 @@ class CloudProfile {
     required this.role,
     required this.name,
     required this.phone,
+    this.avatarUrl = '',
   });
 
   final String id;
   final String role; // 'client' | 'master'
   final String name;
   final String phone;
+  final String avatarUrl;
 
   bool get isMaster => role == 'master';
   bool get isClient => role == 'client';
@@ -116,6 +129,7 @@ class CloudProfile {
         role: _parseString(map['role'], fallback: 'client'),
         name: _parseString(map['name']),
         phone: _parseString(map['phone']),
+        avatarUrl: _parseString(map['avatar_url']),
       );
 
   Map<String, dynamic> toMap() => {
@@ -123,6 +137,7 @@ class CloudProfile {
         'role': role,
         'name': name,
         'phone': phone,
+        'avatar_url': avatarUrl,
       };
 }
 
@@ -154,12 +169,15 @@ class MasterCard {
   final double ratingAvg;
   final int ratingCount;
 
-  factory MasterCard.fromMap(Map<String, dynamic> map) {
-    final profile = map['profiles'];
+  factory MasterCard.fromMap(
+    Map<String, dynamic> map, {
+    Map<String, dynamic>? fallbackProfile,
+  }) {
+    final profile = _pickProfileMap(map['profiles']) ?? fallbackProfile;
     return MasterCard(
       userId: _parseString(map['user_id']),
-      name: profile is Map ? _parseString(profile['name']) : '',
-      phone: profile is Map ? _parseString(profile['phone']) : '',
+      name: profile != null ? _parseString(profile['name']) : '',
+      phone: profile != null ? _parseString(profile['phone']) : '',
       category: _parseString(map['category'], fallback: 'Другое'),
       description: _parseString(map['description']),
       address: _parseString(map['address']),
@@ -344,12 +362,12 @@ class ClientReview {
   final DateTime? createdAt;
 
   factory ClientReview.fromMap(Map<String, dynamic> map) {
-    final profile = map['profiles'];
+    final profile = _pickProfileMap(map['profiles']);
     return ClientReview(
       id: _parseInt(map['id']),
       clientId: _parseString(map['client_id']),
       masterId: _parseString(map['master_id']),
-      masterName: profile is Map ? _parseString(profile['name']) : '',
+      masterName: profile != null ? _parseString(profile['name']) : '',
       bookingId: _parseInt(map['booking_id']),
       rating: _parseInt(map['rating'], fallback: 0),
       comment: _parseString(map['comment']),
@@ -415,11 +433,33 @@ class CloudService {
     return (await myProfile())!;
   }
 
-  Future<void> updateMyProfile({String? name, String? phone}) =>
+  Future<void> updateMyProfile({
+    String? name,
+    String? phone,
+    String? avatarUrl,
+  }) =>
       supabase.from('profiles').update({
         'name': ?name,
         'phone': ?phone,
+        'avatar_url': ?avatarUrl,
       }).eq('id', uid!);
+
+  /// Обновляет email и/или пароль текущего пользователя в Supabase Auth.
+  Future<void> updateAuth({String? email, String? password}) async {
+    if ((email == null || email.isEmpty) &&
+        (password == null || password.isEmpty)) {
+      return;
+    }
+    final res = await supabase.auth.updateUser(
+      UserAttributes(
+        email: email?.isNotEmpty == true ? email : null,
+        password: password?.isNotEmpty == true ? password : null,
+      ),
+    );
+    if (res.user == null) {
+      throw Exception('Не удалось обновить данные авторизации');
+    }
+  }
 
   // ---------- Categories ----------
   Future<List<String>> categories() async {
@@ -443,23 +483,116 @@ class CloudService {
 
   // ---------- Master profiles ----------
   Future<List<MasterCard>> masters({String? category}) async {
-    var query = supabase.from('master_profiles').select(
-        'user_id, category, description, address, social, phone_public, avatar_url, rating_avg, rating_count, profiles!inner(name, phone)');
-    if (category != null && category.isNotEmpty) {
-      query = query.eq('category', category);
+    Future<List<MasterCard>> load(List<String> fields) async {
+      var query = supabase.from('master_profiles').select(fields.join(', '));
+      if (category != null && category.isNotEmpty) {
+        query = query.eq('category', category);
+      }
+      final rows = await query.order('rating_avg', ascending: false);
+      final userIds = <String>[
+        for (final r in rows) _parseString(r['user_id'])
+      ].where((id) => id.isNotEmpty).toSet().toList();
+
+      final profileMap = <String, Map<String, dynamic>>{};
+      if (userIds.isNotEmpty) {
+        try {
+          final profiles = await supabase
+              .from('profiles')
+              .select('id, name, phone')
+              .inFilter('id', userIds);
+          for (final p in profiles) {
+            profileMap[_parseString(p['id'])] = p;
+          }
+        } catch (_) {
+          // Профили не критичны — карточки всё равно отобразятся.
+        }
+      }
+
+      return [
+        for (final r in rows)
+          MasterCard.fromMap(
+            r,
+            fallbackProfile: profileMap[_parseString(r['user_id'])],
+          )
+      ];
     }
-    final rows = await query.order('rating_avg', ascending: false);
-    return [for (final r in rows) MasterCard.fromMap(r)];
+
+    const fullFields = [
+      'user_id',
+      'category',
+      'description',
+      'address',
+      'social',
+      'phone_public',
+      'avatar_url',
+      'rating_avg',
+      'rating_count',
+    ];
+    try {
+      return await load(fullFields);
+    } on PostgrestException catch (e) {
+      await SyncLog.write('masters', 'full fields error: $e');
+      return await load([
+        'user_id',
+        'category',
+        'avatar_url',
+        'rating_avg',
+        'rating_count',
+      ]);
+    } catch (e, st) {
+      await SyncLog.write('masters', 'unexpected error: $e\n$st');
+      rethrow;
+    }
   }
 
   Future<MasterCard?> masterCard(String masterId) async {
-    final row = await supabase
-        .from('master_profiles')
-        .select(
-            'user_id, category, description, address, social, phone_public, avatar_url, rating_avg, rating_count, profiles!inner(name, phone)')
-        .eq('user_id', masterId)
-        .maybeSingle();
-    return row == null ? null : MasterCard.fromMap(row);
+    Future<MasterCard?> load(List<String> fields) async {
+      final row = await supabase
+          .from('master_profiles')
+          .select(fields.join(', '))
+          .eq('user_id', masterId)
+          .maybeSingle();
+      if (row == null) return null;
+
+      Map<String, dynamic>? profile;
+      try {
+        final p = await supabase
+            .from('profiles')
+            .select('id, name, phone')
+            .eq('id', masterId)
+            .maybeSingle();
+        if (p != null) profile = p;
+      } catch (_) {}
+
+      return MasterCard.fromMap(
+        row,
+        fallbackProfile: profile,
+      );
+    }
+
+    const fullFields = [
+      'user_id',
+      'category',
+      'description',
+      'address',
+      'social',
+      'phone_public',
+      'avatar_url',
+      'rating_avg',
+      'rating_count',
+    ];
+    try {
+      return await load(fullFields);
+    } on PostgrestException catch (e) {
+      await SyncLog.write('masterCard', 'full fields error: $e');
+      return await load([
+        'user_id',
+        'category',
+        'avatar_url',
+        'rating_avg',
+        'rating_count',
+      ]);
+    }
   }
 
   Future<MasterCard?> myMasterCard() async {
@@ -516,13 +649,24 @@ class CloudService {
 
   /// Опубликованные услуги мастера (видны клиентам).
   Future<List<CloudServiceItem>> servicesOf(String masterId) async {
-    final rows = await supabase
-        .from('services')
-        .select()
-        .eq('master_id', masterId)
-        .eq('published', true)
-        .order('name');
-    return [for (final r in rows) CloudServiceItem.fromMap(r)];
+    try {
+      final rows = await supabase
+          .from('services')
+          .select()
+          .eq('master_id', masterId)
+          .eq('published', true)
+          .order('name');
+      return [for (final r in rows) CloudServiceItem.fromMap(r)];
+    } on PostgrestException catch (e) {
+      await SyncLog.write('servicesOf', 'published filter error: $e');
+      // Если колонки `published` ещё нет — показываем все услуги.
+      final rows = await supabase
+          .from('services')
+          .select()
+          .eq('master_id', masterId)
+          .order('name');
+      return [for (final r in rows) CloudServiceItem.fromMap(r)];
+    }
   }
 
   Future<CloudServiceItem> addService({

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../notifications/push_service.dart';
 import 'cloud_service.dart';
@@ -11,11 +12,13 @@ class ClientHome extends StatefulWidget {
     required this.profile,
     required this.onSignOut,
     required this.onDeleteAccount,
+    this.onProfileUpdated,
   });
 
   final CloudProfile profile;
   final Future<void> Function() onSignOut;
   final Future<void> Function() onDeleteAccount;
+  final VoidCallback? onProfileUpdated;
 
   @override
   State<ClientHome> createState() => _ClientHomeState();
@@ -33,6 +36,7 @@ class _ClientHomeState extends State<ClientHome> {
         profile: widget.profile,
         onSignOut: widget.onSignOut,
         onDeleteAccount: widget.onDeleteAccount,
+        onProfileUpdated: widget.onProfileUpdated,
       ),
     ];
     return Scaffold(
@@ -113,7 +117,8 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
         _categories = categories;
         _masters = masters;
       });
-    } catch (_) {
+    } catch (e, st) {
+      await SyncLog.write('client_catalog', '$e\n$st');
       if (!mounted) return;
       setState(() => _failed = true);
     } finally {
@@ -279,7 +284,8 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
         _services = results[1] as List<CloudServiceItem>;
         _loading = false;
       });
-    } catch (e) {
+    } catch (e, st) {
+      await SyncLog.write('master_detail', '$e\n$st');
       if (!mounted) return;
       setState(() {
         _error = 'Не удалось загрузить профиль мастера';
@@ -979,11 +985,13 @@ class _ClientProfileTab extends StatelessWidget {
     required this.profile,
     required this.onSignOut,
     required this.onDeleteAccount,
+    this.onProfileUpdated,
   });
 
   final CloudProfile profile;
   final Future<void> Function() onSignOut;
   final Future<void> Function() onDeleteAccount;
+  final VoidCallback? onProfileUpdated;
 
   Future<void> _confirmDelete(BuildContext context) async {
     final ok = await showDialog<bool>(
@@ -1019,23 +1027,64 @@ class _ClientProfileTab extends StatelessWidget {
     }
   }
 
+  Future<void> _edit(BuildContext context) async {
+    final updated = await Navigator.of(context).push<CloudProfile>(
+      MaterialPageRoute(
+        builder: (context) => ClientProfileEditScreen(profile: profile),
+      ),
+    );
+    if (updated != null) onProfileUpdated?.call();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('Профиль')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          ListTile(
-            leading: const Icon(Icons.person),
-            title: Text(profile.name.isEmpty ? 'Клиент' : profile.name),
-            subtitle: Text(profile.phone),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 40,
+                    backgroundColor: scheme.primary,
+                    backgroundImage: profile.avatarUrl.isNotEmpty
+                        ? NetworkImage(profile.avatarUrl)
+                        : null,
+                    child: profile.avatarUrl.isEmpty
+                        ? Icon(Icons.person,
+                            color: scheme.onPrimary, size: 36)
+                        : null,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          profile.name.isEmpty ? 'Клиент' : profile.name,
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        if (profile.phone.isNotEmpty) Text(profile.phone),
+                        Text(supabase.auth.currentUser?.email ?? ''),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-          ListTile(
-            leading: const Icon(Icons.email),
-            title: Text(supabase.auth.currentUser?.email ?? ''),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: () => _edit(context),
+            icon: const Icon(Icons.edit),
+            label: const Text('Изменить профиль'),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
           FilledButton.tonalIcon(
             onPressed: () => onSignOut(),
             icon: const Icon(Icons.logout),
@@ -1046,6 +1095,239 @@ class _ClientProfileTab extends StatelessWidget {
             onPressed: () => _confirmDelete(context),
             icon: const Icon(Icons.delete_forever),
             label: const Text('Удалить аккаунт'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Экран редактирования профиля клиента.
+class ClientProfileEditScreen extends StatefulWidget {
+  const ClientProfileEditScreen({super.key, required this.profile});
+
+  final CloudProfile profile;
+
+  @override
+  State<ClientProfileEditScreen> createState() =>
+      _ClientProfileEditScreenState();
+}
+
+class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
+  final _cloud = CloudService();
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
+  String _avatarUrl = '';
+  bool _pickingAvatar = false;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController.text = widget.profile.name;
+    _phoneController.text = widget.profile.phone;
+    _emailController.text = supabase.auth.currentUser?.email ?? '';
+    _avatarUrl = widget.profile.avatarUrl;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickAvatar() async {
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        imageQuality: 85,
+      );
+      if (file == null || !mounted) return;
+      setState(() => _pickingAvatar = true);
+      final url = await _cloud.uploadAvatar(file.path);
+      await _cloud.updateMyProfile(avatarUrl: url);
+      if (!mounted) return;
+      setState(() => _avatarUrl = url);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось загрузить фото')),
+      );
+    } finally {
+      if (mounted) setState(() => _pickingAvatar = false);
+    }
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    final name = _nameController.text.trim();
+    final phone = _phoneController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final confirm = _confirmController.text;
+
+    if (password.isNotEmpty && password != confirm) {
+      setState(() => _error = 'Пароли не совпадают');
+      return;
+    }
+    if (password.isNotEmpty && password.length < 6) {
+      setState(() => _error = 'Пароль должен быть не короче 6 символов');
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    try {
+      await _cloud.updateMyProfile(
+        name: name,
+        phone: phone,
+        avatarUrl: _avatarUrl,
+      );
+
+      final currentEmail = supabase.auth.currentUser?.email ?? '';
+      final needEmail = email.isNotEmpty && email != currentEmail;
+      if (needEmail || password.isNotEmpty) {
+        await _cloud.updateAuth(
+          email: needEmail ? email : null,
+          password: password.isNotEmpty ? password : null,
+        );
+      }
+
+      final updated = await _cloud.myProfile();
+      if (!mounted) return;
+      if (updated == null) throw Exception('Не удалось загрузить профиль');
+      Navigator.of(context).pop(updated);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Профиль сохранён')),
+      );
+    } catch (e) {
+      await SyncLog.write('client_profile_edit', e.toString());
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = 'Не удалось сохранить: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Изменить профиль')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Center(
+            child: Stack(
+              alignment: Alignment.bottomRight,
+              children: [
+                CircleAvatar(
+                  radius: 48,
+                  backgroundColor: scheme.primary,
+                  backgroundImage:
+                      _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
+                  child: _avatarUrl.isEmpty
+                      ? Icon(Icons.person,
+                          color: scheme.onPrimary, size: 40)
+                      : null,
+                ),
+                if (_pickingAvatar)
+                  const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: scheme.secondary,
+                    child: IconButton(
+                      onPressed: _pickAvatar,
+                      icon: const Icon(Icons.camera_alt, size: 16),
+                      color: scheme.onSecondary,
+                      padding: EdgeInsets.zero,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _nameController,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'Имя',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _phoneController,
+            keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(
+              labelText: 'Телефон',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'Email',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _passwordController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Новый пароль (оставьте пустым, чтобы не менять)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _confirmController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Повторите новый пароль',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              style: TextStyle(color: scheme.error),
+            ),
+          ],
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: _saving ? null : _save,
+            icon: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save),
+            label: const Text('Сохранить'),
           ),
         ],
       ),

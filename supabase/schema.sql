@@ -7,6 +7,7 @@ create table if not exists public.profiles (
   role text not null check (role in ('client', 'master')),
   name text not null default '',
   phone text not null default '',
+  avatar_url text not null default '',
   created_at timestamptz not null default now()
 );
 
@@ -196,6 +197,10 @@ create policy "profiles_select_master" on public.profiles
   for select using (role = 'master');
 create policy "profiles_update_own"    on public.profiles
   for update using (auth.uid() = id) with check (auth.uid() = id);
+
+drop policy if exists "profiles_insert_own" on public.profiles;
+create policy "profiles_insert_own" on public.profiles
+  for insert with check (auth.uid() = id);
 
 alter table public.master_clients enable row level security;
 

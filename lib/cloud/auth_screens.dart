@@ -3,6 +3,88 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'cloud_service.dart';
 
+/// Анимированный логотип с масштабом, поворотом, появлением и золотым свечением.
+class AnimatedLogo extends StatelessWidget {
+  const AnimatedLogo({
+    super.key,
+    required this.animation,
+    this.size = 220,
+  });
+
+  final Animation<double> animation;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final scale = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: animation,
+        curve: const Interval(0.0, 0.5, curve: Curves.elasticOut),
+      ),
+    );
+    final opacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: animation,
+        curve: const Interval(0.0, 0.4, curve: Curves.easeOut),
+      ),
+    );
+    final rotation = Tween<double>(begin: -0.15, end: 0.0).animate(
+      CurvedAnimation(
+        parent: animation,
+        curve: const Interval(0.0, 0.45, curve: Curves.easeOutBack),
+      ),
+    );
+    final glow = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: animation,
+        curve: const Interval(0.2, 0.8, curve: Curves.easeOut),
+      ),
+    );
+
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        return Transform.rotate(
+          angle: rotation.value,
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.95),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.amber.withValues(alpha: 0.5 * glow.value),
+                  blurRadius: 70 * glow.value,
+                  spreadRadius: 25 * glow.value,
+                ),
+              ],
+            ),
+            child: Opacity(
+              opacity: opacity.value,
+              child: Transform.scale(
+                scale: scale.value,
+                child: child,
+              ),
+            ),
+          ),
+        );
+      },
+      child: Image.asset(
+        'assets/icons/logo.png',
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) => Icon(
+          Icons.calendar_month,
+          size: size * 0.8,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+      ),
+    );
+  }
+}
+
 /// Экран «Вы клиент или мастер?» — показывается, когда нет сессии.
 class RoleSelectScreen extends StatefulWidget {
   const RoleSelectScreen({super.key, this.skipLogo = false});
@@ -17,7 +99,6 @@ class RoleSelectScreen extends StatefulWidget {
 class _RoleSelectScreenState extends State<RoleSelectScreen>
     with TickerProviderStateMixin {
   late final AnimationController _controller;
-  late final Animation<double> _logoScale;
   late final Animation<double> _welcomeOpacity;
   late final Animation<Offset> _welcomeSlide;
   late final Animation<double> _questionOpacity;
@@ -30,14 +111,7 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
-      value: widget.skipLogo ? 0.35 : 0.0,
-    );
-
-    _logoScale = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.0, 0.45, curve: Curves.elasticOut),
-      ),
+      value: widget.skipLogo ? 1.0 : 0.0,
     );
 
     _welcomeOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -102,18 +176,9 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
     final background = scheme.brightness == Brightness.light
         ? [Colors.white, scheme.primary.withValues(alpha: 0.08)]
         : [Colors.black, scheme.primary.withValues(alpha: 0.12)];
-    final logo = Center(
-      child: Image.asset(
-        'assets/icons/logo.png',
-        width: 220,
-        height: 220,
-        fit: BoxFit.contain,
-        errorBuilder: (context, error, stackTrace) => Icon(
-          Icons.calendar_month,
-          size: 180,
-          color: scheme.primary,
-        ),
-      ),
+    final logo = AnimatedLogo(
+      animation: _controller,
+      size: 220,
     );
 
     return Scaffold(
@@ -132,18 +197,7 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Spacer(),
-                widget.skipLogo
-                    ? logo
-                    : AnimatedBuilder(
-                        animation: _controller,
-                        builder: (context, child) {
-                          return Transform.scale(
-                            scale: _logoScale.value,
-                            child: child,
-                          );
-                        },
-                        child: logo,
-                      ),
+                logo,
                 const SizedBox(height: 32),
                 AnimatedBuilder(
                   animation: _controller,

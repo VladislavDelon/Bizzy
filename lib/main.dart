@@ -6079,7 +6079,6 @@ enum _StartupStep { loading, checking, updating }
 class _StartupScreenState extends State<StartupScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _logoController;
-  late final Animation<double> _logoScale;
   _StartupStep _step = _StartupStep.loading;
 
   @override
@@ -6087,13 +6086,7 @@ class _StartupScreenState extends State<StartupScreen>
     super.initState();
     _logoController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
-    );
-    _logoScale = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _logoController,
-        curve: Curves.elasticOut,
-      ),
+      duration: const Duration(milliseconds: 1200),
     );
     _logoController.addStatusListener(_onAnimationStatus);
     _logoController.forward();
@@ -6163,28 +6156,7 @@ class _StartupScreenState extends State<StartupScreen>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Spacer(),
-                AnimatedBuilder(
-                  animation: _logoController,
-                  builder: (context, child) {
-                    return Transform.scale(
-                      scale: _logoScale.value,
-                      child: child,
-                    );
-                  },
-                  child: Center(
-                    child: Image.asset(
-                      'assets/icons/logo.png',
-                      width: 220,
-                      height: 220,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) => Icon(
-                        Icons.calendar_month,
-                        size: 180,
-                        color: scheme.primary,
-                      ),
-                    ),
-                  ),
-                ),
+                AnimatedLogo(animation: _logoController, size: 220),
                 const SizedBox(height: 32),
                 if (_step != _StartupStep.loading) ...[
                   const Center(
@@ -6345,19 +6317,19 @@ class _CloudGateState extends State<CloudGate> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_startupCompleted) {
+      return StartupScreen(
+        onDone: () {
+          if (mounted) setState(() => _startupCompleted = true);
+        },
+      );
+    }
     if (_loading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
     }
     if (_session == null) {
-      if (!_startupCompleted) {
-        return StartupScreen(
-          onDone: () {
-            if (mounted) setState(() => _startupCompleted = true);
-          },
-        );
-      }
       return const RoleSelectScreen(skipLogo: true);
     }
     if (_error != null) {

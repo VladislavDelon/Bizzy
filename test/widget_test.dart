@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import 'package:bizzy_app/main.dart';
+import 'package:bizzy_app/tasks/task_model.dart';
 
 class MemoryDatabase extends AppointmentsDatabase {
   final contacts = <String, List<Contact>>{
@@ -15,6 +16,7 @@ class MemoryDatabase extends AppointmentsDatabase {
   final companies = <Company>[];
   final users = <String, String>{};
   final services = <Service>[];
+  final tasks = <TaskItem>[];
   bool failContacts = false;
   var _nextCompanyId = 1;
   var _nextAppointmentId = 1;
@@ -196,6 +198,13 @@ class MemoryDatabase extends AppointmentsDatabase {
     appointments.removeWhere((a) => a.id == id);
     return 1;
   }
+
+  @override
+  Future<List<TaskItem>> getTasks(
+    int userId, {
+    bool includeDone = false,
+  }) async =>
+      tasks.where((t) => t.userId == userId).toList();
 }
 
 Future<MemoryDatabase> loggedInDb(WidgetTester tester) async {
@@ -512,5 +521,41 @@ void main() {
     expect(find.text('Анна'), findsNothing);
     expect(find.text('Клиентов пока нет'), findsOneWidget);
     expect(db.contacts['clients']!, isEmpty);
+  });
+
+  testWidgets('Personal task appears on home and calendar day lists',
+      (tester) async {
+    final db = MemoryDatabase();
+    db.users['u'] = 'p';
+    final company =
+        await db.createCompany(1, 'Салон «Тест»', 'Самозанятость');
+    db.tasks.add(
+      TaskItem(
+        id: 1,
+        userId: 1,
+        title: 'Пробежка',
+        description: '',
+        dueAt: DateTime.now().add(const Duration(hours: 3)),
+        createdAt: DateTime.now(),
+      ),
+    );
+    SharedPreferences.setMockInitialValues({
+      'bizzy_user_id': 1,
+      'bizzy_user_login': 'u',
+      'bizzy_company_id': company.id,
+    });
+    await tester.pumpWidget(BizzyApp(database: db));
+    await tester.pumpAndSettle();
+
+    // Главная: дело видно в списке дня и помечено как личное.
+    expect(find.text('Пробежка'), findsOneWidget);
+    expect(find.text('Личное дело'), findsOneWidget);
+    expect(find.textContaining('1 личных дел'), findsOneWidget);
+
+    // Календарь: дело тоже в списке выбранного дня.
+    await tester.tap(find.text('Календарь'));
+    await tester.pumpAndSettle();
+    expect(find.text('Пробежка'), findsOneWidget);
+    expect(find.text('Личное дело'), findsOneWidget);
   });
 }

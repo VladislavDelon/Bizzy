@@ -3073,6 +3073,7 @@ class _MainShellState extends State<MainShell> {
   late final ValueNotifier<DateTime> _homeDayNotifier;
   int _currentIndex = 0;
   List<Appointment> _allAppointments = [];
+  List<TaskItem> _allTasks = [];
   bool _loading = true;
   int _pendingBookings = 0;
 
@@ -3081,6 +3082,7 @@ class _MainShellState extends State<MainShell> {
     super.initState();
     _homeDayNotifier = ValueNotifier(_startOfDay(DateTime.now()));
     _loadAppointments();
+    _loadTasks();
     _loadPendingBookings();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkUpdates();
@@ -3174,10 +3176,21 @@ class _MainShellState extends State<MainShell> {
     }
   }
 
+  Future<void> _loadTasks() async {
+    try {
+      final tasks = await _db.getTasks(widget.user.id, includeDone: false);
+      if (!mounted) return;
+      setState(() => _allTasks = tasks);
+    } catch (_) {
+      // Локальная база недоступна (тесты) — просто не показываем дела.
+    }
+  }
+
   /// Публичный метод для дочерних виджетов (например, MoreTab),
   /// чтобы принудительно перезагрузить список записей.
   Future<void> refreshAppointments() async {
     await _loadAppointments();
+    await _loadTasks();
     await _loadPendingBookings();
   }
 
@@ -3291,18 +3304,23 @@ class _MainShellState extends State<MainShell> {
         company: widget.company,
         user: widget.user,
         appointments: _allAppointments,
+        tasks: _allTasks,
         selectedDayNotifier: _homeDayNotifier,
         loading: _loading,
         onEdit: _showAppointmentDialog,
         onDelete: _deleteAppointment,
+        onTasksChanged: _loadTasks,
       ),
       CalendarTab(
         database: _db,
         company: widget.company,
+        user: widget.user,
         appointments: _allAppointments,
+        tasks: _allTasks,
         loading: _loading,
         onEdit: _showAppointmentDialog,
         onDelete: _deleteAppointment,
+        onTasksChanged: _loadTasks,
       ),
       ClientsTab(
         database: _db,
@@ -3427,16 +3445,19 @@ class HomeTab extends StatefulWidget {
     required this.company,
     required this.user,
     required this.appointments,
+    required this.tasks,
     required this.selectedDayNotifier,
     required this.loading,
     required this.onEdit,
     required this.onDelete,
+    required this.onTasksChanged,
   });
 
   final AppointmentsDatabase database;
   final Company company;
   final User user;
   final List<Appointment> appointments;
+  final List<TaskItem> tasks;
   final ValueNotifier<DateTime> selectedDayNotifier;
   final bool loading;
   final Future<void> Function({
@@ -3444,6 +3465,7 @@ class HomeTab extends StatefulWidget {
     required DateTime initialDate,
   }) onEdit;
   final Future<void> Function(int) onDelete;
+  final Future<void> Function() onTasksChanged;
 
   @override
   State<HomeTab> createState() => _HomeTabState();
@@ -3484,6 +3506,18 @@ class _HomeTabState extends State<HomeTab> {
     widget.selectedDayNotifier.value = _startOfDay(day);
   }
 
+  Future<void> _openTasks() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => TasksScreen(
+          database: widget.database,
+          user: widget.user,
+        ),
+      ),
+    );
+    await widget.onTasksChanged();
+  }
+
   DateTime get _weekStart =>
       _selectedDay.subtract(Duration(days: _selectedDay.weekday - 1));
 
@@ -3493,8 +3527,19 @@ class _HomeTabState extends State<HomeTab> {
         .where((a) => isSameDay(a.dateTime, _selectedDay))
         .toList()
       ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
+    final dayTasks = widget.tasks
+        .where((t) => isSameDay(t.dueAt, _selectedDay))
+        .toList();
+    final dayItems = <_DayEntry>[
+      for (final a in dayAppointments) _DayEntry.appointment(a),
+      for (final t in dayTasks) _DayEntry.task(t),
+    ]..sort((a, b) => a.time.compareTo(b.time));
+    final now = DateTime.now();
     final todayCount = widget.appointments
-        .where((a) => isSameDay(a.dateTime, DateTime.now()))
+        .where((a) => isSameDay(a.dateTime, now))
+        .length;
+    final todayTasks = widget.tasks
+        .where((t) => isSameDay(t.dueAt, now))
         .length;
     final hour = DateTime.now().hour;
     final String greeting;
@@ -3531,7 +3576,8 @@ class _HomeTabState extends State<HomeTab> {
               ),
               const SizedBox(height: 4),
               Text(
-                'У вас $todayCount записей сегодня',
+                'У вас $todayCount записей'
+                '${todayTasks > 0 ? ' и $todayTasks личных дел' : ''} сегодня',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: Colors.grey[700],
                     ),
@@ -3549,6 +3595,10 @@ class _HomeTabState extends State<HomeTab> {
               itemBuilder: (context, index) {
                 final day = _weekStart.add(Duration(days: index));
                 final selected = isSameDay(day, _selectedDay);
+                final hasAppointments = widget.appointments
+                    .any((a) => isSameDay(a.dateTime, day));
+                final hasTasks = widget.tasks
+                    .any((t) => isSameDay(t.dueAt, day));
                 return GestureDetector(
                   onTap: () => _selectDay(day),
                   child: AnimatedContainer(
@@ -3583,6 +3633,21 @@ class _HomeTabState extends State<HomeTab> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
+                        const SizedBox(height: 3),
+                        SizedBox(
+                          height: 6,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (hasAppointments) const _DayDot(),
+                              if (hasTasks)
+                                const _DayDot(
+                                  color: Colors.white,
+                                  bordered: true,
+                                ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -3594,15 +3659,23 @@ class _HomeTabState extends State<HomeTab> {
         Expanded(
           child: widget.loading
               ? const Center(child: CircularProgressIndicator())
-              : dayAppointments.isEmpty
+              : dayItems.isEmpty
                   ? const Center(
                       child: Text('На этот день записей нет.'),
                     )
                   : ListView.builder(
                       padding: const EdgeInsets.only(bottom: 80),
-                      itemCount: dayAppointments.length,
+                      itemCount: dayItems.length,
                       itemBuilder: (context, index) {
-                        final a = dayAppointments[index];
+                        final entry = dayItems[index];
+                        final task = entry.task;
+                        if (task != null) {
+                          return _PersonalTaskTile(
+                            task: task,
+                            onTap: _openTasks,
+                          );
+                        }
+                        final a = entry.appointment!;
                         final initial = a.clientName.trim().isEmpty
                             ? ''
                             : a.clientName.trim()[0].toUpperCase();
@@ -3674,21 +3747,27 @@ class CalendarTab extends StatefulWidget {
     super.key,
     required this.database,
     required this.company,
+    required this.user,
     required this.appointments,
+    required this.tasks,
     required this.loading,
     required this.onEdit,
     required this.onDelete,
+    required this.onTasksChanged,
   });
 
   final AppointmentsDatabase database;
   final Company company;
+  final User user;
   final List<Appointment> appointments;
+  final List<TaskItem> tasks;
   final bool loading;
   final Future<void> Function({
     Appointment? appointment,
     required DateTime initialDate,
   }) onEdit;
   final Future<void> Function(int) onDelete;
+  final Future<void> Function() onTasksChanged;
 
   @override
   State<CalendarTab> createState() => _CalendarTabState();
@@ -3705,18 +3784,37 @@ class _CalendarTabState extends State<CalendarTab> {
     _selectedDay = _focusedDay;
   }
 
+  Future<void> _openTasks() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => TasksScreen(
+          database: widget.database,
+          user: widget.user,
+        ),
+      ),
+    );
+    await widget.onTasksChanged();
+  }
+
   @override
   Widget build(BuildContext context) {
     final dayAppointments = widget.appointments
         .where((a) => isSameDay(a.dateTime, _selectedDay))
         .toList()
       ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
+    final dayTasks = widget.tasks
+        .where((t) => isSameDay(t.dueAt, _selectedDay))
+        .toList();
+    final dayItems = <_DayEntry>[
+      for (final a in dayAppointments) _DayEntry.appointment(a),
+      for (final t in dayTasks) _DayEntry.task(t),
+    ]..sort((a, b) => a.time.compareTo(b.time));
 
     return widget.loading
         ? const Center(child: CircularProgressIndicator())
         : Column(
             children: [
-              TableCalendar<Appointment>(
+              TableCalendar<Object>(
                 locale: 'ru_RU',
                 firstDay: DateTime.utc(2020, 1, 1),
                 lastDay: DateTime.utc(2030, 12, 31),
@@ -3729,9 +3827,29 @@ class _CalendarTabState extends State<CalendarTab> {
                     shape: BoxShape.circle,
                   ),
                 ),
-                eventLoader: (day) => widget.appointments
-                    .where((a) => isSameDay(a.dateTime, day))
-                    .toList(),
+                calendarBuilders: CalendarBuilders<Object>(
+                  markerBuilder: (context, day, events) {
+                    if (events.isEmpty) return null;
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final e in events.take(4))
+                          _DayDot(
+                            color: e is TaskItem
+                                ? Colors.white
+                                : const Color(0xFFFFD600),
+                            bordered: e is TaskItem,
+                          ),
+                      ],
+                    );
+                  },
+                ),
+                eventLoader: (day) => <Object>[
+                  ...widget.appointments
+                      .where((a) => isSameDay(a.dateTime, day)),
+                  ...widget.tasks
+                      .where((t) => isSameDay(t.dueAt, day)),
+                ],
                 availableCalendarFormats: const {
                   CalendarFormat.month: 'Месяц',
                   CalendarFormat.twoWeeks: '2 недели',
@@ -3751,15 +3869,23 @@ class _CalendarTabState extends State<CalendarTab> {
                 },
               ),
               Expanded(
-                child: dayAppointments.isEmpty
+                child: dayItems.isEmpty
                     ? const Center(
                         child: Text('На этот день записей нет.'),
                       )
                     : ListView.builder(
                         padding: const EdgeInsets.only(bottom: 16),
-                        itemCount: dayAppointments.length,
+                        itemCount: dayItems.length,
                         itemBuilder: (context, index) {
-                          final a = dayAppointments[index];
+                          final entry = dayItems[index];
+                          final task = entry.task;
+                          if (task != null) {
+                            return _PersonalTaskTile(
+                              task: task,
+                              onTap: _openTasks,
+                            );
+                          }
+                          final a = entry.appointment!;
                           return Card(
                             margin: const EdgeInsets.symmetric(
                               horizontal: 12,
@@ -3782,6 +3908,88 @@ class _CalendarTabState extends State<CalendarTab> {
             ],
           );
   }
+}
+
+/// Точка-маркер дня: жёлтая для записей клиентов, белая для личных дел.
+class _DayDot extends StatelessWidget {
+  const _DayDot({
+    this.color = const Color(0xFFFFD600),
+    this.bordered = false,
+  });
+
+  final Color color;
+  final bool bordered;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 6,
+      height: 6,
+      margin: const EdgeInsets.symmetric(horizontal: 1),
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: bordered
+            ? Border.all(color: Colors.grey.shade500, width: 0.8)
+            : null,
+      ),
+    );
+  }
+}
+
+/// Карточка личного дела в дневном списке: белая иконка вместо жёлтой,
+/// чтобы сразу было видно, что это не запись клиента.
+class _PersonalTaskTile extends StatelessWidget {
+  const _PersonalTaskTile({required this.task, required this.onTap});
+
+  final TaskItem task;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: ListTile(
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.grey.shade400),
+          ),
+          child: const Icon(Icons.event_note, color: Colors.black87),
+        ),
+        title: Text(task.title),
+        subtitle: const Text('Личное дело'),
+        trailing: Text(
+          _formatTime(task.dueAt),
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+/// Элемент дневного списка: запись клиента или личное дело.
+class _DayEntry {
+  _DayEntry.appointment(Appointment a)
+      : appointment = a,
+        task = null,
+        time = a.dateTime;
+
+  _DayEntry.task(TaskItem t)
+      : task = t,
+        appointment = null,
+        time = t.dueAt;
+
+  final Appointment? appointment;
+  final TaskItem? task;
+  final DateTime time;
 }
 
 class ClientsTab extends StatefulWidget {
@@ -4863,14 +5071,20 @@ class _MoreTabState extends State<MoreTab> {
           leading: const Icon(Icons.task_alt),
           title: const Text('Мои дела'),
           subtitle: const Text('Личные задачи и напоминания'),
-          onTap: () => Navigator.of(context).push<void>(
-            MaterialPageRoute(
-              builder: (context) => TasksScreen(
-                database: widget.database,
-                user: widget.user,
-              ),
-            ),
-          ),
+          onTap: () {
+            final mainShell =
+                context.findAncestorStateOfType<_MainShellState>();
+            Navigator.of(context)
+                .push<void>(
+                  MaterialPageRoute(
+                    builder: (context) => TasksScreen(
+                      database: widget.database,
+                      user: widget.user,
+                    ),
+                  ),
+                )
+                .then((_) => mainShell?.refreshAppointments());
+          },
         ),
         if (cloudSignedIn && !widget.offlineMode) ...[
           ListTile(

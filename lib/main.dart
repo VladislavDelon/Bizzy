@@ -3060,6 +3060,7 @@ class MainShell extends StatefulWidget {
     required this.user,
     this.updateService,
     this.offlineMode = false,
+    this.cloudRole = '',
     required this.onSwitchCompany,
     required this.onLogout,
   });
@@ -3069,6 +3070,9 @@ class MainShell extends StatefulWidget {
   final User user;
   final UpdateService? updateService;
   final bool offlineMode;
+
+  /// Облачная роль: 'master' | 'salon' | '' (локальный вход).
+  final String cloudRole;
   final VoidCallback onSwitchCompany;
   final VoidCallback onLogout;
 
@@ -3335,22 +3339,19 @@ class _MainShellState extends State<MainShell> {
         company: widget.company,
         isVisible: _currentIndex == 2,
         pendingBookings: _pendingBookings,
+        appointments: _allAppointments,
+        appointmentsLoading: _loading,
       ),
       ServicesTab(
         database: _db,
         company: widget.company,
-      ),
-      FinanceTab(
-        database: _db,
-        company: widget.company,
-        appointments: _allAppointments,
-        loading: _loading,
       ),
       MoreTab(
         database: _db,
         company: widget.company,
         user: widget.user,
         offlineMode: widget.offlineMode,
+        cloudRole: widget.cloudRole,
         onSwitchCompany: widget.onSwitchCompany,
         onLogout: widget.onLogout,
       ),
@@ -3433,10 +3434,6 @@ class _MainShellState extends State<MainShell> {
           const NavigationDestination(
             icon: Icon(Icons.spa),
             label: 'Услуги',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.payments_outlined),
-            label: 'Финансы',
           ),
           const NavigationDestination(
             icon: Icon(Icons.menu),
@@ -4017,12 +4014,18 @@ class ClientsTab extends StatefulWidget {
     required this.company,
     this.isVisible = false,
     this.pendingBookings = 0,
+    this.appointments = const [],
+    this.appointmentsLoading = false,
   });
 
   final AppointmentsDatabase database;
   final Company company;
   final bool isVisible;
   final int pendingBookings;
+
+  /// Записи для раздела «Финансы» внутри вкладки.
+  final List<Appointment> appointments;
+  final bool appointmentsLoading;
 
   @override
   State<ClientsTab> createState() => _ClientsTabState();
@@ -4033,6 +4036,7 @@ class _ClientsTabState extends State<ClientsTab> {
   String _query = '';
   bool _loading = false;
   bool _failed = false;
+  bool _showFinance = false;
 
   @override
   void initState() {
@@ -4189,6 +4193,36 @@ class _ClientsTabState extends State<ClientsTab> {
     return Scaffold(
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(
+                  value: false,
+                  label: Text('Клиенты'),
+                  icon: Icon(Icons.people_outline),
+                ),
+                ButtonSegment(
+                  value: true,
+                  label: Text('Финансы'),
+                  icon: Icon(Icons.payments_outlined),
+                ),
+              ],
+              selected: {_showFinance},
+              onSelectionChanged: (s) =>
+                  setState(() => _showFinance = s.first),
+            ),
+          ),
+          if (_showFinance)
+            Expanded(
+              child: FinanceTab(
+                database: widget.database,
+                company: widget.company,
+                appointments: widget.appointments,
+                loading: widget.appointmentsLoading,
+              ),
+            )
+          else ...[
           if (cloudSignedIn) ...[
             Card(
               margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -4337,14 +4371,17 @@ class _ClientsTabState extends State<ClientsTab> {
                             },
                           ),
           ),
+          ],
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: null,
-        onPressed: _addClient,
-        icon: const Icon(Icons.add),
-        label: const Text('Добавить клиента'),
-      ),
+      floatingActionButton: _showFinance
+          ? null
+          : FloatingActionButton.extended(
+              heroTag: null,
+              onPressed: _addClient,
+              icon: const Icon(Icons.add),
+              label: const Text('Добавить клиента'),
+            ),
     );
   }
 }
@@ -5149,30 +5186,23 @@ class _FinanceTabState extends State<FinanceTab> {
         if (serviceNames.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: InputDecorator(
+            child: DropdownButtonFormField<String>(
+              initialValue: _service,
+              isExpanded: true,
               decoration: const InputDecoration(
                 labelText: 'Услуга',
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
-              isEmpty: _service.isEmpty,
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _service.isEmpty ? null : _service,
-                  isExpanded: true,
-                  isDense: true,
-                  hint: const Text('Все услуги'),
-                  items: [
-                    const DropdownMenuItem<String>(
-                      value: '',
-                      child: Text('Все услуги'),
-                    ),
-                    for (final name in serviceNames)
-                      DropdownMenuItem(value: name, child: Text(name)),
-                  ],
-                  onChanged: (v) => setState(() => _service = v ?? ''),
+              items: [
+                const DropdownMenuItem<String>(
+                  value: '',
+                  child: Text('Все услуги'),
                 ),
-              ),
+                for (final name in serviceNames)
+                  DropdownMenuItem(value: name, child: Text(name)),
+              ],
+              onChanged: (v) => setState(() => _service = v ?? ''),
             ),
           ),
         Padding(
@@ -5272,6 +5302,7 @@ class MoreTab extends StatefulWidget {
     required this.company,
     required this.user,
     this.offlineMode = false,
+    this.cloudRole = '',
     required this.onSwitchCompany,
     required this.onLogout,
   });
@@ -5280,6 +5311,10 @@ class MoreTab extends StatefulWidget {
   final Company company;
   final User user;
   final bool offlineMode;
+
+  /// 'master' | 'salon' | '' — для мастера-одиночки прячем
+  /// «Мастера» и «Сменить компанию», они нужны салону/локальному режиму.
+  final String cloudRole;
   final VoidCallback onSwitchCompany;
   final VoidCallback onLogout;
 
@@ -5432,19 +5467,20 @@ class _MoreTabState extends State<MoreTab> {
             ),
           ),
         ],
-        ListTile(
-          leading: const Icon(Icons.badge_outlined),
-          title: const Text('Мастера'),
-          onTap: () => Navigator.of(context).push<void>(
-            MaterialPageRoute(
-              builder: (context) => ContactsScreen(
-                database: widget.database,
-                type: ContactType.master,
-                companyId: widget.company.id,
+        if (widget.cloudRole != 'master')
+          ListTile(
+            leading: const Icon(Icons.badge_outlined),
+            title: Text(widget.cloudRole == 'salon' ? 'Сотрудники' : 'Мастера'),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (context) => ContactsScreen(
+                  database: widget.database,
+                  type: ContactType.master,
+                  companyId: widget.company.id,
+                ),
               ),
             ),
           ),
-        ),
         ListTile(
           leading: const Icon(Icons.settings),
           title: const Text('Настройки'),
@@ -5454,11 +5490,12 @@ class _MoreTabState extends State<MoreTab> {
             ),
           ),
         ),
-        ListTile(
-          leading: const Icon(Icons.business),
-          title: const Text('Сменить компанию'),
-          onTap: widget.onSwitchCompany,
-        ),
+        if (widget.cloudRole != 'master')
+          ListTile(
+            leading: const Icon(Icons.business),
+            title: const Text('Сменить компанию'),
+            onTap: widget.onSwitchCompany,
+          ),
         ListTile(
           leading: const Icon(Icons.logout),
           title: const Text('Выйти из аккаунта'),
@@ -6922,7 +6959,7 @@ class _CloudGateState extends State<CloudGate> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    if (profile.isMaster) {
+    if (profile.isMaster || profile.isSalon) {
       return _MasterBridge(
         database: _db,
         profile: profile,
@@ -7012,7 +7049,7 @@ class _MasterBridgeState extends State<_MasterBridge> {
         await widget.database.createCompany(
           user.id,
           widget.profile.name,
-          '',
+          widget.profile.isSalon ? 'Салон' : '',
         );
         companies = await widget.database.getCompanies(user.id);
       }
@@ -7084,6 +7121,7 @@ class _MasterBridgeState extends State<_MasterBridge> {
       updateService: widget.updateService,
       onSignOut: widget.onSignOut,
       offlineMode: widget.offlineMode,
+      cloudRole: widget.profile.role,
     );
   }
 }
@@ -7098,6 +7136,7 @@ class LocalSessionGate extends StatefulWidget {
     required this.onSignOut,
     this.updateService,
     this.offlineMode = false,
+    this.cloudRole = '',
   });
 
   final AppointmentsDatabase database;
@@ -7105,6 +7144,9 @@ class LocalSessionGate extends StatefulWidget {
   final UpdateService? updateService;
   final Future<void> Function() onSignOut;
   final bool offlineMode;
+
+  /// Облачная роль: 'master' | 'salon' | '' (локальный/офлайн).
+  final String cloudRole;
 
   @override
   State<LocalSessionGate> createState() => _LocalSessionGateState();
@@ -7163,6 +7205,7 @@ class _LocalSessionGateState extends State<LocalSessionGate> {
       user: widget.user,
       updateService: widget.updateService,
       offlineMode: widget.offlineMode,
+      cloudRole: widget.cloudRole,
       onSwitchCompany: () => setState(() => _company = null),
       onLogout: () => widget.onSignOut(),
     );

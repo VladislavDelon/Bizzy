@@ -273,6 +273,13 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
                         subtitle: 'Оказываю услуги и веду записи клиентов',
                         onTap: () => _pick(context, 'master'),
                       ),
+                      const SizedBox(height: 16),
+                      _RoleCard(
+                        icon: Icons.storefront,
+                        title: 'Салон',
+                        subtitle: 'Владею салоном — сотрудники, клиенты, расписание',
+                        onTap: () => _pick(context, 'salon'),
+                      ),
                     ],
                   ),
                 ),
@@ -422,7 +429,11 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final roleName = widget.role == 'master' ? 'мастер' : 'клиент';
+    final roleName = switch (widget.role) {
+      'master' => 'мастер',
+      'salon' => 'салон',
+      _ => 'клиент',
+    };
     return Scaffold(
       appBar: AppBar(title: Text(_registerMode ? 'Регистрация' : 'Вход')),
       body: SafeArea(

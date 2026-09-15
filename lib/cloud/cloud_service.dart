@@ -121,12 +121,13 @@ class CloudProfile {
   });
 
   final String id;
-  final String role; // 'client' | 'master'
+  final String role; // 'client' | 'master' | 'salon'
   final String name;
   final String phone;
   final String avatarUrl;
 
   bool get isMaster => role == 'master';
+  bool get isSalon => role == 'salon';
   bool get isClient => role == 'client';
 
   factory CloudProfile.fromMap(Map<String, dynamic> map) => CloudProfile(

@@ -506,15 +506,16 @@ class CloudService {
     required String login,
     required String password,
     required String role,
-    required String name,
-    required String phone,
+    String name = '',
+    String phone = '',
   }) =>
       supabase.auth.signUp(
         email: loginToEmail(login),
         password: password,
         data: {
           'role': role,
-          'name': name,
+          // Без имени показываем логин — имя задаётся позже в профиле.
+          'name': name.isEmpty ? login.trim() : name,
           'phone': phone,
           'login': login.trim(),
         },

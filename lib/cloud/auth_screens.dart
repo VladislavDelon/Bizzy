@@ -361,19 +361,16 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
   final _formKey = GlobalKey<FormState>();
   final _loginController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _nameController = TextEditingController();
-  final _phoneController = TextEditingController();
   final _cloud = CloudService();
   bool _registerMode = false;
   bool _busy = false;
+  bool _showPassword = false;
   String? _error;
 
   @override
   void dispose() {
     _loginController.dispose();
     _passwordController.dispose();
-    _nameController.dispose();
-    _phoneController.dispose();
     super.dispose();
   }
 
@@ -388,6 +385,9 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
       }
       if (msg.contains('password')) {
         return 'Пароль слишком простой (минимум 6 символов)';
+      }
+      if (msg.contains('database error')) {
+        return 'Ошибка регистрации на сервере. Попробуйте позже.';
       }
       return e.message;
     }
@@ -408,8 +408,6 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
           login: login,
           password: password,
           role: widget.role,
-          name: _nameController.text.trim(),
-          phone: _phoneController.text.trim(),
         );
       } else {
         await _cloud.signIn(login, password);
@@ -448,34 +446,14 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 24),
-                if (_registerMode) ...[
-                  TextFormField(
-                    controller: _nameController,
-                    enabled: !_busy,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      labelText: 'Имя',
-                      border: OutlineInputBorder(),
+                if (_registerMode)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      'Имя и телефон можно будет указать позже в профиле',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    validator: (v) =>
-                        v == null || v.trim().isEmpty ? 'Введите имя' : null,
                   ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _phoneController,
-                    enabled: !_busy,
-                    keyboardType: TextInputType.phone,
-                    decoration: const InputDecoration(
-                      labelText: 'Телефон',
-                      hintText: '+7 ___ ___ __ __',
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (v) => v == null || v.trim().isEmpty
-                        ? 'Введите телефон'
-                        : null,
-                  ),
-                  const SizedBox(height: 12),
-                ],
                 TextFormField(
                   controller: _loginController,
                   enabled: !_busy,
@@ -496,7 +474,7 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
                 TextFormField(
                   controller: _passwordController,
                   enabled: !_busy,
-                  obscureText: true,
+                  obscureText: !_showPassword,
                   decoration: const InputDecoration(
                     labelText: 'Пароль',
                     border: OutlineInputBorder(),
@@ -504,6 +482,35 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
                   validator: (v) => v == null || v.length < 6
                       ? 'Минимум 6 символов'
                       : null,
+                ),
+                InkWell(
+                  onTap: _busy
+                      ? null
+                      : () => setState(
+                          () => _showPassword = !_showPassword),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Checkbox(
+                          value: _showPassword,
+                          onChanged: _busy
+                              ? null
+                              : (v) => setState(
+                                  () => _showPassword = v ?? false),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        Text(
+                          'Показать пароль',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 16),

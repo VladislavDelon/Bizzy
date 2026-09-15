@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
@@ -11,6 +12,44 @@ SupabaseClient get supabase => Supabase.instance.client;
 bool get cloudSignedIn =>
     Supabase.instance.isInitialized &&
     Supabase.instance.client.auth.currentUser != null;
+
+/// Домен технических email — пользователь вводит только логин,
+/// Supabase Auth внутри работает с email вида `<логин>@bizzy.app`.
+const String kLoginEmailDomain = 'bizzy.app';
+
+/// Превращает логин в email для Supabase Auth.
+/// - Ввод с '@' — это настоящий email старого аккаунта, возвращаем как есть.
+/// - ASCII-логин [a-z0-9._-] — `логин@bizzy.app`.
+/// - Любой другой (кириллица и т.п.) — `u<base64url>@bizzy.app`,
+///   чтобы остаться в допустимом формате email и не терять уникальность.
+String loginToEmail(String input) {
+  final login = input.trim().toLowerCase();
+  if (login.contains('@')) return login;
+  if (RegExp(r'^[a-z0-9._-]+$').hasMatch(login)) {
+    return '$login@$kLoginEmailDomain';
+  }
+  final encoded =
+      base64UrlEncode(utf8.encode(login)).replaceAll('=', '');
+  return 'u$encoded@$kLoginEmailDomain';
+}
+
+/// Обратная операция: достаёт логин из технического email.
+/// Если email настоящий (не наш домен) — возвращает его целиком.
+String emailToLogin(String email) {
+  const suffix = '@$kLoginEmailDomain';
+  if (!email.endsWith(suffix)) return email;
+  final local = email.substring(0, email.length - suffix.length);
+  if (local.startsWith('u') && local.length > 1) {
+    try {
+      var b64 = local.substring(1);
+      b64 = b64.padRight((b64.length + 3) ~/ 4 * 4, '=');
+      return utf8.decode(base64Url.decode(b64));
+    } catch (_) {
+      return local;
+    }
+  }
+  return local;
+}
 
 // ---------- Безопасный парсинг ответов Supabase ----------
 String _parseString(dynamic value, {String fallback = ''}) {
@@ -118,6 +157,9 @@ class CloudProfile {
     required this.name,
     required this.phone,
     this.avatarUrl = '',
+    this.address = '',
+    this.lat,
+    this.lng,
   });
 
   final String id;
@@ -125,10 +167,14 @@ class CloudProfile {
   final String name;
   final String phone;
   final String avatarUrl;
+  final String address;
+  final double? lat;
+  final double? lng;
 
   bool get isMaster => role == 'master';
   bool get isSalon => role == 'salon';
   bool get isClient => role == 'client';
+  bool get hasLocation => lat != null && lng != null;
 
   factory CloudProfile.fromMap(Map<String, dynamic> map) => CloudProfile(
         id: _parseString(map['id']),
@@ -136,6 +182,9 @@ class CloudProfile {
         name: _parseString(map['name']),
         phone: _parseString(map['phone']),
         avatarUrl: _parseString(map['avatar_url']),
+        address: _parseString(map['address']),
+        lat: map['lat'] == null ? null : _parseDouble(map['lat']),
+        lng: map['lng'] == null ? null : _parseDouble(map['lng']),
       );
 
   Map<String, dynamic> toMap() => {
@@ -144,6 +193,9 @@ class CloudProfile {
         'name': name,
         'phone': phone,
         'avatar_url': avatarUrl,
+        'address': address,
+        'lat': lat,
+        'lng': lng,
       };
 }
 
@@ -161,6 +213,8 @@ class MasterCard {
     required this.avatarUrl,
     required this.ratingAvg,
     required this.ratingCount,
+    this.lat,
+    this.lng,
   });
 
   final String userId;
@@ -174,6 +228,10 @@ class MasterCard {
   final String avatarUrl;
   final double ratingAvg;
   final int ratingCount;
+  final double? lat;
+  final double? lng;
+
+  bool get hasLocation => lat != null && lng != null;
 
   factory MasterCard.fromMap(
     Map<String, dynamic> map, {
@@ -192,6 +250,8 @@ class MasterCard {
       avatarUrl: _parseString(map['avatar_url']),
       ratingAvg: _parseDouble(map['rating_avg']),
       ratingCount: _parseInt(map['rating_count']),
+      lat: map['lat'] == null ? null : _parseDouble(map['lat']),
+      lng: map['lng'] == null ? null : _parseDouble(map['lng']),
     );
   }
 
@@ -207,6 +267,8 @@ class MasterCard {
     String? avatarUrl,
     double? ratingAvg,
     int? ratingCount,
+    double? lat,
+    double? lng,
   }) =>
       MasterCard(
         userId: userId ?? this.userId,
@@ -220,6 +282,8 @@ class MasterCard {
         avatarUrl: avatarUrl ?? this.avatarUrl,
         ratingAvg: ratingAvg ?? this.ratingAvg,
         ratingCount: ratingCount ?? this.ratingCount,
+        lat: lat ?? this.lat,
+        lng: lng ?? this.lng,
       );
 }
 
@@ -422,20 +486,38 @@ class CloudService {
   String? get email => supabase.auth.currentUser?.email;
   Stream<AuthState> get authChanges => supabase.auth.onAuthStateChange;
 
-  Future<void> signIn(String email, String password) =>
-      supabase.auth.signInWithPassword(email: email, password: password);
+  /// Логин для показа пользователю: из metadata, иначе вырезанный из
+  /// технического email. Для старых аккаунтов — настоящий email.
+  String get displayLogin {
+    final meta = supabase.auth.currentUser?.userMetadata;
+    final login = meta?['login'];
+    if (login is String && login.isNotEmpty) return login;
+    return emailToLogin(email ?? '');
+  }
+
+  /// Вход по логину (внутри — технический email).
+  Future<void> signIn(String login, String password) =>
+      supabase.auth.signInWithPassword(
+        email: loginToEmail(login),
+        password: password,
+      );
 
   Future<void> signUp({
-    required String email,
+    required String login,
     required String password,
     required String role,
     required String name,
     required String phone,
   }) =>
       supabase.auth.signUp(
-        email: email,
+        email: loginToEmail(login),
         password: password,
-        data: {'role': role, 'name': name, 'phone': phone},
+        data: {
+          'role': role,
+          'name': name,
+          'phone': phone,
+          'login': login.trim(),
+        },
       );
 
   Future<void> signOut() => supabase.auth.signOut();
@@ -475,22 +557,31 @@ class CloudService {
     String? name,
     String? phone,
     String? avatarUrl,
+    String? address,
+    double? lat,
+    double? lng,
+    bool clearLocation = false,
   }) =>
       supabase.from('profiles').update({
         'name': ?name,
         'phone': ?phone,
         'avatar_url': ?avatarUrl,
+        'address': ?address,
+        'lat': ?lat,
+        'lng': ?lng,
+        if (clearLocation) ...{'lat': null, 'lng': null},
       }).eq('id', uid!);
 
-  /// Обновляет email и/или пароль текущего пользователя в Supabase Auth.
-  Future<void> updateAuth({String? email, String? password}) async {
-    if ((email == null || email.isEmpty) &&
-        (password == null || password.isEmpty)) {
+  /// Обновляет логин и/или пароль текущего пользователя в Supabase Auth.
+  /// [login] — то, что вводит пользователь; внутри превращается в email.
+  Future<void> updateAuth({String? login, String? password}) async {
+    final email = login == null || login.isEmpty ? null : loginToEmail(login);
+    if (email == null && (password == null || password.isEmpty)) {
       return;
     }
     final res = await supabase.auth.updateUser(
       UserAttributes(
-        email: email?.isNotEmpty == true ? email : null,
+        email: email,
         password: password?.isNotEmpty == true ? password : null,
       ),
     );
@@ -560,6 +651,8 @@ class CloudService {
       'category',
       'description',
       'address',
+      'lat',
+      'lng',
       'social',
       'phone_public',
       'avatar_url',
@@ -613,6 +706,8 @@ class CloudService {
       'category',
       'description',
       'address',
+      'lat',
+      'lng',
       'social',
       'phone_public',
       'avatar_url',
@@ -643,6 +738,8 @@ class CloudService {
     required String category,
     required String description,
     String address = '',
+    double? lat,
+    double? lng,
     String social = '',
     bool phonePublic = false,
     String avatarUrl = '',
@@ -652,6 +749,8 @@ class CloudService {
         'category': category,
         'description': description,
         'address': address,
+        'lat': ?lat,
+        'lng': ?lng,
         'social': social,
         'phone_public': phonePublic,
         'avatar_url': avatarUrl,

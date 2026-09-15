@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../notifications/push_service.dart';
 import 'cloud_service.dart';
+import 'geo_service.dart';
+import 'map_screens.dart';
 import 'master_public_profile.dart';
 
 /// Экран профиля мастера: категория, описание, рейтинг.
@@ -32,6 +35,7 @@ class MasterProfileScreen extends StatefulWidget {
 
 class _MasterProfileScreenState extends State<MasterProfileScreen> {
   final _cloud = CloudService();
+  final _geo = GeoService();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
@@ -45,6 +49,8 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   bool _pickingAvatar = false;
   double _ratingAvg = 0;
   int _ratingCount = 0;
+  double? _lat;
+  double? _lng;
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -84,7 +90,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _categories = categories;
         _nameController.text = profile?.name ?? '';
         _phoneController.text = profile?.phone ?? '';
-        _emailController.text = supabase.auth.currentUser?.email ?? '';
+        _emailController.text = _cloud.displayLogin;
         _category = card?.category ?? categories.firstOrNull;
         _descController.text = card?.description ?? '';
         _addressController.text = card?.address ?? '';
@@ -93,6 +99,8 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _avatarUrl = card?.avatarUrl ?? '';
         _ratingAvg = card?.ratingAvg ?? 0;
         _ratingCount = card?.ratingCount ?? 0;
+        _lat = card?.lat;
+        _lng = card?.lng;
         _portfolio = portfolio;
         _loading = false;
       });
@@ -339,6 +347,34 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
     );
   }
 
+  /// Открывает карту для выбора точки мастера; после выбора подставляет
+  /// адрес через обратный геокодинг.
+  Future<void> _pickLocationOnMap() async {
+    GeoPoint? initial;
+    if (_lat != null && _lng != null) {
+      initial = GeoPoint(_lat!, _lng!);
+    } else if (_addressController.text.trim().isNotEmpty) {
+      // Пробуем найти введённый адрес, чтобы карта открылась рядом.
+      initial = await _geo.geocode(_addressController.text);
+    }
+    if (!mounted) return;
+    final picked = await Navigator.of(context).push<LatLng>(
+      MaterialPageRoute(
+        builder: (context) => MapPickerScreen(initial: initial),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _lat = picked.latitude;
+      _lng = picked.longitude;
+    });
+    final addr = await _geo.reverseGeocode(picked.latitude, picked.longitude);
+    if (!mounted) return;
+    if (addr != null && addr.label.isNotEmpty) {
+      setState(() => _addressController.text = addr.label);
+    }
+  }
+
   Future<void> _save() async {
     if (_saving) return;
     if (_category == null) {
@@ -350,13 +386,30 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       _error = null;
     });
     try {
-      final email = _emailController.text.trim();
-      final currentEmail = supabase.auth.currentUser?.email ?? '';
-      final needEmail = !widget.isFirstSetup &&
-          email.isNotEmpty &&
-          email != currentEmail;
-      if (needEmail) {
-        await _cloud.updateAuth(email: email);
+      final login = _emailController.text.trim();
+      final needLogin = !widget.isFirstSetup &&
+          login.isNotEmpty &&
+          login != _cloud.displayLogin;
+      if (needLogin) {
+        await _cloud.updateAuth(login: login);
+      }
+
+      // Координаты: выбранные на карте, либо геокодинг из текста адреса.
+      final address = _addressController.text.trim();
+      var lat = _lat;
+      var lng = _lng;
+      if ((lat == null || lng == null) && address.isNotEmpty) {
+        final point = await _geo.geocode(address);
+        if (point != null) {
+          lat = point.lat;
+          lng = point.lng;
+          if (mounted) {
+            setState(() {
+              _lat = lat;
+              _lng = lng;
+            });
+          }
+        }
       }
 
       await _cloud.updateMyProfile(
@@ -367,7 +420,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       await _cloud.upsertMasterProfile(
         category: _category!,
         description: _descController.text.trim(),
-        address: _addressController.text.trim(),
+        address: address,
+        lat: lat,
+        lng: lng,
         social: _socialController.text.trim(),
         phonePublic: _phonePublic,
         avatarUrl: _avatarUrl,
@@ -526,9 +581,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                 const SizedBox(height: 8),
                 TextField(
                   controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
                   decoration: const InputDecoration(
-                    labelText: 'Email / логин',
+                    labelText: 'Логин',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -571,6 +626,24 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                     labelText: 'Адрес',
                     hintText: 'Город, улица, кабинет…',
                     border: OutlineInputBorder(),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _saving ? null : _pickLocationOnMap,
+                    icon: Icon(
+                      _lat != null ? Icons.edit_location_alt : Icons.map,
+                      size: 18,
+                    ),
+                    label: Text(
+                      _lat != null
+                          ? 'Точка на карте указана — изменить'
+                          : 'Указать точку на карте',
+                    ),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),

@@ -346,11 +346,11 @@ class _RoleCard extends StatelessWidget {
   }
 }
 
-/// Вход/регистрация через Supabase (email + пароль).
+/// Вход/регистрация через Supabase (логин + пароль, без email).
 class CloudAuthScreen extends StatefulWidget {
   const CloudAuthScreen({super.key, required this.role});
 
-  /// 'client' | 'master'
+  /// 'client' | 'master' | 'salon'
   final String role;
 
   @override
@@ -359,7 +359,7 @@ class CloudAuthScreen extends StatefulWidget {
 
 class _CloudAuthScreenState extends State<CloudAuthScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _loginController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -370,7 +370,7 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _loginController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
     _phoneController.dispose();
@@ -381,16 +381,13 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
     if (e is AuthException) {
       final msg = e.message.toLowerCase();
       if (msg.contains('invalid login') || msg.contains('invalid credentials')) {
-        return 'Неверный email или пароль';
+        return 'Неверный логин или пароль';
       }
       if (msg.contains('already registered') || msg.contains('already in use')) {
-        return 'Такой email уже зарегистрирован';
+        return 'Такой логин уже занят';
       }
       if (msg.contains('password')) {
         return 'Пароль слишком простой (минимум 6 символов)';
-      }
-      if (msg.contains('email')) {
-        return 'Проверьте email';
       }
       return e.message;
     }
@@ -403,19 +400,19 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
       _busy = true;
       _error = null;
     });
-    final email = _emailController.text.trim();
+    final login = _loginController.text.trim();
     final password = _passwordController.text;
     try {
       if (_registerMode) {
         await _cloud.signUp(
-          email: email,
+          login: login,
           password: password,
           role: widget.role,
           name: _nameController.text.trim(),
           phone: _phoneController.text.trim(),
         );
       } else {
-        await _cloud.signIn(email, password);
+        await _cloud.signIn(login, password);
       }
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -480,16 +477,20 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
                   const SizedBox(height: 12),
                 ],
                 TextFormField(
-                  controller: _emailController,
+                  controller: _loginController,
                   enabled: !_busy,
-                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
                   decoration: const InputDecoration(
-                    labelText: 'Email',
+                    labelText: 'Логин',
+                    hintText: 'Придумайте логин',
                     border: OutlineInputBorder(),
                   ),
-                  validator: (v) => v == null || !v.contains('@')
-                      ? 'Введите email'
-                      : null,
+                  validator: (v) {
+                    final s = v?.trim() ?? '';
+                    if (s.length < 3) return 'Минимум 3 символа';
+                    if (s.contains(' ')) return 'Без пробелов';
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 12),
                 TextFormField(

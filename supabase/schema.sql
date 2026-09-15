@@ -4,10 +4,13 @@
 -- ========== ПРОФИЛИ ==========
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  role text not null check (role in ('client', 'master')),
+  role text not null check (role in ('client', 'master', 'salon')),
   name text not null default '',
   phone text not null default '',
   avatar_url text not null default '',
+  address text not null default '',
+  lat double precision,
+  lng double precision,
   created_at timestamptz not null default now()
 );
 
@@ -62,6 +65,8 @@ create table if not exists public.master_profiles (
   description text not null default '',
   avatar_url text not null default '',
   address text not null default '',
+  lat double precision,
+  lng double precision,
   social text not null default '',
   phone_public boolean not null default false,
   rating_avg numeric(2,1) not null default 0,
@@ -194,7 +199,7 @@ drop policy if exists "profiles_update_own"    on public.profiles;
 create policy "profiles_select_own"    on public.profiles
   for select using (auth.uid() = id);
 create policy "profiles_select_master" on public.profiles
-  for select using (role = 'master');
+  for select using (role in ('master', 'salon'));
 create policy "profiles_update_own"    on public.profiles
   for update using (auth.uid() = id) with check (auth.uid() = id);
 
@@ -353,7 +358,9 @@ drop policy if exists "client_reviews_delete" on public.client_reviews;
 
 create policy "client_reviews_select" on public.client_reviews
   for select using (
-    auth.uid() in (select id from public.profiles where role = 'master')
+    auth.uid() in (
+      select id from public.profiles where role in ('master', 'salon')
+    )
   );
 create policy "client_reviews_insert" on public.client_reviews
   for insert with check (

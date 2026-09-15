@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../notifications/push_service.dart';
 import 'cloud_service.dart';
+import 'geo_service.dart';
+import 'map_screens.dart';
 import 'master_public_profile.dart';
 
 /// Главный экран клиента: каталог мастеров, мои записи, профиль.
@@ -98,10 +101,40 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
   bool _loading = true;
   bool _failed = false;
 
+  /// Координаты клиента из профиля — для сортировки «рядом с вами».
+  double? get _myLat => widget.profile.lat;
+  double? get _myLng => widget.profile.lng;
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  /// Расстояние от клиента до мастера в км. null — если нет координат.
+  double? _distanceTo(MasterCard m) {
+    final lat = _myLat;
+    final lng = _myLng;
+    if (lat == null || lng == null || !m.hasLocation) return null;
+    return GeoService.distanceKm(lat, lng, m.lat!, m.lng!);
+  }
+
+  /// Сначала мастера с координатами — по возрастанию расстояния,
+  /// без координат — в конце в исходном порядке (по рейтингу).
+  List<MasterCard> _sortedByDistance(List<MasterCard> list) {
+    if (_myLat == null || _myLng == null) return list;
+    final withDist = <(MasterCard, double)>[];
+    final rest = <MasterCard>[];
+    for (final m in list) {
+      final d = _distanceTo(m);
+      if (d == null) {
+        rest.add(m);
+      } else {
+        withDist.add((m, d));
+      }
+    }
+    withDist.sort((a, b) => a.$2.compareTo(b.$2));
+    return [...withDist.map((e) => e.$1), ...rest];
   }
 
   Future<void> _load() async {
@@ -115,7 +148,7 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
       if (!mounted) return;
       setState(() {
         _categories = categories;
-        _masters = masters;
+        _masters = _sortedByDistance(masters);
       });
     } catch (e, st) {
       await SyncLog.write('client_catalog', '$e\n$st');
@@ -124,6 +157,19 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _openMap() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => MastersMapScreen(
+          masters: _masters,
+          clientLat: _myLat,
+          clientLng: _myLng,
+          onOpen: _openMaster,
+        ),
+      ),
+    );
   }
 
   Future<void> _openMaster(MasterCard master) async {
@@ -146,6 +192,13 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
         title: Text(
           'Привет, ${widget.profile.name.isEmpty ? 'клиент' : widget.profile.name}!',
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Мастера на карте',
+            icon: const Icon(Icons.map_outlined),
+            onPressed: _loading ? null : _openMap,
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -234,6 +287,30 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
                                     ),
                                   ],
                                 ),
+                                if (_distanceTo(m) != null)
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.place_outlined,
+                                        size: 14,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '${GeoService.formatDistance(_distanceTo(m)!)} от вас',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
                               ],
                             ),
                             isThreeLine: true,
@@ -1088,7 +1165,29 @@ class _ClientProfileTab extends StatelessWidget {
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
                         if (profile.phone.isNotEmpty) Text(profile.phone),
-                        Text(supabase.auth.currentUser?.email ?? ''),
+                        Text(CloudService().displayLogin),
+                        if (profile.address.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  Icons.place_outlined,
+                                  size: 16,
+                                  color: scheme.primary,
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    profile.address,
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -1133,12 +1232,16 @@ class ClientProfileEditScreen extends StatefulWidget {
 
 class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
   final _cloud = CloudService();
+  final _geo = GeoService();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
+  final _addressController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
   String _avatarUrl = '';
+  double? _lat;
+  double? _lng;
   bool _pickingAvatar = false;
   bool _saving = false;
   String? _error;
@@ -1148,8 +1251,11 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
     super.initState();
     _nameController.text = widget.profile.name;
     _phoneController.text = widget.profile.phone;
-    _emailController.text = supabase.auth.currentUser?.email ?? '';
+    _emailController.text = _cloud.displayLogin;
+    _addressController.text = widget.profile.address;
     _avatarUrl = widget.profile.avatarUrl;
+    _lat = widget.profile.lat;
+    _lng = widget.profile.lng;
   }
 
   @override
@@ -1157,9 +1263,37 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
     _nameController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
+    _addressController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
     super.dispose();
+  }
+
+  /// Выбор своей точки на карте; после выбора адрес подставляется
+  /// обратным геокодингом.
+  Future<void> _pickLocationOnMap() async {
+    GeoPoint? initial;
+    if (_lat != null && _lng != null) {
+      initial = GeoPoint(_lat!, _lng!);
+    } else if (_addressController.text.trim().isNotEmpty) {
+      initial = await _geo.geocode(_addressController.text);
+    }
+    if (!mounted) return;
+    final picked = await Navigator.of(context).push<LatLng>(
+      MaterialPageRoute(
+        builder: (context) => MapPickerScreen(initial: initial),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _lat = picked.latitude;
+      _lng = picked.longitude;
+    });
+    final addr = await _geo.reverseGeocode(picked.latitude, picked.longitude);
+    if (!mounted) return;
+    if (addr != null && addr.label.isNotEmpty) {
+      setState(() => _addressController.text = addr.label);
+    }
   }
 
   Future<void> _pickAvatar() async {
@@ -1190,7 +1324,8 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
     if (_saving) return;
     final name = _nameController.text.trim();
     final phone = _phoneController.text.trim();
-    final email = _emailController.text.trim();
+    final login = _emailController.text.trim();
+    final address = _addressController.text.trim();
     final password = _passwordController.text;
     final confirm = _confirmController.text;
 
@@ -1209,17 +1344,33 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
     });
 
     try {
+      // Координаты: выбранные на карте, либо геокодинг из текста адреса.
+      var lat = _lat;
+      var lng = _lng;
+      if ((lat == null || lng == null) && address.isNotEmpty) {
+        final point = await _geo.geocode(address);
+        if (point != null) {
+          lat = point.lat;
+          lng = point.lng;
+        }
+      }
+      final cleared = address.isEmpty;
+
       await _cloud.updateMyProfile(
         name: name,
         phone: phone,
         avatarUrl: _avatarUrl,
+        address: address,
+        lat: cleared ? null : lat,
+        lng: cleared ? null : lng,
+        clearLocation: cleared,
       );
 
-      final currentEmail = supabase.auth.currentUser?.email ?? '';
-      final needEmail = email.isNotEmpty && email != currentEmail;
-      if (needEmail || password.isNotEmpty) {
+      final needLogin =
+          login.isNotEmpty && login != _cloud.displayLogin;
+      if (needLogin || password.isNotEmpty) {
         await _cloud.updateAuth(
-          email: needEmail ? email : null,
+          login: needLogin ? login : null,
           password: password.isNotEmpty ? password : null,
         );
       }
@@ -1304,10 +1455,38 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
+            autocorrect: false,
             decoration: const InputDecoration(
-              labelText: 'Email',
+              labelText: 'Логин',
               border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _addressController,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Мой адрес',
+              hintText: 'Город, улица — для поиска мастеров рядом',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _saving ? null : _pickLocationOnMap,
+              icon: Icon(
+                _lat != null ? Icons.edit_location_alt : Icons.map,
+                size: 18,
+              ),
+              label: Text(
+                _lat != null
+                    ? 'Точка на карте указана — изменить'
+                    : 'Указать точку на карте',
+              ),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+              ),
             ),
           ),
           const SizedBox(height: 12),

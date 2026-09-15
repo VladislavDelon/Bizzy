@@ -2044,6 +2044,9 @@ class AppointmentsDatabase {
             ],
           );
         }
+        final cloudPrice = cloud.servicePrice > 0
+            ? cloud.servicePrice
+            : await _servicePriceForName(companyId, cloud.serviceName);
         if (existing.isEmpty) {
           await db.insert('appointments', {
             'companyId': companyId,
@@ -2057,6 +2060,7 @@ class AppointmentsDatabase {
             'notes': cloud.notes,
             'externalId': ext,
             'cloudUpdatedAt': cloudUpdatedAt.toIso8601String(),
+            'servicePrice': cloudPrice,
           });
         } else {
           final id = existing.first['id'] as int;
@@ -2076,6 +2080,7 @@ class AppointmentsDatabase {
                 'durationMinutes': cloud.durationMinutes,
                 'notes': cloud.notes,
                 'cloudUpdatedAt': cloudUpdatedAt.toIso8601String(),
+                'servicePrice': cloudPrice,
               },
               where: 'id = ?',
               whereArgs: [id],
@@ -2116,6 +2121,7 @@ class AppointmentsDatabase {
           masterName: a.master,
           startsAt: a.dateTime,
           durationMinutes: a.durationMinutes,
+          servicePrice: a.servicePrice,
           notes: a.notes,
         );
         await db.update(
@@ -2150,6 +2156,7 @@ class AppointmentsDatabase {
               masterName: a.master,
               startsAt: a.dateTime,
               durationMinutes: a.durationMinutes,
+              servicePrice: a.servicePrice,
               notes: a.notes,
             ),
           );
@@ -2229,8 +2236,9 @@ class AppointmentsDatabase {
       where: 'externalId = ?',
       whereArgs: ['cloud:${booking.id}'],
     );
-    final servicePrice =
-        await _servicePriceForName(companyId, booking.serviceName);
+    final servicePrice = booking.servicePrice > 0
+        ? booking.servicePrice
+        : await _servicePriceForName(companyId, booking.serviceName);
     final appointment = Appointment(
       companyId: companyId,
       clientName: booking.clientName.isEmpty
@@ -3332,6 +3340,12 @@ class _MainShellState extends State<MainShell> {
         database: _db,
         company: widget.company,
       ),
+      FinanceTab(
+        database: _db,
+        company: widget.company,
+        appointments: _allAppointments,
+        loading: _loading,
+      ),
       MoreTab(
         database: _db,
         company: widget.company,
@@ -3419,6 +3433,10 @@ class _MainShellState extends State<MainShell> {
           const NavigationDestination(
             icon: Icon(Icons.spa),
             label: 'Услуги',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.payments_outlined),
+            label: 'Финансы',
           ),
           const NavigationDestination(
             icon: Icon(Icons.menu),
@@ -4532,14 +4550,32 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
           ? await widget.database.createService(service)
           : await widget.database.updateService(service).then((_) => service);
       // Сразу заливаем в облако, чтобы клиенты видели без ожидания синхронизации.
-      if (cloudSignedIn && saved.published) {
+      if (cloudSignedIn) {
         try {
-          final cloud = await CloudService().addService(
-            name: saved.name,
-            price: saved.price,
-            durationMinutes: saved.durationMinutes,
-            published: saved.published,
-          );
+          final cloudId =
+              int.tryParse(saved.externalId.split(':').last);
+          final CloudServiceItem cloud;
+          if (cloudId != null) {
+            // Услуга уже в облаке — обновляем, а не создаём дубликат.
+            // Пушим даже published=false, чтобы снятие публикации дошло.
+            cloud = await CloudService().updateService(
+              CloudServiceItem(
+                id: cloudId,
+                masterId: CloudService().uid ?? '',
+                name: saved.name,
+                price: saved.price,
+                durationMinutes: saved.durationMinutes,
+                published: saved.published,
+              ),
+            );
+          } else {
+            cloud = await CloudService().addService(
+              name: saved.name,
+              price: saved.price,
+              durationMinutes: saved.durationMinutes,
+              published: saved.published,
+            );
+          }
           final synced = saved.copyWith(
             externalId: 'cloud:service:${cloud.id}',
             cloudUpdatedAt: (cloud.updatedAt ?? DateTime.now()).toIso8601String(),
@@ -4548,8 +4584,18 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
           if (!mounted) return;
           Navigator.of(context).pop(synced);
           return;
-        } catch (_) {
-          // Нет сети — синхронизируем позже.
+        } catch (e, st) {
+          await SyncLog.write('services', 'Пуш услуги в облако не удался: $e\n$st');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Сохранено на телефоне, но в облако не ушло — '
+                  'клиенты пока её не увидят. Проверьте интернет.',
+                ),
+              ),
+            );
+          }
         }
       }
       if (!mounted) return;
@@ -4760,6 +4806,49 @@ class _ServicesTabState extends State<ServicesTab> {
         cloudUpdatedAt: DateTime.now().toIso8601String(),
       );
       await widget.database.updateService(updated);
+      // Сразу доносим изменение до облака, чтобы глазик отражал
+      // реальную видимость услуги для клиентов.
+      if (cloudSignedIn) {
+        try {
+          final cloudId =
+              int.tryParse(updated.externalId.split(':').last);
+          if (cloudId != null) {
+            await CloudService().updateService(
+              CloudServiceItem(
+                id: cloudId,
+                masterId: CloudService().uid ?? '',
+                name: updated.name,
+                price: updated.price,
+                durationMinutes: updated.durationMinutes,
+                published: updated.published,
+              ),
+            );
+          } else if (updated.published) {
+            final cloud = await CloudService().addService(
+              name: updated.name,
+              price: updated.price,
+              durationMinutes: updated.durationMinutes,
+              published: true,
+            );
+            await widget.database.updateService(
+              updated.copyWith(
+                externalId: 'cloud:service:${cloud.id}',
+                cloudUpdatedAt:
+                    (cloud.updatedAt ?? DateTime.now()).toIso8601String(),
+              ),
+            );
+          }
+        } catch (e, st) {
+          await SyncLog.write('services', 'Тоггл публикации не ушёл в облако: $e\n$st');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Не удалось обновить видимость в облаке'),
+              ),
+            );
+          }
+        }
+      }
       await _load();
     } catch (_) {
       if (!mounted) return;
@@ -4935,6 +5024,247 @@ class _ServicesTabState extends State<ServicesTab> {
   }
 }
 
+enum _FinancePeriod { week, month, all }
+
+/// Вкладка «Финансы»: сколько записей сделано за период
+/// и на какую сумму. Считаются только прошедшие записи
+/// (завершённые): отменённые заявки не попадают в календарь,
+/// а будущие ещё не отработаны.
+class FinanceTab extends StatefulWidget {
+  const FinanceTab({
+    super.key,
+    required this.database,
+    required this.company,
+    required this.appointments,
+    required this.loading,
+  });
+
+  final AppointmentsDatabase database;
+  final Company company;
+  final List<Appointment> appointments;
+  final bool loading;
+
+  @override
+  State<FinanceTab> createState() => _FinanceTabState();
+}
+
+class _FinanceTabState extends State<FinanceTab> {
+  _FinancePeriod _period = _FinancePeriod.month;
+  String _service = '';
+  List<Service> _services = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadServices();
+  }
+
+  @override
+  void didUpdateWidget(covariant FinanceTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.company.id != widget.company.id) _loadServices();
+  }
+
+  Future<void> _loadServices() async {
+    try {
+      final services = await widget.database.getServices(widget.company.id);
+      if (mounted) setState(() => _services = services);
+    } catch (_) {
+      // Офлайн — фильтр по услугам просто не покажет цен-запасной вариант.
+    }
+  }
+
+  DateTime? get _from {
+    final now = DateTime.now();
+    return switch (_period) {
+      _FinancePeriod.week => now.subtract(const Duration(days: 7)),
+      _FinancePeriod.month => DateTime(now.year, now.month - 1, now.day),
+      _FinancePeriod.all => null,
+    };
+  }
+
+  List<Appointment> get _filtered {
+    final now = DateTime.now();
+    final from = _from;
+    return widget.appointments
+        .where(
+          (a) =>
+              a.dateTime.isBefore(now) &&
+              (from == null || !a.dateTime.isBefore(from)) &&
+              (_service.isEmpty || a.service == _service),
+        )
+        .toList()
+      ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
+  }
+
+  /// Цена записи: снимок, сохранённый при записи,
+  /// а если его нет — текущая цена услуги из справочника.
+  double _priceOf(Appointment a) {
+    if (a.servicePrice > 0) return a.servicePrice;
+    for (final s in _services) {
+      if (s.name == a.service) return s.price;
+    }
+    return 0;
+  }
+
+  String _fmtDay(DateTime dt) =>
+      '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')} '
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final items = _filtered;
+    final total = items.fold<double>(0, (sum, a) => sum + _priceOf(a));
+    final clients = items
+        .map((a) => '${a.clientName}|${a.phone}')
+        .toSet()
+        .length;
+    final serviceNames = _services.map((s) => s.name).toSet().toList();
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Row(
+            children: [
+              for (final p in _FinancePeriod.values) ...[
+                ChoiceChip(
+                  label: Text(
+                    switch (p) {
+                      _FinancePeriod.week => 'Неделя',
+                      _FinancePeriod.month => 'Месяц',
+                      _FinancePeriod.all => 'Всё время',
+                    },
+                  ),
+                  selected: _period == p,
+                  onSelected: (_) => setState(() => _period = p),
+                ),
+                if (p != _FinancePeriod.values.last)
+                  const SizedBox(width: 8),
+              ],
+            ],
+          ),
+        ),
+        if (serviceNames.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: InputDecorator(
+              decoration: const InputDecoration(
+                labelText: 'Услуга',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              isEmpty: _service.isEmpty,
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _service.isEmpty ? null : _service,
+                  isExpanded: true,
+                  isDense: true,
+                  hint: const Text('Все услуги'),
+                  items: [
+                    const DropdownMenuItem<String>(
+                      value: '',
+                      child: Text('Все услуги'),
+                    ),
+                    for (final name in serviceNames)
+                      DropdownMenuItem(value: name, child: Text(name)),
+                  ],
+                  onChanged: (v) => setState(() => _service = v ?? ''),
+                ),
+              ),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Card(
+            color: scheme.primaryContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Завершено записей: ${items.length}',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        Text(
+                          'Клиентов: $clients',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  ValueListenableBuilder<Currency>(
+                    valueListenable: _currency,
+                    builder: (context, currency, _) => Text(
+                      '${total.toStringAsFixed(0)} ${currency.symbol}',
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: scheme.onPrimaryContainer,
+                              ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: widget.loading && widget.appointments.isEmpty
+              ? const Center(child: CircularProgressIndicator())
+              : items.isEmpty
+                  ? const Center(
+                      child: Text('За выбранный период записей нет'),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      itemCount: items.length,
+                      itemBuilder: (context, index) {
+                        final a = items[index];
+                        final price = _priceOf(a);
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: scheme.secondaryContainer,
+                              child: Icon(
+                                Icons.check_circle_outline,
+                                color: scheme.onSecondaryContainer,
+                              ),
+                            ),
+                            title: Text(
+                              a.service.isEmpty ? 'Запись' : a.service,
+                            ),
+                            subtitle: Text(
+                              '${a.clientName.isEmpty ? 'Клиент' : a.clientName}'
+                              ' • ${_fmtDay(a.dateTime)}',
+                            ),
+                            trailing: price > 0
+                                ? _priceText(
+                                    price,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  )
+                                : const Text('—'),
+                          ),
+                        );
+                      },
+                    ),
+        ),
+      ],
+    );
+  }
+}
+
 class MoreTab extends StatefulWidget {
   const MoreTab({
     super.key,
@@ -5094,6 +5424,8 @@ class _MoreTabState extends State<MoreTab> {
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute(
                 builder: (context) => MasterProfileScreen(
+                  onSyncServices: () =>
+                      widget.database.syncServices(widget.company.id),
                   onDeleteAccount: () => CloudService().deleteMyAccount().then((_) => widget.onLogout()),
                 ),
               ),

@@ -13,6 +13,7 @@ class MasterProfileScreen extends StatefulWidget {
     super.key,
     this.isFirstSetup = false,
     this.onDeleteAccount,
+    this.onSyncServices,
   });
 
   /// true — показываем сразу после первого входа мастера.
@@ -20,6 +21,10 @@ class MasterProfileScreen extends StatefulWidget {
 
   /// Колбэк удаления аккаунта.
   final Future<void> Function()? onDeleteAccount;
+
+  /// Вызывается перед предпросмотром — пушит локальные услуги в облако,
+  /// чтобы «как видят клиенты» показывал актуальный список.
+  final Future<void> Function()? onSyncServices;
 
   @override
   State<MasterProfileScreen> createState() => _MasterProfileScreenState();
@@ -30,8 +35,6 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmController = TextEditingController();
   final _descController = TextEditingController();
   final _addressController = TextEditingController();
   final _socialController = TextEditingController();
@@ -45,6 +48,8 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   bool _loading = true;
   bool _saving = false;
   String? _error;
+  List<PortfolioPhoto> _portfolio = [];
+  bool _uploadingPhoto = false;
 
   @override
   void initState() {
@@ -57,8 +62,6 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
     _nameController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
-    _passwordController.dispose();
-    _confirmController.dispose();
     _descController.dispose();
     _addressController.dispose();
     _socialController.dispose();
@@ -70,6 +73,12 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       final categories = await _cloud.categories();
       final profile = await _cloud.myProfile();
       final card = await _cloud.myMasterCard();
+      List<PortfolioPhoto> portfolio = [];
+      try {
+        portfolio = await _cloud.myPortfolio();
+      } catch (e, st) {
+        await SyncLog.write('portfolio', 'Загрузка портфолио: $e\n$st');
+      }
       if (!mounted) return;
       setState(() {
         _categories = categories;
@@ -84,6 +93,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _avatarUrl = card?.avatarUrl ?? '';
         _ratingAvg = card?.ratingAvg ?? 0;
         _ratingCount = card?.ratingCount ?? 0;
+        _portfolio = portfolio;
         _loading = false;
       });
     } catch (_) {
@@ -116,6 +126,138 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       );
     } finally {
       if (mounted) setState(() => _pickingAvatar = false);
+    }
+  }
+
+  Future<void> _addPortfolioPhoto() async {
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1280,
+        imageQuality: 85,
+      );
+      if (file == null || !mounted) return;
+      setState(() => _uploadingPhoto = true);
+      final photo = await _cloud.uploadPortfolioPhoto(file.path);
+      if (!mounted) return;
+      setState(() => _portfolio = [..._portfolio, photo]);
+    } catch (e, st) {
+      await SyncLog.write('portfolio', 'Загрузка фото: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось загрузить фото')),
+      );
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
+    }
+  }
+
+  Future<void> _removePortfolioPhoto(PortfolioPhoto photo) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить фото?'),
+        content: const Text('Фото пропадёт из вашего публичного профиля.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _cloud.deletePortfolioPhoto(photo);
+      setState(
+          () => _portfolio = _portfolio.where((p) => p.id != photo.id).toList());
+    } catch (e, st) {
+      await SyncLog.write('portfolio', 'Удаление фото: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось удалить фото')),
+      );
+    }
+  }
+
+  /// Отдельный компактный диалог смены пароля:
+  /// сперва новый пароль, затем повтор.
+  Future<void> _changePassword() async {
+    final newCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Сменить пароль'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: newCtrl,
+                obscureText: true,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Новый пароль',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (v) => (v == null || v.length < 6)
+                    ? 'Минимум 6 символов'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: confirmCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Повторите новый пароль',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (v) =>
+                    v != newCtrl.text ? 'Пароли не совпадают' : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.of(context).pop(true);
+              }
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+    final password = newCtrl.text;
+    newCtrl.dispose();
+    confirmCtrl.dispose();
+    if (ok != true || !mounted) return;
+    try {
+      await _cloud.updateAuth(password: password);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Пароль обновлён')),
+      );
+    } catch (e) {
+      await SyncLog.write('password_change', e.toString());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось сменить пароль')),
+      );
     }
   }
 
@@ -170,6 +312,13 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       ratingAvg: _ratingAvg,
       ratingCount: _ratingCount,
     );
+    // Сначала доталкиваем локальные услуги в облако, чтобы
+    // предпросмотр показывал то же, что видят клиенты.
+    try {
+      await widget.onSyncServices?.call();
+    } catch (_) {
+      // Нет сети — покажем то, что уже в облаке.
+    }
     List<CloudServiceItem> services = [];
     try {
       services = await _cloud.myServices();
@@ -183,6 +332,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         builder: (context) => MasterPublicProfileView(
           master: previewCard,
           services: services,
+          portfolio: _portfolio,
           isPreview: true,
         ),
       ),
@@ -195,16 +345,6 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       setState(() => _error = 'Выберите категорию');
       return;
     }
-    final password = _passwordController.text;
-    final confirm = _confirmController.text;
-    if (password.isNotEmpty && password != confirm) {
-      setState(() => _error = 'Пароли не совпадают');
-      return;
-    }
-    if (password.isNotEmpty && password.length < 6) {
-      setState(() => _error = 'Пароль должен быть не короче 6 символов');
-      return;
-    }
     setState(() {
       _saving = true;
       _error = null;
@@ -215,11 +355,8 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       final needEmail = !widget.isFirstSetup &&
           email.isNotEmpty &&
           email != currentEmail;
-      if (needEmail || password.isNotEmpty) {
-        await _cloud.updateAuth(
-          email: needEmail ? email : null,
-          password: password.isNotEmpty ? password : null,
-        );
+      if (needEmail) {
+        await _cloud.updateAuth(email: email);
       }
 
       await _cloud.updateMyProfile(
@@ -358,30 +495,40 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                     border: OutlineInputBorder(),
                   ),
                 ),
-                const SizedBox(height: 12),
+                InkWell(
+                  onTap: _saving
+                      ? null
+                      : () => setState(() => _phonePublic = !_phonePublic),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Checkbox(
+                          value: _phonePublic,
+                          onChanged: _saving
+                              ? null
+                              : (v) =>
+                                  setState(() => _phonePublic = v ?? false),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        Text(
+                          'Показывать номер',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
                 TextField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(
                     labelText: 'Email / логин',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Новый пароль (оставьте пустым, чтобы не менять)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _confirmController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Повторите новый пароль',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -436,15 +583,6 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                SwitchListTile(
-                  title: const Text('Показывать телефон клиентам'),
-                  subtitle: const Text('Номер будет виден в вашей карточке'),
-                  value: _phonePublic,
-                  onChanged: _saving
-                      ? null
-                      : (v) => setState(() => _phonePublic = v),
-                ),
-                const SizedBox(height: 12),
                 TextField(
                   controller: _descController,
                   minLines: 3,
@@ -454,6 +592,100 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                     hintText: 'Опыт, особенности…',
                     border: OutlineInputBorder(),
                   ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Портфолио — фото работ',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Эти фото видят клиенты в вашей карточке',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                GridView.count(
+                  crossAxisCount: 3,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  children: [
+                    for (final photo in _portfolio)
+                      Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              photo.imageUrl,
+                              fit: BoxFit.cover,
+                              loadingBuilder: (context, child, progress) =>
+                                  progress == null
+                                      ? child
+                                      : Container(
+                                          color: scheme.surfaceContainerHighest,
+                                          child: const Center(
+                                            child:
+                                                CircularProgressIndicator(
+                                                    strokeWidth: 2),
+                                          ),
+                                        ),
+                              errorBuilder: (context, error, stackTrace) =>
+                                  Container(
+                                color: scheme.surfaceContainerHighest,
+                                child: const Icon(Icons.broken_image_outlined),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 2,
+                            right: 2,
+                            child: InkWell(
+                              onTap: _saving
+                                  ? null
+                                  : () => _removePortfolioPhoto(photo),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                padding: const EdgeInsets.all(4),
+                                child: const Icon(
+                                  Icons.close,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    InkWell(
+                      onTap:
+                          _uploadingPhoto || _saving ? null : _addPortfolioPhoto,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: scheme.outline,
+                            style: BorderStyle.solid,
+                          ),
+                          color: scheme.surfaceContainerHighest
+                              .withValues(alpha: 0.4),
+                        ),
+                        child: Center(
+                          child: _uploadingPhoto
+                              ? const CircularProgressIndicator(strokeWidth: 2)
+                              : Icon(
+                                  Icons.add_photo_alternate_outlined,
+                                  color: scheme.primary,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
@@ -481,6 +713,12 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                   label: const Text('Сохранить'),
                 ),
                 if (!widget.isFirstSetup) ...[
+                  const SizedBox(height: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: _saving ? null : _changePassword,
+                    icon: const Icon(Icons.lock_outline),
+                    label: const Text('Сменить пароль'),
+                  ),
                   const SizedBox(height: 12),
                   FilledButton.tonalIcon(
                     onPressed: _saving ? null : _deleteAccount,

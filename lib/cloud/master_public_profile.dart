@@ -11,6 +11,7 @@ class MasterPublicProfileView extends StatelessWidget {
     super.key,
     required this.master,
     required this.services,
+    this.portfolio = const [],
     this.onBook,
     this.isPreview = false,
     this.onRefresh,
@@ -18,6 +19,9 @@ class MasterPublicProfileView extends StatelessWidget {
 
   final MasterCard master;
   final List<CloudServiceItem> services;
+
+  /// Фото работ мастера — сетка в разделе «Работы мастера».
+  final List<PortfolioPhoto> portfolio;
   final VoidCallback? onBook;
   final bool isPreview;
   final Future<void> Function()? onRefresh;
@@ -170,6 +174,40 @@ class MasterPublicProfileView extends StatelessWidget {
               trailing: Text(s.price.toStringAsFixed(0)),
             ),
           ),
+        if (portfolio.isNotEmpty) ...[
+          _sectionTitle(context, 'Работы мастера'),
+          GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            children: [
+              for (final photo in portfolio)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    photo.imageUrl,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, progress) =>
+                        progress == null
+                            ? child
+                            : Container(
+                                color: scheme.surfaceContainerHighest,
+                                child: const Center(
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2),
+                                ),
+                              ),
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      color: scheme.surfaceContainerHighest,
+                      child: const Icon(Icons.broken_image_outlined),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
         const SizedBox(height: 80),
       ],
     );

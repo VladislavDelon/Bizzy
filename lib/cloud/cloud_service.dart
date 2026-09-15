@@ -27,6 +27,11 @@ int _parseInt(dynamic value, {int fallback = 0}) {
   return fallback;
 }
 
+/// true, если ошибка Postgrest означает «колонки нет в таблице»
+/// (например, старая база без миграции published/service_price).
+bool _isMissingColumn(PostgrestException e, String column) =>
+    e.code == '42703' || e.message.contains(column);
+
 double _parseDouble(dynamic value, {double fallback = 0}) {
   if (value == null) return fallback;
   if (value is double) return value;
@@ -273,6 +278,7 @@ class CloudBooking {
     this.clientName = '',
     this.clientPhone = '',
     this.masterName = '',
+    this.servicePrice = 0,
   });
 
   final int id;
@@ -287,6 +293,9 @@ class CloudBooking {
   final String clientName;
   final String clientPhone;
   final String masterName;
+
+  /// Цена услуги на момент записи (снимок).
+  final double servicePrice;
 
   bool get isPast => startsAt.isBefore(DateTime.now());
 
@@ -303,6 +312,7 @@ class CloudBooking {
     String? clientName,
     String? clientPhone,
     String? masterName,
+    double? servicePrice,
   }) =>
       CloudBooking(
         id: id ?? this.id,
@@ -317,6 +327,7 @@ class CloudBooking {
         clientName: clientName ?? this.clientName,
         clientPhone: clientPhone ?? this.clientPhone,
         masterName: masterName ?? this.masterName,
+        servicePrice: servicePrice ?? this.servicePrice,
       );
 
   factory CloudBooking.fromMap(Map<String, dynamic> map) {
@@ -335,8 +346,34 @@ class CloudBooking {
       clientName: client != null ? _parseString(client['name']) : '',
       clientPhone: client != null ? _parseString(client['phone']) : '',
       masterName: master != null ? _parseString(master['name']) : '',
+      servicePrice: _parseDouble(map['service_price']),
     );
   }
+}
+
+/// Фото из портфолио мастера (работы, которые видят клиенты).
+class PortfolioPhoto {
+  const PortfolioPhoto({
+    required this.id,
+    required this.masterId,
+    required this.imageUrl,
+    this.sortOrder = 0,
+    this.createdAt,
+  });
+
+  final int id;
+  final String masterId;
+  final String imageUrl;
+  final int sortOrder;
+  final DateTime? createdAt;
+
+  factory PortfolioPhoto.fromMap(Map<String, dynamic> map) => PortfolioPhoto(
+        id: _parseInt(map['id']),
+        masterId: _parseString(map['master_id']),
+        imageUrl: _parseString(map['image_url']),
+        sortOrder: _parseInt(map['sort_order']),
+        createdAt: _parseDateTime(map['created_at']),
+      );
 }
 
 /// Отзыв мастера о клиенте (виден другим мастерам).
@@ -663,38 +700,123 @@ class CloudService {
     required int durationMinutes,
     bool published = true,
   }) async {
-    final row = await supabase
-        .from('services')
-        .insert({
-          'master_id': uid,
-          'name': name,
-          'price': price,
-          'duration_minutes': durationMinutes,
-          'published': published,
-        })
-        .select()
-        .single();
-    return CloudServiceItem.fromMap(row);
+    final payload = <String, dynamic>{
+      'master_id': uid,
+      'name': name,
+      'price': price,
+      'duration_minutes': durationMinutes,
+      'published': published,
+    };
+    try {
+      final row = await supabase
+          .from('services')
+          .insert(payload)
+          .select()
+          .single();
+      return CloudServiceItem.fromMap(row);
+    } on PostgrestException catch (e) {
+      if (!_isMissingColumn(e, 'published')) rethrow;
+      final row = await supabase
+          .from('services')
+          .insert(payload..remove('published'))
+          .select()
+          .single();
+      return CloudServiceItem.fromMap(row);
+    }
   }
 
   Future<CloudServiceItem> updateService(CloudServiceItem s) async {
-    final row = await supabase
-        .from('services')
-        .update({
-          'name': s.name,
-          'price': s.price,
-          'duration_minutes': s.durationMinutes,
-          'published': s.published,
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-        })
-        .eq('id', s.id)
-        .select()
-        .single();
-    return CloudServiceItem.fromMap(row);
+    final payload = <String, dynamic>{
+      'name': s.name,
+      'price': s.price,
+      'duration_minutes': s.durationMinutes,
+      'published': s.published,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    try {
+      final row = await supabase
+          .from('services')
+          .update(payload)
+          .eq('id', s.id)
+          .select()
+          .single();
+      return CloudServiceItem.fromMap(row);
+    } on PostgrestException catch (e) {
+      if (!_isMissingColumn(e, 'published')) rethrow;
+      final row = await supabase
+          .from('services')
+          .update(payload..remove('published'))
+          .eq('id', s.id)
+          .select()
+          .single();
+      return CloudServiceItem.fromMap(row);
+    }
   }
 
   Future<void> deleteService(int id) =>
       supabase.from('services').delete().eq('id', id);
+
+  // ---------- Портфолио мастера ----------
+  /// Фото работ текущего мастера.
+  Future<List<PortfolioPhoto>> myPortfolio() async {
+    final rows = await supabase
+        .from('master_portfolio')
+        .select()
+        .eq('master_id', uid!)
+        .order('sort_order')
+        .order('created_at');
+    return [for (final r in rows) PortfolioPhoto.fromMap(r)];
+  }
+
+  /// Фото работ мастера для клиентского просмотра.
+  Future<List<PortfolioPhoto>> portfolioOf(String masterId) async {
+    final rows = await supabase
+        .from('master_portfolio')
+        .select()
+        .eq('master_id', masterId)
+        .order('sort_order')
+        .order('created_at');
+    return [for (final r in rows) PortfolioPhoto.fromMap(r)];
+  }
+
+  /// Загружает фото работы в bucket `avatars/<uid>/portfolio/…`
+  /// (политики bucket уже разрешают владельцу писать в свою папку)
+  /// и создаёт запись в master_portfolio.
+  Future<PortfolioPhoto> uploadPortfolioPhoto(String filePath) async {
+    final userId = uid;
+    if (userId == null) throw Exception('Не авторизован');
+    final fileName =
+        '${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final dest = '$userId/portfolio/$fileName';
+    await supabase.storage
+        .from('avatars')
+        .upload(dest, File(filePath));
+    final url = supabase.storage.from('avatars').getPublicUrl(dest);
+    final row = await supabase
+        .from('master_portfolio')
+        .insert({'master_id': userId, 'image_url': url})
+        .select()
+        .single();
+    return PortfolioPhoto.fromMap(row);
+  }
+
+  /// Удаляет фото: запись в таблице + файл в storage (по URL).
+  Future<void> deletePortfolioPhoto(PortfolioPhoto photo) async {
+    await supabase
+        .from('master_portfolio')
+        .delete()
+        .eq('id', photo.id);
+    final marker = '/storage/v1/object/public/avatars/';
+    final idx = photo.imageUrl.indexOf(marker);
+    if (idx >= 0) {
+      final path = photo.imageUrl.substring(idx + marker.length);
+      try {
+        await supabase.storage.from('avatars').remove([path]);
+      } catch (_) {
+        // Файл мог быть удалён ранее — записи уже нет.
+      }
+    }
+  }
 
   /// Полностью перезаписывает список услуг мастера в облаке
   /// (простой способ синхронизации локального справочника).
@@ -725,22 +847,35 @@ class CloudService {
     required String serviceName,
     required DateTime startsAt,
     required int durationMinutes,
+    double servicePrice = 0,
     String notes = '',
   }) async {
-    final row = await supabase
-        .from('appointments')
-        .insert({
-          'client_id': uid,
-          'master_id': masterId,
-          'service_id': serviceId,
-          'service_name': serviceName,
-          'starts_at': startsAt.toUtc().toIso8601String(),
-          'duration_minutes': durationMinutes,
-          'notes': notes,
-        })
-        .select()
-        .single();
-    return CloudBooking.fromMap(row);
+    final payload = <String, dynamic>{
+      'client_id': uid,
+      'master_id': masterId,
+      'service_id': serviceId,
+      'service_name': serviceName,
+      'starts_at': startsAt.toUtc().toIso8601String(),
+      'duration_minutes': durationMinutes,
+      'service_price': servicePrice,
+      'notes': notes,
+    };
+    try {
+      final row = await supabase
+          .from('appointments')
+          .insert(payload)
+          .select()
+          .single();
+      return CloudBooking.fromMap(row);
+    } on PostgrestException catch (e) {
+      if (!_isMissingColumn(e, 'service_price')) rethrow;
+      final row = await supabase
+          .from('appointments')
+          .insert(payload..remove('service_price'))
+          .select()
+          .single();
+      return CloudBooking.fromMap(row);
+    }
   }
 
   /// Записи текущего пользователя как клиента.
@@ -913,44 +1048,70 @@ class CloudService {
     required String masterName,
     required DateTime startsAt,
     required int durationMinutes,
+    double servicePrice = 0,
     String notes = '',
   }) async {
-    final row = await supabase
-        .from('master_appointments')
-        .insert({
-          'master_id': uid,
-          'client_name': clientName,
-          'client_phone': clientPhone,
-          'service_name': serviceName,
-          'master_name': masterName,
-          'starts_at': startsAt.toUtc().toIso8601String(),
-          'duration_minutes': durationMinutes,
-          'notes': notes,
-        })
-        .select()
-        .single();
-    return CloudMasterAppointment.fromMap(row);
+    final payload = <String, dynamic>{
+      'master_id': uid,
+      'client_name': clientName,
+      'client_phone': clientPhone,
+      'service_name': serviceName,
+      'master_name': masterName,
+      'starts_at': startsAt.toUtc().toIso8601String(),
+      'duration_minutes': durationMinutes,
+      'service_price': servicePrice,
+      'notes': notes,
+    };
+    try {
+      final row = await supabase
+          .from('master_appointments')
+          .insert(payload)
+          .select()
+          .single();
+      return CloudMasterAppointment.fromMap(row);
+    } on PostgrestException catch (e) {
+      if (!_isMissingColumn(e, 'service_price')) rethrow;
+      final row = await supabase
+          .from('master_appointments')
+          .insert(payload..remove('service_price'))
+          .select()
+          .single();
+      return CloudMasterAppointment.fromMap(row);
+    }
   }
 
   Future<CloudMasterAppointment> updateMasterAppointment(
     CloudMasterAppointment a,
   ) async {
-    final row = await supabase
-        .from('master_appointments')
-        .update({
-          'client_name': a.clientName,
-          'client_phone': a.clientPhone,
-          'service_name': a.serviceName,
-          'master_name': a.masterName,
-          'starts_at': a.startsAt.toUtc().toIso8601String(),
-          'duration_minutes': a.durationMinutes,
-          'notes': a.notes,
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-        })
-        .eq('id', a.id)
-        .select()
-        .single();
-    return CloudMasterAppointment.fromMap(row);
+    final payload = <String, dynamic>{
+      'client_name': a.clientName,
+      'client_phone': a.clientPhone,
+      'service_name': a.serviceName,
+      'master_name': a.masterName,
+      'starts_at': a.startsAt.toUtc().toIso8601String(),
+      'duration_minutes': a.durationMinutes,
+      'service_price': a.servicePrice,
+      'notes': a.notes,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    try {
+      final row = await supabase
+          .from('master_appointments')
+          .update(payload)
+          .eq('id', a.id)
+          .select()
+          .single();
+      return CloudMasterAppointment.fromMap(row);
+    } on PostgrestException catch (e) {
+      if (!_isMissingColumn(e, 'service_price')) rethrow;
+      final row = await supabase
+          .from('master_appointments')
+          .update(payload..remove('service_price'))
+          .eq('id', a.id)
+          .select()
+          .single();
+      return CloudMasterAppointment.fromMap(row);
+    }
   }
 
   Future<void> deleteMasterAppointment(int id) =>
@@ -993,6 +1154,7 @@ class CloudMasterAppointment {
     required this.masterName,
     required this.startsAt,
     required this.durationMinutes,
+    this.servicePrice = 0,
     this.notes = '',
     this.updatedAt,
   });
@@ -1005,6 +1167,9 @@ class CloudMasterAppointment {
   final String masterName;
   final DateTime startsAt;
   final int durationMinutes;
+
+  /// Цена услуги на момент записи (снимок).
+  final double servicePrice;
   final String notes;
   final DateTime? updatedAt;
 
@@ -1018,6 +1183,7 @@ class CloudMasterAppointment {
         masterName: _parseString(map['master_name']),
         startsAt: _parseDateTime(map['starts_at']) ?? DateTime.now(),
         durationMinutes: _parseInt(map['duration_minutes'], fallback: 60),
+        servicePrice: _parseDouble(map['service_price']),
         notes: _parseString(map['notes']),
         updatedAt: _parseDateTime(map['updated_at']),
       );

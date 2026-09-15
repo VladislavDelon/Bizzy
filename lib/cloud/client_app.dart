@@ -262,6 +262,7 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
   final _cloud = CloudService();
   MasterCard? _master;
   List<CloudServiceItem> _services = [];
+  List<PortfolioPhoto> _portfolio = [];
   bool _loading = true;
   String? _error;
 
@@ -279,16 +280,24 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
         _cloud.servicesOf(widget.master.userId),
       ]);
       final rawServices = results[1] as List<CloudServiceItem>;
+      List<PortfolioPhoto> portfolio = [];
+      try {
+        portfolio = await _cloud.portfolioOf(widget.master.userId);
+      } catch (e, st) {
+        await SyncLog.write('master_detail_portfolio', '$e\n$st');
+      }
       await SyncLog.write(
         'master_detail',
         'masterId=${widget.master.userId}, '
         'services=${rawServices.length}, '
-        'published=${rawServices.where((s) => s.published).length}',
+        'published=${rawServices.where((s) => s.published).length}, '
+        'portfolio=${portfolio.length}',
       );
       if (!mounted) return;
       setState(() {
         _master = (results[0] as MasterCard?) ?? widget.master;
         _services = rawServices.where((s) => s.published).toList();
+        _portfolio = portfolio;
         _loading = false;
       });
     } catch (e, st) {
@@ -335,6 +344,7 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
     return MasterPublicProfileView(
       master: _master ?? widget.master,
       services: _services,
+      portfolio: _portfolio,
       onBook: _book,
       onRefresh: _load,
     );
@@ -476,6 +486,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
         serviceName: _service?.name ?? custom,
         startsAt: startsAt,
         durationMinutes: _service?.durationMinutes ?? 60,
+        servicePrice: _service?.price ?? 0,
         notes: _notes.text.trim(),
       );
       await PushNotificationService.sendPush(

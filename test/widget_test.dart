@@ -529,14 +529,16 @@ void main() {
     db.users['u'] = 'p';
     final company =
         await db.createCompany(1, 'Салон «Тест»', 'Самозанятость');
+    final now = DateTime.now();
     db.tasks.add(
       TaskItem(
         id: 1,
         userId: 1,
         title: 'Пробежка',
         description: '',
-        dueAt: DateTime.now().add(const Duration(hours: 3)),
-        createdAt: DateTime.now(),
+        // Жёстко сегодня — «сейчас +3ч» могло уехать на завтра ночью.
+        dueAt: DateTime(now.year, now.month, now.day, 23, 59),
+        createdAt: now,
       ),
     );
     SharedPreferences.setMockInitialValues({

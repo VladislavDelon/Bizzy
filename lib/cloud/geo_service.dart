@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
 /// Точка на карте (широта/долгота).
@@ -79,6 +80,32 @@ class GeoService {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Текущая геопозиция устройства. Запрашивает разрешение у пользователя.
+  /// Бросает [Exception] с понятным текстом, если выйти не удалось.
+  Future<GeoPoint> currentPosition() async {
+    final serviceOn = await Geolocator.isLocationServiceEnabled();
+    if (!serviceOn) {
+      throw Exception('Геолокация выключена. Включите GPS в настройках.');
+    }
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied) {
+      throw Exception('Нет разрешения на геопозицию.');
+    }
+    if (permission == LocationPermission.deniedForever) {
+      throw Exception(
+        'Доступ к геопозиции запрещён. Разрешите его в настройках приложения.',
+      );
+    }
+    final pos = await Geolocator.getCurrentPosition(
+      locationSettings:
+          const LocationSettings(timeLimit: Duration(seconds: 15)),
+    );
+    return GeoPoint(pos.latitude, pos.longitude);
   }
 
   /// Расстояние по прямой в километрах (формула гаверсинуса).

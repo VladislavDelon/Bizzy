@@ -51,6 +51,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   int _ratingCount = 0;
   double? _lat;
   double? _lng;
+  bool _isSalon = false;
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -77,7 +78,17 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   Future<void> _load() async {
     try {
       final categories = await _cloud.categories();
-      final profile = await _cloud.myProfile();
+      var profile = await _cloud.myProfile();
+      if (profile == null) {
+        // Профиль мог не создаться при старой сломанной регистрации —
+        // создаём по роли из metadata, иначе сохранение не сработает.
+        final meta = supabase.auth.currentUser?.userMetadata ?? const {};
+        profile = await _cloud.ensureProfile(
+          role: meta['role'] as String? ?? 'master',
+          name: meta['name'] as String? ?? '',
+          phone: meta['phone'] as String? ?? '',
+        );
+      }
       final card = await _cloud.myMasterCard();
       List<PortfolioPhoto> portfolio = [];
       try {
@@ -91,6 +102,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _nameController.text = profile?.name ?? '';
         _phoneController.text = profile?.phone ?? '';
         _emailController.text = _cloud.displayLogin;
+        _isSalon = profile?.isSalon ?? false;
         _category = card?.category ?? categories.firstOrNull;
         _descController.text = card?.description ?? '';
         _addressController.text = card?.address ?? '';
@@ -347,6 +359,31 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
     );
   }
 
+  /// Определяет точку по GPS и подставляет адрес обратным геокодингом.
+  Future<void> _useMyLocation() async {
+    try {
+      final point = await _geo.currentPosition();
+      if (!mounted) return;
+      setState(() {
+        _lat = point.lat;
+        _lng = point.lng;
+      });
+      final addr = await _geo.reverseGeocode(point.lat, point.lng);
+      if (!mounted) return;
+      if (addr != null && addr.label.isNotEmpty) {
+        setState(() => _addressController.text = addr.label);
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Точка определена по геопозиции')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+  }
+
   /// Открывает карту для выбора точки мастера; после выбора подставляет
   /// адрес через обратный геокодинг.
   Future<void> _pickLocationOnMap() async {
@@ -448,7 +485,11 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.isFirstSetup ? 'Профиль мастера' : 'Мой профиль мастера',
+          _isSalon
+              ? (widget.isFirstSetup ? 'Профиль салона' : 'Мой профиль салона')
+              : (widget.isFirstSetup
+                  ? 'Профиль мастера'
+                  : 'Мой профиль мастера'),
         ),
       ),
       body: _loading
@@ -628,23 +669,35 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                     border: OutlineInputBorder(),
                   ),
                 ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: _saving ? null : _pickLocationOnMap,
-                    icon: Icon(
-                      _lat != null ? Icons.edit_location_alt : Icons.map,
-                      size: 18,
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton.icon(
+                        onPressed: _saving ? null : _pickLocationOnMap,
+                        icon: Icon(
+                          _lat != null ? Icons.edit_location_alt : Icons.map,
+                          size: 18,
+                        ),
+                        label: Text(
+                          _lat != null
+                              ? 'Точка на карте указана — изменить'
+                              : 'Указать точку на карте',
+                        ),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          alignment: Alignment.centerLeft,
+                        ),
+                      ),
                     ),
-                    label: Text(
-                      _lat != null
-                          ? 'Точка на карте указана — изменить'
-                          : 'Указать точку на карте',
+                    TextButton.icon(
+                      onPressed: _saving ? null : _useMyLocation,
+                      icon: const Icon(Icons.my_location, size: 18),
+                      label: const Text('По геопозиции'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
                     ),
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 TextField(

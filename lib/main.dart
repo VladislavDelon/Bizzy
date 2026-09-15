@@ -2611,7 +2611,6 @@ class _AuthGateState extends State<AuthGate> {
       company: _company!,
       user: _user!,
       updateService: updateService,
-      onSwitchCompany: () => setState(() => _company = null),
       onLogout: _logout,
     );
   }
@@ -2966,11 +2965,8 @@ class AddCompanyDialog extends StatefulWidget {
 }
 
 class _AddCompanyDialogState extends State<AddCompanyDialog> {
-  static const _types = ['Самозанятость', 'ИП', 'ООО', 'Другое'];
-
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  String _type = _types.first;
   bool _saving = false;
 
   @override
@@ -2986,7 +2982,7 @@ class _AddCompanyDialogState extends State<AddCompanyDialog> {
       final company = await widget.database.createCompany(
         widget.userId,
         _nameController.text,
-        _type == 'Другое' ? '' : _type,
+        '',
       );
       if (!mounted) return;
       Navigator.of(context).pop(company);
@@ -3008,19 +3004,6 @@ class _AddCompanyDialogState extends State<AddCompanyDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final type in _types)
-                      ChoiceChip(
-                        label: Text(type),
-                        selected: _type == type,
-                        onSelected:
-                            _saving ? null : (_) => setState(() => _type = type),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
                 TextFormField(
                   controller: _nameController,
                   enabled: !_saving,
@@ -3061,7 +3044,6 @@ class MainShell extends StatefulWidget {
     this.updateService,
     this.offlineMode = false,
     this.cloudRole = '',
-    required this.onSwitchCompany,
     required this.onLogout,
   });
 
@@ -3073,7 +3055,6 @@ class MainShell extends StatefulWidget {
 
   /// Облачная роль: 'master' | 'salon' | '' (локальный вход).
   final String cloudRole;
-  final VoidCallback onSwitchCompany;
   final VoidCallback onLogout;
 
   @override
@@ -3352,7 +3333,6 @@ class _MainShellState extends State<MainShell> {
         user: widget.user,
         offlineMode: widget.offlineMode,
         cloudRole: widget.cloudRole,
-        onSwitchCompany: widget.onSwitchCompany,
         onLogout: widget.onLogout,
       ),
     ];
@@ -5303,7 +5283,6 @@ class MoreTab extends StatefulWidget {
     required this.user,
     this.offlineMode = false,
     this.cloudRole = '',
-    required this.onSwitchCompany,
     required this.onLogout,
   });
 
@@ -5313,9 +5292,8 @@ class MoreTab extends StatefulWidget {
   final bool offlineMode;
 
   /// 'master' | 'salon' | '' — для мастера-одиночки прячем
-  /// «Мастера» и «Сменить компанию», они нужны салону/локальному режиму.
+  /// «Мастера», это нужно салону/локальному режиму.
   final String cloudRole;
-  final VoidCallback onSwitchCompany;
   final VoidCallback onLogout;
 
   @override
@@ -5454,7 +5432,9 @@ class _MoreTabState extends State<MoreTab> {
         if (cloudSignedIn && !widget.offlineMode) ...[
           ListTile(
             leading: const Icon(Icons.storefront_outlined),
-            title: const Text('Профиль мастера'),
+            title: Text(
+              widget.cloudRole == 'salon' ? 'Профиль салона' : 'Профиль мастера',
+            ),
             subtitle: const Text('Категория и описание для клиентов'),
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute(
@@ -5490,12 +5470,6 @@ class _MoreTabState extends State<MoreTab> {
             ),
           ),
         ),
-        if (widget.cloudRole != 'master')
-          ListTile(
-            leading: const Icon(Icons.business),
-            title: const Text('Сменить компанию'),
-            onTap: widget.onSwitchCompany,
-          ),
         ListTile(
           leading: const Icon(Icons.logout),
           title: const Text('Выйти из аккаунта'),
@@ -7206,7 +7180,6 @@ class _LocalSessionGateState extends State<LocalSessionGate> {
       updateService: widget.updateService,
       offlineMode: widget.offlineMode,
       cloudRole: widget.cloudRole,
-      onSwitchCompany: () => setState(() => _company = null),
       onLogout: () => widget.onSignOut(),
     );
   }

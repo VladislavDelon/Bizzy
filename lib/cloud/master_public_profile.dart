@@ -15,6 +15,8 @@ class MasterPublicProfileView extends StatelessWidget {
     this.onBook,
     this.isPreview = false,
     this.onRefresh,
+    this.isFavorite,
+    this.onToggleFavorite,
   });
 
   final MasterCard master;
@@ -25,6 +27,10 @@ class MasterPublicProfileView extends StatelessWidget {
   final VoidCallback? onBook;
   final bool isPreview;
   final Future<void> Function()? onRefresh;
+
+  /// null — сердечко избранного не показываем (предпросмотр мастера).
+  final bool? isFavorite;
+  final VoidCallback? onToggleFavorite;
 
   Future<void> _call(String phone) async {
     if (phone.isEmpty) return;
@@ -219,6 +225,17 @@ class MasterPublicProfileView extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(isPreview ? 'Предпросмотр' : master.name),
+        actions: [
+          if (isFavorite != null && onToggleFavorite != null)
+            IconButton(
+              tooltip: 'Избранное',
+              icon: Icon(
+                isFavorite! ? Icons.favorite : Icons.favorite_border,
+                color: isFavorite! ? Colors.redAccent : null,
+              ),
+              onPressed: onToggleFavorite,
+            ),
+        ],
       ),
       body: onRefresh == null
           ? content

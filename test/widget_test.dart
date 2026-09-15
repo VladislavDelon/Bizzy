@@ -260,7 +260,6 @@ void main() {
     await tester.tap(find.text('Создать компанию'));
     await tester.pumpAndSettle();
     expect(find.text('Назовите свою компанию'), findsOneWidget);
-    await tester.tap(find.text('ИП'));
     await tester.enterText(
         find.widgetWithText(TextFormField, 'Название'), 'Салон «Лилия»');
     await tester.tap(find.text('Сохранить'));
@@ -298,7 +297,7 @@ void main() {
     await tester.tap(find.text('Ещё'));
     await tester.pumpAndSettle();
     expect(find.text('Салон «Тест»'), findsOneWidget);
-    expect(find.text('Сменить компанию'), findsOneWidget);
+    expect(find.text('Сменить компанию'), findsNothing);
     expect(find.text('Выйти из аккаунта'), findsOneWidget);
   });
 

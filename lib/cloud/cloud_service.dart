@@ -213,6 +213,7 @@ class MasterCard {
     required this.avatarUrl,
     required this.ratingAvg,
     required this.ratingCount,
+    this.role = 'master',
     this.lat,
     this.lng,
   });
@@ -220,6 +221,7 @@ class MasterCard {
   final String userId;
   final String name;
   final String phone;
+  final String role; // 'master' | 'salon' — салон = компания, мастер = частник
   final String category;
   final String description;
   final String address;
@@ -232,6 +234,7 @@ class MasterCard {
   final double? lng;
 
   bool get hasLocation => lat != null && lng != null;
+  bool get isSalon => role == 'salon';
 
   factory MasterCard.fromMap(
     Map<String, dynamic> map, {
@@ -242,6 +245,9 @@ class MasterCard {
       userId: _parseString(map['user_id']),
       name: profile != null ? _parseString(profile['name']) : '',
       phone: profile != null ? _parseString(profile['phone']) : '',
+      role: profile != null
+          ? _parseString(profile['role'], fallback: 'master')
+          : 'master',
       category: _parseString(map['category'], fallback: 'Другое'),
       description: _parseString(map['description']),
       address: _parseString(map['address']),
@@ -259,6 +265,7 @@ class MasterCard {
     String? userId,
     String? name,
     String? phone,
+    String? role,
     String? category,
     String? description,
     String? address,
@@ -274,6 +281,7 @@ class MasterCard {
         userId: userId ?? this.userId,
         name: name ?? this.name,
         phone: phone ?? this.phone,
+        role: role ?? this.role,
         category: category ?? this.category,
         description: description ?? this.description,
         address: address ?? this.address,
@@ -343,6 +351,7 @@ class CloudBooking {
     this.clientName = '',
     this.clientPhone = '',
     this.masterName = '',
+    this.masterAddress = '',
     this.servicePrice = 0,
   });
 
@@ -358,6 +367,9 @@ class CloudBooking {
   final String clientName;
   final String clientPhone;
   final String masterName;
+
+  /// Адрес мастера/салона из `master_profiles` (может быть пустым).
+  final String masterAddress;
 
   /// Цена услуги на момент записи (снимок).
   final double servicePrice;
@@ -377,6 +389,7 @@ class CloudBooking {
     String? clientName,
     String? clientPhone,
     String? masterName,
+    String? masterAddress,
     double? servicePrice,
   }) =>
       CloudBooking(
@@ -392,6 +405,7 @@ class CloudBooking {
         clientName: clientName ?? this.clientName,
         clientPhone: clientPhone ?? this.clientPhone,
         masterName: masterName ?? this.masterName,
+        masterAddress: masterAddress ?? this.masterAddress,
         servicePrice: servicePrice ?? this.servicePrice,
       );
 
@@ -628,7 +642,7 @@ class CloudService {
         try {
           final profiles = await supabase
               .from('profiles')
-              .select('id, name, phone')
+              .select('id, name, phone, role')
               .inFilter('id', userIds);
           for (final p in profiles) {
             profileMap[_parseString(p['id'])] = p;
@@ -690,7 +704,7 @@ class CloudService {
       try {
         final p = await supabase
             .from('profiles')
-            .select('id, name, phone')
+            .select('id, name, phone, role')
             .eq('id', masterId)
             .maybeSingle();
         if (p != null) profile = p;
@@ -986,7 +1000,31 @@ class CloudService {
         .select('*, master:profiles!appointments_master_id_fkey(name)')
         .eq('client_id', uid!)
         .order('starts_at', ascending: false);
-    return [for (final r in rows) CloudBooking.fromMap(r)];
+    final bookings = [for (final r in rows) CloudBooking.fromMap(r)];
+
+    // Подтягиваем адреса мастеров из master_profiles отдельным запросом —
+    // appointments.master_id ссылается на profiles, а не на master_profiles.
+    final masterIds =
+        bookings.map((b) => b.masterId).where((id) => id.isNotEmpty).toSet();
+    if (masterIds.isNotEmpty) {
+      try {
+        final mpRows = await supabase
+            .from('master_profiles')
+            .select('user_id, address, phone_public')
+            .inFilter('user_id', masterIds.toList());
+        final addr = <String, String>{};
+        for (final r in mpRows) {
+          addr[_parseString(r['user_id'])] = _parseString(r['address']);
+        }
+        return [
+          for (final b in bookings)
+            b.copyWith(masterAddress: addr[b.masterId] ?? ''),
+        ];
+      } catch (_) {
+        // Адрес не критичен — вернём записи без него.
+      }
+    }
+    return bookings;
   }
 
   /// Записи текущего пользователя как мастера.
@@ -1020,6 +1058,70 @@ class CloudService {
 
   Future<void> setBookingStatus(int id, String status) =>
       supabase.from('appointments').update({'status': status}).eq('id', id);
+
+  // ---------- Favorites (избранные мастера/салоны клиента) ----------
+
+  /// id мастеров/салонов, которых клиент добавил в избранное.
+  Future<Set<String>> myFavoriteIds() async {
+    final rows = await supabase
+        .from('favorites')
+        .select('master_id')
+        .eq('client_id', uid!);
+    return {for (final r in rows) _parseString(r['master_id'])};
+  }
+
+  /// Карточки избранных мастеров/салонов.
+  Future<List<MasterCard>> favoriteMasters() async {
+    final ids = await myFavoriteIds();
+    if (ids.isEmpty) return [];
+    final rows = await supabase
+        .from('master_profiles')
+        .select(
+          'user_id, category, description, address, lat, lng, social, '
+          'phone_public, avatar_url, rating_avg, rating_count',
+        )
+        .inFilter('user_id', ids.toList());
+    final profileRows = await supabase
+        .from('profiles')
+        .select('id, name, phone, role')
+        .inFilter('id', ids.toList());
+    final profileMap = <String, Map<String, dynamic>>{
+      for (final p in profileRows) _parseString(p['id']): p,
+    };
+    return [
+      for (final r in rows)
+        MasterCard.fromMap(
+          r,
+          fallbackProfile: profileMap[_parseString(r['user_id'])],
+        ),
+    ];
+  }
+
+  Future<bool> isFavorite(String masterId) async {
+    final row = await supabase
+        .from('favorites')
+        .select('id')
+        .eq('client_id', uid!)
+        .eq('master_id', masterId)
+        .maybeSingle();
+    return row != null;
+  }
+
+  /// Добавить/убрать из избранного. Возвращает новое состояние.
+  Future<bool> toggleFavorite(String masterId) async {
+    if (await isFavorite(masterId)) {
+      await supabase
+          .from('favorites')
+          .delete()
+          .eq('client_id', uid!)
+          .eq('master_id', masterId);
+      return false;
+    }
+    await supabase
+        .from('favorites')
+        .insert({'client_id': uid, 'master_id': masterId});
+    return true;
+  }
 
   // ---------- Ratings ----------
   Future<void> rateBooking({

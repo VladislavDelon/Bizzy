@@ -34,6 +34,7 @@ class _ClientHomeState extends State<ClientHome> {
   Widget build(BuildContext context) {
     final pages = [
       ClientCatalogTab(profile: widget.profile),
+      const ClientFavoritesTab(),
       const ClientBookingsTab(),
       _ClientProfileTab(
         profile: widget.profile,
@@ -49,9 +50,14 @@ class _ClientHomeState extends State<ClientHome> {
         onDestinationSelected: (i) => setState(() => _tab = i),
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.person_search_outlined),
-            selectedIcon: Icon(Icons.person_search),
-            label: 'Мастера',
+            icon: Icon(Icons.room_service_outlined),
+            selectedIcon: Icon(Icons.room_service),
+            label: 'Услуги',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.favorite_outline),
+            selectedIcon: Icon(Icons.favorite),
+            label: 'Избранное',
           ),
           NavigationDestination(
             icon: Icon(Icons.event_note_outlined),
@@ -95,20 +101,32 @@ class ClientCatalogTab extends StatefulWidget {
 
 class _ClientCatalogTabState extends State<ClientCatalogTab> {
   final _cloud = CloudService();
+  final _geo = GeoService();
+  final _searchController = TextEditingController();
   List<String> _categories = [];
   List<MasterCard> _masters = [];
+  Set<String> _favorites = {};
   String? _category;
+  String _kindFilter = 'all'; // 'all' | 'salon' | 'master'
   bool _loading = true;
   bool _failed = false;
 
-  /// Координаты клиента из профиля — для сортировки «рядом с вами».
-  double? get _myLat => widget.profile.lat;
-  double? get _myLng => widget.profile.lng;
+  /// Координаты клиента: из профиля, либо определённые по GPS в этой сессии.
+  double? _myLat;
+  double? _myLng;
 
   @override
   void initState() {
     super.initState();
+    _myLat = widget.profile.lat;
+    _myLng = widget.profile.lng;
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   /// Расстояние от клиента до мастера в км. null — если нет координат.
@@ -137,6 +155,27 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
     return [...withDist.map((e) => e.$1), ...rest];
   }
 
+  /// Применяет фильтры «салон/частник» и поиск по адресу.
+  List<MasterCard> get _visibleMasters {
+    var list = _masters;
+    if (_kindFilter == 'salon') {
+      list = list.where((m) => m.isSalon).toList();
+    } else if (_kindFilter == 'master') {
+      list = list.where((m) => !m.isSalon).toList();
+    }
+    final q = _searchController.text.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      list = list
+          .where(
+            (m) =>
+                m.address.toLowerCase().contains(q) ||
+                m.name.toLowerCase().contains(q),
+          )
+          .toList();
+    }
+    return list;
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -145,10 +184,15 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
     try {
       final categories = await _cloud.categories();
       final masters = await _cloud.masters(category: _category);
+      var favorites = <String>{};
+      try {
+        favorites = await _cloud.myFavoriteIds();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _categories = categories;
         _masters = _sortedByDistance(masters);
+        _favorites = favorites;
       });
     } catch (e, st) {
       await SyncLog.write('client_catalog', '$e\n$st');
@@ -159,11 +203,51 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
     }
   }
 
+  /// Определяет положение клиента по GPS и пересортировывает список.
+  Future<void> _detectLocation() async {
+    try {
+      final point = await _geo.currentPosition();
+      if (!mounted) return;
+      setState(() {
+        _myLat = point.lat;
+        _myLng = point.lng;
+        _masters = _sortedByDistance(_masters);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Геопозиция определена')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+  }
+
+  Future<void> _toggleFavorite(MasterCard m) async {
+    try {
+      final added = await _cloud.toggleFavorite(m.userId);
+      if (!mounted) return;
+      setState(() {
+        if (added) {
+          _favorites.add(m.userId);
+        } else {
+          _favorites.remove(m.userId);
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось обновить избранное')),
+      );
+    }
+  }
+
   void _openMap() {
     Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (context) => MastersMapScreen(
-          masters: _masters,
+          masters: _visibleMasters,
           clientLat: _myLat,
           clientLng: _myLng,
           onOpen: _openMaster,
@@ -194,6 +278,11 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Моё местоположение',
+            icon: const Icon(Icons.my_location),
+            onPressed: _loading ? null : _detectLocation,
+          ),
+          IconButton(
             tooltip: 'Мастера на карте',
             icon: const Icon(Icons.map_outlined),
             onPressed: _loading ? null : _openMap,
@@ -218,6 +307,27 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
                   child: ListView(
                     padding: const EdgeInsets.only(bottom: 24),
                     children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                        child: TextField(
+                          controller: _searchController,
+                          textInputAction: TextInputAction.search,
+                          onChanged: (_) => setState(() {}),
+                          decoration: InputDecoration(
+                            hintText: 'Город, район, улица или имя…',
+                            prefixIcon: const Icon(Icons.search),
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                            suffixIcon: _searchController.text.isEmpty
+                                ? null
+                                : IconButton(
+                                    icon: const Icon(Icons.clear, size: 18),
+                                    onPressed: () => setState(
+                                        () => _searchController.clear()),
+                                  ),
+                          ),
+                        ),
+                      ),
                       SizedBox(
                         height: 52,
                         child: ListView(
@@ -229,6 +339,47 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
                                   const EdgeInsets.symmetric(horizontal: 4),
                               child: ChoiceChip(
                                 label: const Text('Все'),
+                                selected: _kindFilter == 'all',
+                                onSelected: (_) =>
+                                    setState(() => _kindFilter = 'all'),
+                              ),
+                            ),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              child: ChoiceChip(
+                                avatar: const Icon(Icons.storefront, size: 16),
+                                label: const Text('Салоны'),
+                                selected: _kindFilter == 'salon',
+                                onSelected: (_) =>
+                                    setState(() => _kindFilter = 'salon'),
+                              ),
+                            ),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              child: ChoiceChip(
+                                avatar: const Icon(Icons.person, size: 16),
+                                label: const Text('Частные мастера'),
+                                selected: _kindFilter == 'master',
+                                onSelected: (_) =>
+                                    setState(() => _kindFilter = 'master'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(
+                        height: 52,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          children: [
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              child: ChoiceChip(
+                                label: const Text('Все категории'),
                                 selected: _category == null,
                                 onSelected: (_) {
                                   setState(() => _category = null);
@@ -252,17 +403,17 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
                           ],
                         ),
                       ),
-                      if (_masters.isEmpty)
+                      if (_visibleMasters.isEmpty)
                         const Padding(
                           padding: EdgeInsets.all(32),
                           child: Center(
                             child: Text(
-                              'Мастеров в этой категории пока нет',
+                              'По вашему запросу никого не нашлось',
                               textAlign: TextAlign.center,
                             ),
                           ),
                         ),
-                      for (final m in _masters)
+                      for (final m in _visibleMasters)
                         Card(
                           margin: const EdgeInsets.symmetric(
                             horizontal: 12,
@@ -270,7 +421,27 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
                           ),
                           child: ListTile(
                             leading: _masterAvatar(context, m, 24),
-                            title: Text(m.name.isEmpty ? 'Мастер' : m.name),
+                            title: Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    m.name.isEmpty
+                                        ? (m.isSalon ? 'Салон' : 'Мастер')
+                                        : m.name,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (m.isSalon) ...[
+                                  const SizedBox(width: 6),
+                                  Icon(
+                                    Icons.storefront,
+                                    size: 16,
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
+                                  ),
+                                ],
+                              ],
+                            ),
                             subtitle: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -314,12 +485,201 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
                               ],
                             ),
                             isThreeLine: true,
-                            trailing: const Icon(Icons.chevron_right),
+                            trailing: IconButton(
+                              icon: Icon(
+                                _favorites.contains(m.userId)
+                                    ? Icons.favorite
+                                    : Icons.favorite_border,
+                                color: _favorites.contains(m.userId)
+                                    ? Colors.redAccent
+                                    : null,
+                              ),
+                              onPressed: () => _toggleFavorite(m),
+                            ),
                             onTap: () => _openMaster(m),
                           ),
                         ),
                     ],
                   ),
+                ),
+    );
+  }
+}
+
+// ==================== ИЗБРАННОЕ ====================
+
+/// Вкладка «Избранное»: любимые мастера и салоны клиента.
+/// Отсюда можно сразу открыть профиль и записаться.
+class ClientFavoritesTab extends StatefulWidget {
+  const ClientFavoritesTab({super.key});
+
+  @override
+  State<ClientFavoritesTab> createState() => _ClientFavoritesTabState();
+}
+
+class _ClientFavoritesTabState extends State<ClientFavoritesTab> {
+  final _cloud = CloudService();
+  List<MasterCard> _masters = [];
+  bool _loading = true;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    try {
+      final masters = await _cloud.favoriteMasters();
+      if (!mounted) return;
+      setState(() => _masters = masters);
+    } catch (e, st) {
+      await SyncLog.write('client_favorites', '$e\n$st');
+      if (!mounted) return;
+      setState(() => _failed = true);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _remove(MasterCard m) async {
+    try {
+      await _cloud.toggleFavorite(m.userId);
+      if (!mounted) return;
+      setState(
+          () => _masters.removeWhere((x) => x.userId == m.userId));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось убрать из избранного')),
+      );
+    }
+  }
+
+  Future<void> _openMaster(MasterCard master) async {
+    final booked = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (context) => MasterDetailScreen(master: master),
+      ),
+    );
+    if (booked == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Заявка отправлена мастеру')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Избранное')),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _failed
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Не удалось загрузить избранное'),
+                      TextButton(
+                          onPressed: _load, child: const Text('Повторить')),
+                    ],
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: _masters.isEmpty
+                      ? ListView(
+                          children: const [
+                            SizedBox(height: 120),
+                            Center(
+                              child: Text(
+                                'Пока пусто.\nОтметьте мастера сердечком '
+                                'во вкладке «Услуги».',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                        )
+                      : ListView(
+                          padding: const EdgeInsets.only(bottom: 24),
+                          children: [
+                            for (final m in _masters)
+                              Card(
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
+                                child: ListTile(
+                                  leading: _masterAvatar(context, m, 24),
+                                  title: Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          m.name.isEmpty
+                                              ? (m.isSalon
+                                                  ? 'Салон'
+                                                  : 'Мастер')
+                                              : m.name,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      if (m.isSalon) ...[
+                                        const SizedBox(width: 6),
+                                        Icon(
+                                          Icons.storefront,
+                                          size: 16,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                  subtitle: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(m.category),
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.star,
+                                              size: 16, color: Colors.amber),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            m.ratingCount == 0
+                                                ? 'Новый'
+                                                : '${m.ratingAvg.toStringAsFixed(1)} (${m.ratingCount})',
+                                          ),
+                                        ],
+                                      ),
+                                      if (m.address.isNotEmpty)
+                                        Text(
+                                          m.address,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall,
+                                        ),
+                                    ],
+                                  ),
+                                  isThreeLine: true,
+                                  trailing: IconButton(
+                                    icon: const Icon(Icons.favorite,
+                                        color: Colors.redAccent),
+                                    onPressed: () => _remove(m),
+                                  ),
+                                  onTap: () => _openMaster(m),
+                                ),
+                              ),
+                          ],
+                        ),
                 ),
     );
   }
@@ -340,6 +700,7 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
   MasterCard? _master;
   List<CloudServiceItem> _services = [];
   List<PortfolioPhoto> _portfolio = [];
+  Set<String> _favoriteIds = {};
   bool _loading = true;
   String? _error;
 
@@ -348,6 +709,19 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
     super.initState();
     _master = widget.master;
     _load();
+  }
+
+  Future<void> _toggleFavorite() async {
+    final id = widget.master.userId;
+    final was = _favoriteIds.contains(id);
+    setState(() => was ? _favoriteIds.remove(id) : _favoriteIds.add(id));
+    try {
+      await _cloud.toggleFavorite(id);
+    } catch (_) {
+      if (mounted) {
+        setState(() => was ? _favoriteIds.add(id) : _favoriteIds.remove(id));
+      }
+    }
   }
 
   Future<void> _load() async {
@@ -363,6 +737,10 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
       } catch (e, st) {
         await SyncLog.write('master_detail_portfolio', '$e\n$st');
       }
+      Set<String> favs = {};
+      try {
+        favs = await _cloud.myFavoriteIds();
+      } catch (_) {}
       await SyncLog.write(
         'master_detail',
         'masterId=${widget.master.userId}, '
@@ -375,6 +753,7 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
         _master = (results[0] as MasterCard?) ?? widget.master;
         _services = rawServices.where((s) => s.published).toList();
         _portfolio = portfolio;
+        _favoriteIds = favs;
         _loading = false;
       });
     } catch (e, st) {
@@ -424,6 +803,8 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
       portfolio: _portfolio,
       onBook: _book,
       onRefresh: _load,
+      isFavorite: _favoriteIds.contains(widget.master.userId),
+      onToggleFavorite: _toggleFavorite,
     );
   }
 }
@@ -854,6 +1235,147 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
       (b.status == 'confirmed' || b.status == 'completed') &&
       !_myRatings.containsKey(b.id);
 
+  static const _months = [
+    'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+  ];
+
+  String _monthLabel(DateTime d) => '${_months[d.month - 1]} ${d.year}';
+
+  /// Повторная запись: открывает карточку того же мастера,
+  /// где клиент выбирает услугу и время заново.
+  Future<void> _repeat(CloudBooking b) async {
+    try {
+      final master = await _cloud.masterCard(b.masterId);
+      if (!mounted) return;
+      if (master == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Профиль мастера сейчас недоступен'),
+          ),
+        );
+        return;
+      }
+      final booked = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (context) => MasterDetailScreen(master: master),
+        ),
+      );
+      if (booked == true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Заявка отправлена мастеру')),
+        );
+        await _load();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось открыть мастера')),
+      );
+    }
+  }
+
+  /// Детали записи + действия: повторить, оценить, отменить.
+  void _showDetails(CloudBooking b) {
+    final myRating = _myRatings[b.id];
+    final scheme = Theme.of(context).colorScheme;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      b.serviceName,
+                      style: Theme.of(ctx).textTheme.titleLarge,
+                    ),
+                  ),
+                  Chip(
+                    label: Text(_statusLabel(b.status)),
+                    backgroundColor:
+                        _statusColor(b.status).withValues(alpha: 0.15),
+                    side: BorderSide.none,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.person_outline, color: scheme.primary),
+                title: Text(b.masterName.isEmpty ? 'Мастер' : b.masterName),
+                subtitle: b.masterAddress.isNotEmpty
+                    ? Text(b.masterAddress)
+                    : null,
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.schedule, color: scheme.primary),
+                title: Text(_fmt(b.startsAt)),
+                subtitle: Text('${b.durationMinutes} мин'
+                    '${b.servicePrice > 0 ? ' • ${b.servicePrice.toStringAsFixed(0)} ₽' : ''}'),
+              ),
+              if (b.notes.isNotEmpty)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading:
+                      Icon(Icons.notes_outlined, color: scheme.primary),
+                  title: Text(b.notes),
+                ),
+              if (myRating != null)
+                Row(
+                  children: [
+                    Icon(Icons.star, size: 16, color: Colors.amber),
+                    const SizedBox(width: 6),
+                    Text('Ваша оценка: $myRating из 5'),
+                  ],
+                ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      _repeat(b);
+                    },
+                    icon: const Icon(Icons.repeat),
+                    label: const Text('Повторить запись'),
+                  ),
+                  if (_canRate(b))
+                    FilledButton.tonalIcon(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        _rate(b);
+                      },
+                      icon: const Icon(Icons.star),
+                      label: const Text('Оценить'),
+                    ),
+                  if (b.status == 'pending' || b.status == 'confirmed')
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        _cancel(b);
+                      },
+                      icon: const Icon(Icons.close),
+                      label: const Text('Отменить'),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -879,7 +1401,7 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                             SizedBox(height: 120),
                             Center(
                               child: Text(
-                                'У вас пока нет записей.\nВыберите мастера во вкладке «Мастера».',
+                                'У вас пока нет записей.\nВыберите мастера во вкладке «Услуги».',
                                 textAlign: TextAlign.center,
                               ),
                             ),
@@ -891,80 +1413,128 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                           itemBuilder: (context, index) {
                             final b = _bookings[index];
                             final myRating = _myRatings[b.id];
-                            return Card(
-                              margin: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 4,
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            b.serviceName,
+                            // Заголовок месяца — перед первой записью нового месяца.
+                            final showMonthHeader = index == 0 ||
+                                _bookings[index - 1].startsAt.month !=
+                                    b.startsAt.month ||
+                                _bookings[index - 1].startsAt.year !=
+                                    b.startsAt.year;
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (showMonthHeader)
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                        16, 16, 16, 4),
+                                    child: Text(
+                                      _monthLabel(b.startsAt),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                  ),
+                                Card(
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 4,
+                                  ),
+                                  child: InkWell(
+                                    onTap: () => _showDetails(b),
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(12),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  b.serviceName,
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .titleMedium,
+                                                ),
+                                              ),
+                                              Chip(
+                                                label: Text(
+                                                    _statusLabel(b.status)),
+                                                backgroundColor:
+                                                    _statusColor(b.status)
+                                                        .withValues(
+                                                            alpha: 0.15),
+                                                side: BorderSide.none,
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(b.masterName.isEmpty
+                                              ? 'Мастер'
+                                              : b.masterName),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${_fmt(b.startsAt)} • ${b.durationMinutes} мин'
+                                            '${b.servicePrice > 0 ? ' • ${b.servicePrice.toStringAsFixed(0)} ₽' : ''}',
                                             style: Theme.of(context)
                                                 .textTheme
-                                                .titleMedium,
+                                                .bodySmall,
                                           ),
-                                        ),
-                                        Chip(
-                                          label: Text(_statusLabel(b.status)),
-                                          backgroundColor: _statusColor(b.status)
-                                              .withValues(alpha: 0.15),
-                                          side: BorderSide.none,
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                        'Мастер: ${b.masterName.isEmpty ? '—' : b.masterName}'),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${_fmt(b.startsAt)} • ${b.durationMinutes} мин',
-                                      style:
-                                          Theme.of(context).textTheme.bodySmall,
-                                    ),
-                                    if (myRating != null) ...[
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          for (var i = 1; i <= 5; i++)
-                                            Icon(
-                                              i <= myRating
-                                                  ? Icons.star
-                                                  : Icons.star_border,
-                                              size: 16,
-                                              color: Colors.amber,
+                                          if (b.masterAddress.isNotEmpty)
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.only(top: 4),
+                                              child: Row(
+                                                children: [
+                                                  Icon(
+                                                    Icons.place_outlined,
+                                                    size: 14,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .primary,
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Expanded(
+                                                    child: Text(
+                                                      b.masterAddress,
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: Theme.of(context)
+                                                          .textTheme
+                                                          .bodySmall,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
+                                          if (myRating != null) ...[
+                                            const SizedBox(height: 4),
+                                            Row(
+                                              children: [
+                                                for (var i = 1; i <= 5; i++)
+                                                  Icon(
+                                                    i <= myRating
+                                                        ? Icons.star
+                                                        : Icons.star_border,
+                                                    size: 16,
+                                                    color: Colors.amber,
+                                                  ),
+                                              ],
+                                            ),
+                                          ],
                                         ],
                                       ),
-                                    ],
-                                    const SizedBox(height: 8),
-                                    Wrap(
-                                      spacing: 8,
-                                      children: [
-                                        if (b.status == 'pending' ||
-                                            b.status == 'confirmed')
-                                          OutlinedButton.icon(
-                                            onPressed: () => _cancel(b),
-                                            icon: const Icon(Icons.close),
-                                            label: const Text('Отменить'),
-                                          ),
-                                        if (_canRate(b))
-                                          FilledButton.tonalIcon(
-                                            onPressed: () => _rate(b),
-                                            icon: const Icon(Icons.star),
-                                            label: const Text('Оценить'),
-                                          ),
-                                      ],
                                     ),
-                                  ],
+                                  ),
                                 ),
-                              ),
+                              ],
                             );
                           },
                         ),
@@ -1296,6 +1866,31 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
     }
   }
 
+  /// Определяет точку по GPS и подставляет адрес обратным геокодингом.
+  Future<void> _useMyLocation() async {
+    try {
+      final point = await _geo.currentPosition();
+      if (!mounted) return;
+      setState(() {
+        _lat = point.lat;
+        _lng = point.lng;
+      });
+      final addr = await _geo.reverseGeocode(point.lat, point.lng);
+      if (!mounted) return;
+      if (addr != null && addr.label.isNotEmpty) {
+        setState(() => _addressController.text = addr.label);
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Геопозиция определена')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+  }
+
   Future<void> _pickAvatar() async {
     try {
       final picker = ImagePicker();
@@ -1471,23 +2066,35 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
               border: OutlineInputBorder(),
             ),
           ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: _saving ? null : _pickLocationOnMap,
-              icon: Icon(
-                _lat != null ? Icons.edit_location_alt : Icons.map,
-                size: 18,
+          Row(
+            children: [
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: _saving ? null : _pickLocationOnMap,
+                  icon: Icon(
+                    _lat != null ? Icons.edit_location_alt : Icons.map,
+                    size: 18,
+                  ),
+                  label: Text(
+                    _lat != null
+                        ? 'Точка на карте указана — изменить'
+                        : 'Указать точку на карте',
+                  ),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    alignment: Alignment.centerLeft,
+                  ),
+                ),
               ),
-              label: Text(
-                _lat != null
-                    ? 'Точка на карте указана — изменить'
-                    : 'Указать точку на карте',
+              TextButton.icon(
+                onPressed: _saving ? null : _useMyLocation,
+                icon: const Icon(Icons.my_location, size: 18),
+                label: const Text('По геопозиции'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
               ),
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
+            ],
           ),
           const SizedBox(height: 12),
           TextField(

@@ -1,4 +1,4 @@
-name: Build iOS (simulator)
+name: Build iOS (unsigned IPA)
 
 on:
   push:
@@ -18,16 +18,24 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install CocoaPods
-        run: |
-          sudo gem install cocoapods -N
-          pod setup
-
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build iOS for simulator (no code signing)
-        run: flutter build ios --simulator --no-codesign 2>&1 | tee build/build-ios.log
+      # Неподписанная сборка для устройства. Runner.app потом упаковывается
+      # в .ipa, который подписывается локально через Sideloadly/AltStore.
+      - name: Build iOS (device, no signing)
+        run: |
+          set -o pipefail
+          mkdir -p build
+          flutter build ios --release --no-codesign 2>&1 | tee build/build-ios.log
+
+      - name: Package unsigned IPA
+        if: success()
+        run: |
+          mkdir -p Payload
+          cp -r "build/ios/iphoneos/Runner.app" Payload/
+          zip -r bizzy-ios-unsigned.ipa Payload
+          ls -lh bizzy-ios-unsigned.ipa
 
       - name: Upload build log
         if: always()
@@ -36,8 +44,9 @@ jobs:
           name: build-ios-log
           path: build/build-ios.log
 
-      - name: Upload iOS simulator app
+      - name: Upload unsigned IPA
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: bizzy-ios-simulator
-          path: build/ios/iphonesimulator/*.app
+          name: bizzy-ios-unsigned
+          path: bizzy-ios-unsigned.ipa

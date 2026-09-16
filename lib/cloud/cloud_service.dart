@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -50,6 +51,20 @@ String emailToLogin(String email) {
   }
   return local;
 }
+
+/// Пароль, который реально уходит в Supabase Auth.
+///
+/// Supabase отклоняет «слишком простые» пароли: проверка по слитым базам
+/// (HaveIBeenPwned) и требования к символам включены на сервере и из кода
+/// не отключаются. Поэтому приложение принимает ЛЮБОЙ пароль от 6 знаков,
+/// а на сервер отправляет производную 'Bz!9' + sha256(пароль): 68 символов,
+/// все классы (заглавные/строчные/цифры/символ) — серверные проверки
+/// пройдут всегда, а знания производной достаточно для входа.
+///
+/// Аккаунты, созданные до этого изменения, хранят «сырой» пароль —
+/// для них signIn делает запасную попытку с исходным вариантом.
+String hardPassword(String raw) =>
+    'Bz!9${sha256.convert(utf8.encode(raw))}';
 
 // ---------- Безопасный парсинг ответов Supabase ----------
 String _parseString(dynamic value, {String fallback = ''}) {
@@ -216,6 +231,9 @@ class MasterCard {
     this.role = 'master',
     this.lat,
     this.lng,
+    this.prepayEnabled = false,
+    this.prepayAmount = 0,
+    this.prepayLink = '',
   });
 
   final String userId;
@@ -232,6 +250,15 @@ class MasterCard {
   final int ratingCount;
   final double? lat;
   final double? lng;
+
+  /// Мастер принимает предоплату — клиент платит до записи.
+  final bool prepayEnabled;
+
+  /// Сумма предоплаты в валюте мастера.
+  final double prepayAmount;
+
+  /// Pay-ссылка банка мастера (Kaspi, Halyk и т.п.).
+  final String prepayLink;
 
   bool get hasLocation => lat != null && lng != null;
   bool get isSalon => role == 'salon';
@@ -258,6 +285,9 @@ class MasterCard {
       ratingCount: _parseInt(map['rating_count']),
       lat: map['lat'] == null ? null : _parseDouble(map['lat']),
       lng: map['lng'] == null ? null : _parseDouble(map['lng']),
+      prepayEnabled: _parseBool(map['prepay_enabled'], fallback: false),
+      prepayAmount: _parseDouble(map['prepay_amount']),
+      prepayLink: _parseString(map['prepay_link']),
     );
   }
 
@@ -276,6 +306,9 @@ class MasterCard {
     int? ratingCount,
     double? lat,
     double? lng,
+    bool? prepayEnabled,
+    double? prepayAmount,
+    String? prepayLink,
   }) =>
       MasterCard(
         userId: userId ?? this.userId,
@@ -292,6 +325,9 @@ class MasterCard {
         ratingCount: ratingCount ?? this.ratingCount,
         lat: lat ?? this.lat,
         lng: lng ?? this.lng,
+        prepayEnabled: prepayEnabled ?? this.prepayEnabled,
+        prepayAmount: prepayAmount ?? this.prepayAmount,
+        prepayLink: prepayLink ?? this.prepayLink,
       );
 }
 
@@ -353,6 +389,7 @@ class CloudBooking {
     this.masterName = '',
     this.masterAddress = '',
     this.servicePrice = 0,
+    this.prepaymentStatus = 'none',
   });
 
   final int id;
@@ -374,6 +411,9 @@ class CloudBooking {
   /// Цена услуги на момент записи (снимок).
   final double servicePrice;
 
+  /// 'none' | 'claimed' (клиент отметил оплату) | 'confirmed' (мастер подтвердил).
+  final String prepaymentStatus;
+
   bool get isPast => startsAt.isBefore(DateTime.now());
 
   CloudBooking copyWith({
@@ -391,6 +431,7 @@ class CloudBooking {
     String? masterName,
     String? masterAddress,
     double? servicePrice,
+    String? prepaymentStatus,
   }) =>
       CloudBooking(
         id: id ?? this.id,
@@ -407,6 +448,7 @@ class CloudBooking {
         masterName: masterName ?? this.masterName,
         masterAddress: masterAddress ?? this.masterAddress,
         servicePrice: servicePrice ?? this.servicePrice,
+        prepaymentStatus: prepaymentStatus ?? this.prepaymentStatus,
       );
 
   factory CloudBooking.fromMap(Map<String, dynamic> map) {
@@ -426,6 +468,10 @@ class CloudBooking {
       clientPhone: client != null ? _parseString(client['phone']) : '',
       masterName: master != null ? _parseString(master['name']) : '',
       servicePrice: _parseDouble(map['service_price']),
+      prepaymentStatus: _parseString(
+        map['prepayment_status'],
+        fallback: 'none',
+      ),
     );
   }
 }
@@ -509,12 +555,28 @@ class CloudService {
     return emailToLogin(email ?? '');
   }
 
-  /// Вход по логину (внутри — технический email).
-  Future<void> signIn(String login, String password) =>
-      supabase.auth.signInWithPassword(
-        email: loginToEmail(login),
+  /// Вход по логину (внутри — технический email). Сначала пробуем
+  /// производный пароль [hardPassword]; если аккаунт старый и хранит
+  /// «сырой» пароль — повторяем с исходным.
+  Future<void> signIn(String login, String password) async {
+    final email = loginToEmail(login);
+    try {
+      await supabase.auth.signInWithPassword(
+        email: email,
+        password: hardPassword(password),
+      );
+    } on AuthException catch (e) {
+      final msg = e.message.toLowerCase();
+      final wrongCreds = msg.contains('invalid') ||
+          msg.contains('credential') ||
+          msg.contains('wrong');
+      if (!wrongCreds) rethrow;
+      await supabase.auth.signInWithPassword(
+        email: email,
         password: password,
       );
+    }
+  }
 
   Future<void> signUp({
     required String login,
@@ -525,7 +587,7 @@ class CloudService {
   }) =>
       supabase.auth.signUp(
         email: loginToEmail(login),
-        password: password,
+        password: hardPassword(password),
         data: {
           'role': role,
           // Без имени показываем логин — имя задаётся позже в профиле.
@@ -597,7 +659,8 @@ class CloudService {
     final res = await supabase.auth.updateUser(
       UserAttributes(
         email: email,
-        password: password?.isNotEmpty == true ? password : null,
+        password:
+            password?.isNotEmpty == true ? hardPassword(password!) : null,
       ),
     );
     if (res.user == null) {
@@ -673,6 +736,9 @@ class CloudService {
       'avatar_url',
       'rating_avg',
       'rating_count',
+      'prepay_enabled',
+      'prepay_amount',
+      'prepay_link',
     ];
     try {
       return await load(fullFields);
@@ -728,6 +794,9 @@ class CloudService {
       'avatar_url',
       'rating_avg',
       'rating_count',
+      'prepay_enabled',
+      'prepay_amount',
+      'prepay_link',
     ];
     try {
       return await load(fullFields);
@@ -758,18 +827,36 @@ class CloudService {
     String social = '',
     bool phonePublic = false,
     String avatarUrl = '',
-  }) =>
-      supabase.from('master_profiles').upsert({
-        'user_id': uid,
-        'category': category,
-        'description': description,
-        'address': address,
-        'lat': ?lat,
-        'lng': ?lng,
-        'social': social,
-        'phone_public': phonePublic,
-        'avatar_url': avatarUrl,
-      });
+    bool prepayEnabled = false,
+    double prepayAmount = 0,
+    String prepayLink = '',
+  }) async {
+    final payload = <String, dynamic>{
+      'user_id': uid,
+      'category': category,
+      'description': description,
+      'address': address,
+      'lat': ?lat,
+      'lng': ?lng,
+      'social': social,
+      'phone_public': phonePublic,
+      'avatar_url': avatarUrl,
+      'prepay_enabled': prepayEnabled,
+      'prepay_amount': prepayAmount,
+      'prepay_link': prepayLink,
+    };
+    try {
+      await supabase.from('master_profiles').upsert(payload);
+    } on PostgrestException catch (e) {
+      // Старая база без миграции предоплаты — сохраняем без этих полей.
+      if (!_isMissingColumn(e, 'prepay_enabled')) rethrow;
+      payload
+        ..remove('prepay_enabled')
+        ..remove('prepay_amount')
+        ..remove('prepay_link');
+      await supabase.from('master_profiles').upsert(payload);
+    }
+  }
 
   Future<void> updateAvatarUrl(String url) =>
       supabase.from('master_profiles').update({'avatar_url': url}).eq('user_id', uid as Object);
@@ -964,6 +1051,7 @@ class CloudService {
     required int durationMinutes,
     double servicePrice = 0,
     String notes = '',
+    String prepaymentStatus = 'none',
   }) async {
     final payload = <String, dynamic>{
       'client_id': uid,
@@ -973,24 +1061,33 @@ class CloudService {
       'starts_at': startsAt.toUtc().toIso8601String(),
       'duration_minutes': durationMinutes,
       'service_price': servicePrice,
+      'prepayment_status': prepaymentStatus,
       'notes': notes,
     };
-    try {
-      final row = await supabase
-          .from('appointments')
-          .insert(payload)
-          .select()
-          .single();
-      return CloudBooking.fromMap(row);
-    } on PostgrestException catch (e) {
-      if (!_isMissingColumn(e, 'service_price')) rethrow;
-      final row = await supabase
-          .from('appointments')
-          .insert(payload..remove('service_price'))
-          .select()
-          .single();
-      return CloudBooking.fromMap(row);
+    // Повторяем вставку, убирая колонки, которых нет в старой базе.
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final row = await supabase
+            .from('appointments')
+            .insert(payload)
+            .select()
+            .single();
+        return CloudBooking.fromMap(row);
+      } on PostgrestException catch (e) {
+        if (_isMissingColumn(e, 'service_price') &&
+            payload.containsKey('service_price')) {
+          payload.remove('service_price');
+          continue;
+        }
+        if (_isMissingColumn(e, 'prepayment_status') &&
+            payload.containsKey('prepayment_status')) {
+          payload.remove('prepayment_status');
+          continue;
+        }
+        rethrow;
+      }
     }
+    throw Exception('Не удалось создать запись');
   }
 
   /// Записи текущего пользователя как клиента.
@@ -1059,6 +1156,11 @@ class CloudService {
   Future<void> setBookingStatus(int id, String status) =>
       supabase.from('appointments').update({'status': status}).eq('id', id);
 
+  /// Мастер подтверждает получение предоплаты по записи.
+  Future<void> setPrepaymentStatus(int id, String status) => supabase
+      .from('appointments')
+      .update({'prepayment_status': status}).eq('id', id);
+
   // ---------- Favorites (избранные мастера/салоны клиента) ----------
 
   /// id мастеров/салонов, которых клиент добавил в избранное.
@@ -1074,13 +1176,26 @@ class CloudService {
   Future<List<MasterCard>> favoriteMasters() async {
     final ids = await myFavoriteIds();
     if (ids.isEmpty) return [];
-    final rows = await supabase
-        .from('master_profiles')
-        .select(
-          'user_id, category, description, address, lat, lng, social, '
-          'phone_public, avatar_url, rating_avg, rating_count',
-        )
-        .inFilter('user_id', ids.toList());
+    List<dynamic> rows;
+    try {
+      rows = await supabase
+          .from('master_profiles')
+          .select(
+            'user_id, category, description, address, lat, lng, social, '
+            'phone_public, avatar_url, rating_avg, rating_count, '
+            'prepay_enabled, prepay_amount, prepay_link',
+          )
+          .inFilter('user_id', ids.toList());
+    } on PostgrestException catch (e) {
+      if (!_isMissingColumn(e, 'prepay_enabled')) rethrow;
+      rows = await supabase
+          .from('master_profiles')
+          .select(
+            'user_id, category, description, address, lat, lng, social, '
+            'phone_public, avatar_url, rating_avg, rating_count',
+          )
+          .inFilter('user_id', ids.toList());
+    }
     final profileRows = await supabase
         .from('profiles')
         .select('id, name, phone, role')

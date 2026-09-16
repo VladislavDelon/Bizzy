@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'cloud_service.dart';
@@ -104,10 +105,12 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
   late final Animation<double> _questionOpacity;
   late final Animation<double> _cardsOpacity;
   late final Animation<Offset> _cardsSlide;
+  String _appVersion = '';
 
   @override
   void initState() {
     super.initState();
+    _loadVersion();
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
@@ -154,6 +157,17 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
     );
 
     _controller.forward();
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() => _appVersion =
+          '${info.version}${info.buildNumber.isNotEmpty ? '+${info.buildNumber}' : ''}');
+    } catch (_) {
+      // В тестах/десктопе PackageInfo недоступен — просто не показываем.
+    }
   }
 
   @override
@@ -284,6 +298,14 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
                   ),
                 ),
                 const Spacer(),
+                if (_appVersion.isNotEmpty)
+                  Text(
+                    'Версия $_appVersion',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurface.withValues(alpha: 0.5),
+                        ),
+                  ),
               ],
             ),
           ),

@@ -7,6 +7,7 @@ import 'package:bizzy_app/cloud/auth_screens.dart';
 import 'package:bizzy_app/cloud/client_app.dart';
 import 'package:bizzy_app/cloud/cloud_service.dart';
 import 'package:bizzy_app/cloud/master_screens.dart';
+import 'package:bizzy_app/currency.dart';
 import 'package:bizzy_app/notifications/notifications_screen.dart';
 import 'package:bizzy_app/notifications/push_service.dart';
 import 'package:bizzy_app/services/install_service.dart';
@@ -35,34 +36,13 @@ import 'package:url_launcher/url_launcher.dart';
 
 final ValueNotifier<ThemeMode> _themeMode = ValueNotifier(ThemeMode.system);
 
-enum Currency {
-  kzt('₸', 'Тенге (KZT)'),
-  rub('₽', 'Рубли (RUB)'),
-  usd(r'$', 'Доллары (USD)'),
-  eur('€', 'Евро (EUR)');
-
-  final String symbol;
-  final String label;
-
-  const Currency(this.symbol, this.label);
-
-  static Currency fromString(String? value) {
-    return Currency.values.firstWhere(
-      (c) => c.name == value,
-      orElse: () => Currency.kzt,
-    );
-  }
-}
-
-final ValueNotifier<Currency> _currency = ValueNotifier(Currency.kzt);
-
 Widget _priceText(
   double price, {
   String prefix = '',
   TextStyle? style,
 }) {
   return ValueListenableBuilder<Currency>(
-    valueListenable: _currency,
+    valueListenable: appCurrency,
     builder: (context, currency, _) => Text(
       prefix.isEmpty
           ? '${price.toStringAsFixed(0)} ${currency.symbol}'
@@ -95,7 +75,7 @@ Future<void> _loadTheme() async {
 
 Future<void> _loadCurrency() async {
   final prefs = await SharedPreferences.getInstance();
-  _currency.value = Currency.fromString(prefs.getString('bizzy_currency'));
+  appCurrency.value = Currency.fromString(prefs.getString('bizzy_currency'));
 }
 
 const _supabaseUrl = 'https://ngnikkkjxyfhnnwqbzma.supabase.co';
@@ -2457,7 +2437,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   ValueListenableBuilder<Currency>(
-                    valueListenable: _currency,
+                    valueListenable: appCurrency,
                     builder: (context, currency, _) => InputDecorator(
                       decoration: const InputDecoration(
                         labelText: 'Валюта',
@@ -2481,7 +2461,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               .toList(),
                           onChanged: (value) async {
                             if (value == null) return;
-                            _currency.value = value;
+                            appCurrency.value = value;
                             final prefs = await SharedPreferences.getInstance();
                             await prefs.setString(
                                 'bizzy_currency', value.name);
@@ -4653,14 +4633,14 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
                 ),
                 const SizedBox(height: 12),
                 ListenableBuilder(
-                  listenable: _currency,
+                  listenable: appCurrency,
                   builder: (context, _) => TextFormField(
                     controller: _priceController,
                     enabled: !_saving,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     decoration: InputDecoration(
-                      labelText: 'Цена, ${_currency.value.symbol}',
+                      labelText: 'Цена, ${appCurrency.value.symbol}',
                       border: const OutlineInputBorder(),
                     ),
                     validator: (value) {
@@ -4975,7 +4955,7 @@ class _ServicesTabState extends State<ServicesTab> {
                                   leading: const Icon(Icons.spa),
                                   title: Text(service.name),
                                   subtitle: ValueListenableBuilder<Currency>(
-                                    valueListenable: _currency,
+                                    valueListenable: appCurrency,
                                     builder: (context, currency, _) => Text(
                                       '${service.price.toStringAsFixed(2)} ${currency.symbol} • ${service.durationMinutes} мин',
                                     ),
@@ -5209,7 +5189,7 @@ class _FinanceTabState extends State<FinanceTab> {
                     ),
                   ),
                   ValueListenableBuilder<Currency>(
-                    valueListenable: _currency,
+                    valueListenable: appCurrency,
                     builder: (context, currency, _) => Text(
                       '${total.toStringAsFixed(0)} ${currency.symbol}',
                       style:
@@ -5439,6 +5419,7 @@ class _MoreTabState extends State<MoreTab> {
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute(
                 builder: (context) => MasterProfileScreen(
+                  role: widget.cloudRole,
                   onSyncServices: () =>
                       widget.database.syncServices(widget.company.id),
                   onDeleteAccount: () => CloudService().deleteMyAccount().then((_) => widget.onLogout()),
@@ -7040,6 +7021,9 @@ class _MasterBridgeState extends State<_MasterBridge> {
 
       // В офлайне не пытаемся синхронизировать облачный профиль.
       if (widget.offlineMode) return;
+      // Автоматически открываем анкету только у частного мастера —
+      // салон сразу попадает в рабочее место.
+      if (widget.profile.role != 'master') return;
       // Если у мастера ещё нет облачного профиля — предлагаем заполнить.
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         try {
@@ -7049,6 +7033,7 @@ class _MasterBridgeState extends State<_MasterBridge> {
               MaterialPageRoute(
                 builder: (context) => MasterProfileScreen(
                   isFirstSetup: true,
+                  role: widget.profile.role,
                   onDeleteAccount: widget.onDeleteAccount,
                 ),
               ),

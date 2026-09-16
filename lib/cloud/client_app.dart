@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../currency.dart';
 import '../notifications/push_service.dart';
 import 'cloud_service.dart';
 import 'geo_service.dart';
@@ -836,6 +839,9 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
   bool _loadingSlots = false;
   bool _saving = false;
   String? _error;
+  bool _prepayDone = false;
+
+  bool get _needsPrepay => widget.master.prepayEnabled;
 
   static const _workStart = TimeOfDay(hour: 9, minute: 0);
   static const _workEnd = TimeOfDay(hour: 18, minute: 0);
@@ -919,6 +925,20 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
     if (picked != null && mounted) setState(() => _time = picked);
   }
 
+  /// Открывает pay-ссылку мастера (Kaspi и т.п.) во внешнем приложении.
+  Future<void> _pay() async {
+    final link = widget.master.prepayLink.trim();
+    if (link.isEmpty) return;
+    final uri = Uri.tryParse(link);
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ссылка на оплату недоступна')),
+      );
+      return;
+    }
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
   Future<void> _submit() async {
     if (_saving) return;
     final custom = _customService.text.trim();
@@ -946,6 +966,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
         durationMinutes: _service?.durationMinutes ?? 60,
         servicePrice: _service?.price ?? 0,
         notes: _notes.text.trim(),
+        prepaymentStatus: _needsPrepay ? 'claimed' : 'none',
       );
       await PushNotificationService.sendPush(
         toUserId: booking.masterId,
@@ -1096,6 +1117,83 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                 border: OutlineInputBorder(),
               ),
             ),
+            if (_needsPrepay) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .primaryContainer
+                      .withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.payments_outlined,
+                          size: 18,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${widget.master.isSalon ? 'Салон' : 'Мастер'} '
+                            'работает по предоплате: '
+                            '${formatMoney(widget.master.prepayAmount)}',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (widget.master.prepayLink.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      FilledButton.tonalIcon(
+                        onPressed: _pay,
+                        icon: const Icon(Icons.open_in_new, size: 18),
+                        label: const Text('Оплатить'),
+                      ),
+                    ] else
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Реквизиты для оплаты уточните у '
+                          '${widget.master.isSalon ? 'салона' : 'мастера'}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    InkWell(
+                      onTap: _saving
+                          ? null
+                          : () =>
+                              setState(() => _prepayDone = !_prepayDone),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            Checkbox(
+                              value: _prepayDone,
+                              onChanged: _saving
+                                  ? null
+                                  : (v) => setState(
+                                      () => _prepayDone = v ?? false),
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            const Expanded(
+                              child: Text('Я внёс предоплату'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 8),
               Text(
@@ -1112,8 +1210,13 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
           child: const Text('Отмена'),
         ),
         FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: const Text('Отправить'),
+          onPressed:
+              (_saving || (_needsPrepay && !_prepayDone)) ? null : _submit,
+          child: Text(
+            _needsPrepay && !_prepayDone
+                ? 'Сначала внесите предоплату'
+                : 'Записаться',
+          ),
         ),
       ],
     );
@@ -1319,8 +1422,23 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                 leading: Icon(Icons.schedule, color: scheme.primary),
                 title: Text(_fmt(b.startsAt)),
                 subtitle: Text('${b.durationMinutes} мин'
-                    '${b.servicePrice > 0 ? ' • ${b.servicePrice.toStringAsFixed(0)} ₽' : ''}'),
+                    '${b.servicePrice > 0 ? ' • ${formatMoney(b.servicePrice)}' : ''}'),
               ),
+              if (b.prepaymentStatus != 'none')
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.payments_outlined,
+                    color: b.prepaymentStatus == 'confirmed'
+                        ? Colors.green
+                        : Colors.orange,
+                  ),
+                  title: Text(
+                    b.prepaymentStatus == 'confirmed'
+                        ? 'Предоплата подтверждена мастером'
+                        : 'Предоплата внесена — ждёт подтверждения',
+                  ),
+                ),
               if (b.notes.isNotEmpty)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -1481,7 +1599,8 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                                           const SizedBox(height: 4),
                                           Text(
                                             '${_fmt(b.startsAt)} • ${b.durationMinutes} мин'
-                                            '${b.servicePrice > 0 ? ' • ${b.servicePrice.toStringAsFixed(0)} ₽' : ''}',
+                                            '${b.servicePrice > 0 ? ' • ${formatMoney(b.servicePrice)}' : ''}'
+                                            '${b.prepaymentStatus != 'none' ? ' • предоплата' : ''}',
                                             style: Theme.of(context)
                                                 .textTheme
                                                 .bodySmall,
@@ -1782,6 +1901,22 @@ class _ClientProfileTab extends StatelessWidget {
             onPressed: () => _confirmDelete(context),
             icon: const Icon(Icons.delete_forever),
             label: const Text('Удалить аккаунт'),
+          ),
+          const SizedBox(height: 24),
+          FutureBuilder<PackageInfo>(
+            future: PackageInfo.fromPlatform(),
+            builder: (context, snap) {
+              final v = snap.data?.version ?? '';
+              if (v.isEmpty) return const SizedBox.shrink();
+              final build = snap.data?.buildNumber ?? '';
+              return Text(
+                'Версия $v${build.isNotEmpty ? '+$build' : ''}',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurface.withValues(alpha: 0.5),
+                    ),
+              );
+            },
           ),
         ],
       ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,18 +10,23 @@ import 'geo_service.dart';
 import 'map_screens.dart';
 import 'master_public_profile.dart';
 
-/// Экран профиля мастера: категория, описание, рейтинг.
-/// Показывается мастеру при первом входе и из «Ещё».
+/// Экран профиля мастера/салона: категория, описание, рейтинг.
+/// Показывается при первом входе мастера и из «Ещё».
 class MasterProfileScreen extends StatefulWidget {
   const MasterProfileScreen({
     super.key,
     this.isFirstSetup = false,
+    this.role = '',
     this.onDeleteAccount,
     this.onSyncServices,
   });
 
   /// true — показываем сразу после первого входа мастера.
   final bool isFirstSetup;
+
+  /// 'master' | 'salon' — нужен сразу, чтобы заголовок
+  /// не мигал «мастер → салон» пока грузится профиль.
+  final String role;
 
   /// Колбэк удаления аккаунта.
   final Future<void> Function()? onDeleteAccount;
@@ -57,10 +63,14 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   String? _error;
   List<PortfolioPhoto> _portfolio = [];
   bool _uploadingPhoto = false;
+  bool _prepayEnabled = false;
+  final _prepayAmountController = TextEditingController();
+  final _prepayLinkController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    _isSalon = widget.role == 'salon';
     _load();
   }
 
@@ -72,6 +82,8 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
     _descController.dispose();
     _addressController.dispose();
     _socialController.dispose();
+    _prepayAmountController.dispose();
+    _prepayLinkController.dispose();
     super.dispose();
   }
 
@@ -114,6 +126,11 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _lat = card?.lat;
         _lng = card?.lng;
         _portfolio = portfolio;
+        _prepayEnabled = card?.prepayEnabled ?? false;
+        _prepayAmountController.text = (card != null && card.prepayAmount > 0)
+            ? card.prepayAmount.toStringAsFixed(0)
+            : '';
+        _prepayLinkController.text = card?.prepayLink ?? '';
         _loading = false;
       });
     } catch (_) {
@@ -323,12 +340,18 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       userId: _cloud.uid ?? '',
       name: _nameController.text.trim(),
       phone: _phoneController.text.trim(),
+      role: _isSalon ? 'salon' : 'master',
       category: _category ?? 'Другое',
       description: _descController.text.trim(),
       address: _addressController.text.trim(),
       social: _socialController.text.trim(),
       phonePublic: _phonePublic,
       avatarUrl: _avatarUrl,
+      prepayEnabled: _prepayEnabled,
+      prepayAmount:
+          double.tryParse(_prepayAmountController.text.replaceAll(',', '.')) ??
+              0,
+      prepayLink: _prepayLinkController.text.trim(),
       ratingAvg: _ratingAvg,
       ratingCount: _ratingCount,
     );
@@ -418,6 +441,12 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       setState(() => _error = 'Выберите категорию');
       return;
     }
+    final prepayAmount =
+        double.tryParse(_prepayAmountController.text.replaceAll(',', '.')) ?? 0;
+    if (_prepayEnabled && prepayAmount <= 0) {
+      setState(() => _error = 'Укажите сумму предоплаты');
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
@@ -460,6 +489,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         address: address,
         lat: lat,
         lng: lng,
+        prepayEnabled: _prepayEnabled,
+        prepayAmount: prepayAmount,
+        prepayLink: _prepayLinkController.text.trim(),
         social: _socialController.text.trim(),
         phonePublic: _phonePublic,
         avatarUrl: _avatarUrl,
@@ -486,7 +518,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       appBar: AppBar(
         title: Text(
           _isSalon
-              ? (widget.isFirstSetup ? 'Профиль салона' : 'Мой профиль салона')
+              ? 'Профиль салона'
               : (widget.isFirstSetup
                   ? 'Профиль мастера'
                   : 'Мой профиль мастера'),
@@ -719,6 +751,55 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                     border: OutlineInputBorder(),
                   ),
                 ),
+                const SizedBox(height: 20),
+                Text(
+                  'Предоплата',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Работа по предоплате'),
+                  subtitle: const Text(
+                    'Клиент внесёт предоплату перед записью, '
+                    'вы подтвердите получение',
+                  ),
+                  value: _prepayEnabled,
+                  onChanged: _saving
+                      ? null
+                      : (v) => setState(() => _prepayEnabled = v),
+                ),
+                if (_prepayEnabled) ...[
+                  TextField(
+                    controller: _prepayAmountController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                          RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'Сумма предоплаты',
+                      hintText: 'Например: 2000',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _prepayLinkController,
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Ссылка на оплату',
+                      hintText: 'Kaspi, Halyk, Сбербанк — pay-ссылка или QR',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Клиент нажмёт «Оплатить» при записи — '
+                    'откроется эта ссылка в его банковском приложении',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
                 const SizedBox(height: 20),
                 Text(
                   'Портфолио — фото работ',
@@ -996,6 +1077,19 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
     );
   }
 
+  /// Мастер подтверждает, что предоплата реально пришла.
+  Future<void> _confirmPrepay(CloudBooking b) async {
+    try {
+      await _cloud.setPrepaymentStatus(b.id, 'confirmed');
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось подтвердить оплату')),
+      );
+    }
+  }
+
   Future<void> _rateClient(CloudBooking b) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -1093,6 +1187,34 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
                                             .bodySmall,
                                       ),
                                     ],
+                                    if (b.prepaymentStatus != 'none') ...[
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.payments_outlined,
+                                            size: 16,
+                                            color: b.prepaymentStatus ==
+                                                    'confirmed'
+                                                ? Colors.green
+                                                : Colors.orange,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Expanded(
+                                            child: Text(
+                                              b.prepaymentStatus == 'confirmed'
+                                                  ? 'Предоплата получена'
+                                                  : 'Клиент отметил '
+                                                      'предоплату — проверьте '
+                                                      'поступление',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
                                     const SizedBox(height: 8),
                                     Wrap(
                                       spacing: 8,
@@ -1137,6 +1259,14 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
                                             tooltip: 'Профиль клиента',
                                             onPressed: () => _openClient(b),
                                             icon: const Icon(Icons.person),
+                                          ),
+                                        if (b.prepaymentStatus == 'claimed')
+                                          FilledButton.tonalIcon(
+                                            onPressed: () => _confirmPrepay(b),
+                                            icon: const Icon(
+                                                Icons.payments_outlined),
+                                            label: const Text(
+                                                'Оплата получена'),
                                           ),
                                         if (_canReviewClient(b))
                                           FilledButton.tonalIcon(

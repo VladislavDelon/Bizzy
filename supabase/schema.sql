@@ -71,6 +71,10 @@ create table if not exists public.master_profiles (
   phone_public boolean not null default false,
   rating_avg numeric(2,1) not null default 0,
   rating_count int not null default 0,
+  -- Предоплата: мастер/салон включает приём оплаты до записи.
+  prepay_enabled boolean not null default false,
+  prepay_amount numeric not null default 0,
+  prepay_link text not null default '',
   created_at timestamptz not null default now()
 );
 
@@ -125,6 +129,8 @@ create table if not exists public.appointments (
   duration_minutes int not null default 60,
   status text not null default 'pending'
     check (status in ('pending', 'confirmed', 'cancelled', 'completed')),
+  prepayment_status text not null default 'none'
+    check (prepayment_status in ('none', 'claimed', 'confirmed')),
   notes text not null default '',
   created_at timestamptz not null default now()
 );

@@ -9,9 +9,11 @@ import 'geo_service.dart';
 /// координат нет.
 const LatLng kDefaultMapCenter = LatLng(55.751244, 37.618423);
 
-/// Слой тайлов OpenStreetMap — бесплатно, без API-ключа.
+/// Слой тайлов с русскими подписями (Wikimedia OSM, параметр lang=ru).
+/// Стандартные тайлы OSM подписывают объекты на местном языке страны.
 TileLayer osmTileLayer() => TileLayer(
-      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      urlTemplate:
+          'https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}.png?lang=ru',
       userAgentPackageName: 'com.example.bizzy_app',
       maxZoom: 19,
     );

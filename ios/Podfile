@@ -44,4 +44,14 @@ post_install do |installer|
       config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
     end
   end
+  # Флаг нужен и на Runner: модуль firebase_messaging достраивается
+  # при его импорте из кода приложения, а не только в самом поде.
+  installer.aggregate_targets.each do |aggregate|
+    aggregate.user_project.native_targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      end
+    end
+    aggregate.user_project.save
+  end
 end

@@ -10,6 +10,8 @@ on:
 jobs:
   build-ios:
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +30,18 @@ jobs:
           set -o pipefail
           mkdir -p build
           flutter build ios --release --no-codesign 2>&1 | tee build/build-ios.log
+
+      # При падении постим хвост лога комментарием к коммиту —
+      # логи Actions без логина не прочитать, а комментарий публичный.
+      - name: Report build log tail on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tail -c 5000 build/build-ios.log > /tmp/ios-tail.txt 2>/dev/null || \
+            echo "(no build log)" > /tmp/ios-tail.txt
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
+            -f body="$(cat /tmp/ios-tail.txt)" --jq '.id' || true
 
       - name: Package unsigned IPA
         if: success()

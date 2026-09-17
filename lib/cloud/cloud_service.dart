@@ -86,6 +86,30 @@ int _parseInt(dynamic value, {int fallback = 0}) {
 bool _isMissingColumn(PostgrestException e, String column) =>
     e.code == '42703' || e.message.contains(column);
 
+/// Имя отсутствующей колонки из ошибки PGRST204
+/// («Could not find the 'avatar_url' column of 'profiles'...»).
+String? _missingColumnName(PostgrestException e) =>
+    RegExp(r"'(\w+)' column").firstMatch(e.message)?.group(1);
+
+/// Выполняет [run] с [payload]; при PGRST204 выкидывает отсутствующую
+/// колонку из payload и повторяет — старые базы без свежих миграций
+/// продолжают сохранять основные поля.
+Future<void> _runWithMissingColumnFallback(
+  Map<String, dynamic> payload,
+  Future<void> Function(Map<String, dynamic>) run,
+) async {
+  for (var attempt = 0; attempt <= payload.length; attempt++) {
+    try {
+      await run(payload);
+      return;
+    } on PostgrestException catch (e) {
+      final col = _missingColumnName(e);
+      if (col == null || !payload.containsKey(col)) rethrow;
+      payload.remove(col);
+    }
+  }
+}
+
 double _parseDouble(dynamic value, {double fallback = 0}) {
   if (value == null) return fallback;
   if (value is double) return value;
@@ -639,7 +663,7 @@ class CloudService {
     double? lng,
     bool clearLocation = false,
   }) =>
-      supabase.from('profiles').update({
+      _runWithMissingColumnFallback(<String, dynamic>{
         'name': ?name,
         'phone': ?phone,
         'avatar_url': ?avatarUrl,
@@ -647,7 +671,7 @@ class CloudService {
         'lat': ?lat,
         'lng': ?lng,
         if (clearLocation) ...{'lat': null, 'lng': null},
-      }).eq('id', uid!);
+      }, (p) => supabase.from('profiles').update(p).eq('id', uid!));
 
   /// Обновляет логин и/или пароль текущего пользователя в Supabase Auth.
   /// [login] — то, что вводит пользователь; внутри превращается в email.
@@ -818,6 +842,14 @@ class CloudService {
     return masterCard(id);
   }
 
+  /// Создаёт пустую карточку мастера/салона, если её ещё нет —
+  /// чтобы аккаунт сразу был виден клиентам в каталоге.
+  Future<void> ensureMasterCard() async {
+    if (uid == null) return;
+    if (await myMasterCard() != null) return;
+    await upsertMasterProfile(category: 'Другое', description: '');
+  }
+
   Future<void> upsertMasterProfile({
     required String category,
     required String description,
@@ -845,17 +877,9 @@ class CloudService {
       'prepay_amount': prepayAmount,
       'prepay_link': prepayLink,
     };
-    try {
-      await supabase.from('master_profiles').upsert(payload);
-    } on PostgrestException catch (e) {
-      // Старая база без миграции предоплаты — сохраняем без этих полей.
-      if (!_isMissingColumn(e, 'prepay_enabled')) rethrow;
-      payload
-        ..remove('prepay_enabled')
-        ..remove('prepay_amount')
-        ..remove('prepay_link');
-      await supabase.from('master_profiles').upsert(payload);
-    }
+    // Старая база без свежих миграций — сохраняем без отсутствующих полей.
+    await _runWithMissingColumnFallback(
+        payload, (p) => supabase.from('master_profiles').upsert(p));
   }
 
   Future<void> updateAvatarUrl(String url) =>

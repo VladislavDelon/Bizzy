@@ -7021,6 +7021,13 @@ class _MasterBridgeState extends State<_MasterBridge> {
 
       // В офлайне не пытаемся синхронизировать облачный профиль.
       if (widget.offlineMode) return;
+      // Карточка в каталоге — у мастера и салона сразу, чтобы
+      // клиенты видели их в списке ещё до заполнения анкеты.
+      try {
+        await CloudService().ensureMasterCard();
+      } catch (_) {
+        // Каталог не критичен для локальной работы.
+      }
       // Автоматически открываем анкету только у частного мастера —
       // салон сразу попадает в рабочее место.
       if (widget.profile.role != 'master') return;

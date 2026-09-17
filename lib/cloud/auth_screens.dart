@@ -205,108 +205,116 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
           ),
         ),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Spacer(),
-                logo,
-                const SizedBox(height: 32),
-                AnimatedBuilder(
-                  animation: _controller,
-                  builder: (context, child) {
-                    return Opacity(
-                      opacity: _welcomeOpacity.value,
-                      child: FractionalTranslation(
-                        translation: _welcomeSlide.value,
-                        child: child,
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints:
+                    BoxConstraints(minHeight: constraints.maxHeight - 48),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Spacer(flex: 2),
+                    logo,
+                    const SizedBox(height: 32),
+                    AnimatedBuilder(
+                      animation: _controller,
+                      builder: (context, child) {
+                        return Opacity(
+                          opacity: _welcomeOpacity.value,
+                          child: FractionalTranslation(
+                            translation: _welcomeSlide.value,
+                            child: child,
+                          ),
+                        );
+                      },
+                      child: Column(
+                        children: [
+                          Text(
+                            'Добро пожаловать в',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          Text(
+                            'Bizzy',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineLarge
+                                ?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: scheme.primary,
+                                ),
+                          ),
+                        ],
                       ),
-                    );
-                  },
-                  child: Column(
-                    children: [
-                      Text(
-                        'Добро пожаловать в',
+                    ),
+                    const SizedBox(height: 40),
+                    AnimatedBuilder(
+                      animation: _controller,
+                      builder: (context, child) {
+                        return Opacity(
+                          opacity: _questionOpacity.value,
+                          child: child,
+                        );
+                      },
+                      child: Text(
+                        'Кто вы?',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
+                    ),
+                    const SizedBox(height: 12),
+                    AnimatedBuilder(
+                      animation: _controller,
+                      builder: (context, child) {
+                        return Opacity(
+                          opacity: _cardsOpacity.value,
+                          child: FractionalTranslation(
+                            translation: _cardsSlide.value,
+                            child: child,
+                          ),
+                        );
+                      },
+                      child: Column(
+                        children: [
+                          _RoleCard(
+                            icon: Icons.person_search,
+                            title: 'Я клиент',
+                            subtitle:
+                                'Ищу мастера и хочу записываться на услуги',
+                            onTap: () => _pick(context, 'client'),
+                          ),
+                          const SizedBox(height: 16),
+                          _RoleCard(
+                            icon: Icons.content_cut,
+                            title: 'Я мастер',
+                            subtitle: 'Оказываю услуги и веду записи клиентов',
+                            onTap: () => _pick(context, 'master'),
+                          ),
+                          const SizedBox(height: 16),
+                          _RoleCard(
+                            icon: Icons.storefront,
+                            title: 'Салон',
+                            subtitle:
+                                'Владею салоном — сотрудники, клиенты, расписание',
+                            onTap: () => _pick(context, 'salon'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Spacer(),
+                    if (_appVersion.isNotEmpty)
                       Text(
-                        'Bizzy',
+                        'Версия $_appVersion',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineLarge
-                            ?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: scheme.primary,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurface.withValues(alpha: 0.5),
                             ),
                       ),
-                    ],
-                  ),
+                  ],
                 ),
-                const SizedBox(height: 40),
-                AnimatedBuilder(
-                  animation: _controller,
-                  builder: (context, child) {
-                    return Opacity(
-                      opacity: _questionOpacity.value,
-                      child: child,
-                    );
-                  },
-                  child: Text(
-                    'Кто вы?',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                AnimatedBuilder(
-                  animation: _controller,
-                  builder: (context, child) {
-                    return Opacity(
-                      opacity: _cardsOpacity.value,
-                      child: FractionalTranslation(
-                        translation: _cardsSlide.value,
-                        child: child,
-                      ),
-                    );
-                  },
-                  child: Column(
-                    children: [
-                      _RoleCard(
-                        icon: Icons.person_search,
-                        title: 'Я клиент',
-                        subtitle: 'Ищу мастера и хочу записываться на услуги',
-                        onTap: () => _pick(context, 'client'),
-                      ),
-                      const SizedBox(height: 16),
-                      _RoleCard(
-                        icon: Icons.content_cut,
-                        title: 'Я мастер',
-                        subtitle: 'Оказываю услуги и веду записи клиентов',
-                        onTap: () => _pick(context, 'master'),
-                      ),
-                      const SizedBox(height: 16),
-                      _RoleCard(
-                        icon: Icons.storefront,
-                        title: 'Салон',
-                        subtitle: 'Владею салоном — сотрудники, клиенты, расписание',
-                        onTap: () => _pick(context, 'salon'),
-                      ),
-                    ],
-                  ),
-                ),
-                const Spacer(),
-                if (_appVersion.isNotEmpty)
-                  Text(
-                    'Версия $_appVersion',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurface.withValues(alpha: 0.5),
-                        ),
-                  ),
-              ],
+              ),
             ),
           ),
         ),

@@ -1227,13 +1227,23 @@ class CloudService {
     final profileMap = <String, Map<String, dynamic>>{
       for (final p in profileRows) _parseString(p['id']): p,
     };
-    return [
+    final result = [
       for (final r in rows)
         MasterCard.fromMap(
           r,
           fallbackProfile: profileMap[_parseString(r['user_id'])],
         ),
     ];
+    // Избранное не должно теряться: если у мастера/салона ещё нет
+    // карточки в master_profiles — показываем профиль как есть.
+    final found = result.map((c) => c.userId).toSet();
+    for (final id in ids) {
+      final p = profileMap[id];
+      if (!found.contains(id) && p != null) {
+        result.add(MasterCard.fromMap(const {}, fallbackProfile: p));
+      }
+    }
+    return result;
   }
 
   Future<bool> isFavorite(String masterId) async {

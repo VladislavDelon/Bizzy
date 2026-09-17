@@ -723,6 +723,9 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
     } catch (_) {
       if (mounted) {
         setState(() => was ? _favoriteIds.add(id) : _favoriteIds.remove(id));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось обновить избранное')),
+        );
       }
     }
   }
@@ -843,6 +846,13 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
 
   bool get _needsPrepay => widget.master.prepayEnabled;
 
+  /// Сколько останется доплатить на месте после предоплаты (не ниже 0).
+  double get _remainingAfterPrepay {
+    final price = _service?.price ?? 0;
+    final left = price - widget.master.prepayAmount;
+    return left < 0 ? 0 : left;
+  }
+
   static const _workStart = TimeOfDay(hour: 9, minute: 0);
   static const _workEnd = TimeOfDay(hour: 18, minute: 0);
   static const _slotStepMinutes = 60;
@@ -937,6 +947,30 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
       return;
     }
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  /// Связаться с мастером/салоном для внесения предоплаты:
+  /// сначала звонок, если телефона нет — соцсеть/мессенджер.
+  Future<void> _contactMaster() async {
+    final phone = widget.master.phone.trim();
+    if (phone.isNotEmpty) {
+      await launchUrl(Uri(scheme: 'tel', path: phone));
+      return;
+    }
+    final social = widget.master.social.trim();
+    if (social.isNotEmpty) {
+      final uri = Uri.tryParse(
+          social.startsWith('http') ? social : 'https://$social');
+      if (uri != null) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Контакты не указаны')),
+      );
+    }
   }
 
   Future<void> _submit() async {
@@ -1149,22 +1183,57 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                         ),
                       ],
                     ),
-                    if (widget.master.prepayLink.trim().isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      FilledButton.tonalIcon(
-                        onPressed: _pay,
-                        icon: const Icon(Icons.open_in_new, size: 18),
-                        label: const Text('Оплатить'),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        'Предоплата засчитывается в стоимость услуги.',
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
-                    ] else
+                    ),
+                    if (_service != null && _service!.price > 0)
                       Padding(
-                        padding: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.only(top: 2),
                         child: Text(
-                          'Реквизиты для оплаты уточните у '
-                          '${widget.master.isSalon ? 'салона' : 'мастера'}',
-                          style: Theme.of(context).textTheme.bodySmall,
+                          'Стоимость посещения после предоплаты: '
+                          '${formatMoney(_remainingAfterPrepay)}',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                       ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Если вы не придёте, предоплата сгорает.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        'Для внесения предоплаты свяжитесь с '
+                        '${widget.master.isSalon ? 'салоном' : 'мастером'}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton.tonalIcon(
+                      onPressed: _contactMaster,
+                      icon: const Icon(Icons.phone_outlined, size: 18),
+                      label: Text(
+                          'Связаться с ${widget.master.isSalon ? 'салоном' : 'мастером'}'),
+                    ),
+                    if (widget.master.prepayLink.trim().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      TextButton.icon(
+                        onPressed: _pay,
+                        icon: const Icon(Icons.open_in_new, size: 18),
+                        label: const Text('Оплатить по ссылке'),
+                      ),
+                    ],
                     InkWell(
                       onTap: _saving
                           ? null

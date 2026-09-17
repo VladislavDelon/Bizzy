@@ -110,6 +110,43 @@ Future<void> _runWithMissingColumnFallback(
   }
 }
 
+/// SELECT с фолбэком: при PGRST204 убирает отсутствующую колонку
+/// из выборки и повторяет — работает на старых базах без миграций.
+extension _ResilientSelect on CloudService {
+  Future<List<dynamic>> _selectResilient(
+    String table,
+    List<String> fields, {
+    String? inColumn,
+    List<Object>? inValues,
+    String? eqColumn,
+    Object? eqValue,
+    String? orderBy,
+    bool ascending = false,
+  }) async {
+    var cols = List<String>.of(fields);
+    for (var attempt = 0; attempt <= fields.length; attempt++) {
+      try {
+        var q = supabase.from(table).select(cols.join(', '));
+        if (inColumn != null && inValues != null) {
+          q = q.inFilter(inColumn, inValues);
+        }
+        if (eqColumn != null) {
+          q = q.eq(eqColumn, eqValue as Object);
+        }
+        if (orderBy != null && cols.contains(orderBy)) {
+          return await q.order(orderBy, ascending: ascending);
+        }
+        return await q;
+      } on PostgrestException catch (e) {
+        final col = _missingColumnName(e);
+        if (col == null || !cols.contains(col)) rethrow;
+        cols = List.of(cols)..remove(col);
+      }
+    }
+    return const [];
+  }
+}
+
 double _parseDouble(dynamic value, {double fallback = 0}) {
   if (value == null) return fallback;
   if (value is double) return value;
@@ -714,12 +751,30 @@ class CloudService {
 
   // ---------- Master profiles ----------
   Future<List<MasterCard>> masters({String? category}) async {
-    Future<List<MasterCard>> load(List<String> fields) async {
-      var query = supabase.from('master_profiles').select(fields.join(', '));
-      if (category != null && category.isNotEmpty) {
-        query = query.eq('category', category);
-      }
-      final rows = await query.order('rating_avg', ascending: false);
+    const fields = [
+      'user_id',
+      'category',
+      'description',
+      'address',
+      'lat',
+      'lng',
+      'social',
+      'phone_public',
+      'avatar_url',
+      'rating_avg',
+      'rating_count',
+      'prepay_enabled',
+      'prepay_amount',
+      'prepay_link',
+    ];
+    try {
+      final rows = await _selectResilient(
+        'master_profiles',
+        fields,
+        eqColumn: category == null || category.isEmpty ? null : 'category',
+        eqValue: category,
+        orderBy: 'rating_avg',
+      );
       final userIds = <String>[
         for (final r in rows) _parseString(r['user_id'])
       ].where((id) => id.isNotEmpty).toSet().toList();
@@ -727,10 +782,12 @@ class CloudService {
       final profileMap = <String, Map<String, dynamic>>{};
       if (userIds.isNotEmpty) {
         try {
-          final profiles = await supabase
-              .from('profiles')
-              .select('id, name, phone, role')
-              .inFilter('id', userIds);
+          final profiles = await _selectResilient(
+            'profiles',
+            const ['id', 'name', 'phone', 'role'],
+            inColumn: 'id',
+            inValues: userIds,
+          );
           for (final p in profiles) {
             profileMap[_parseString(p['id'])] = p;
           }
@@ -746,35 +803,6 @@ class CloudService {
             fallbackProfile: profileMap[_parseString(r['user_id'])],
           )
       ];
-    }
-
-    const fullFields = [
-      'user_id',
-      'category',
-      'description',
-      'address',
-      'lat',
-      'lng',
-      'social',
-      'phone_public',
-      'avatar_url',
-      'rating_avg',
-      'rating_count',
-      'prepay_enabled',
-      'prepay_amount',
-      'prepay_link',
-    ];
-    try {
-      return await load(fullFields);
-    } on PostgrestException catch (e) {
-      await SyncLog.write('masters', 'full fields error: $e');
-      return await load([
-        'user_id',
-        'category',
-        'avatar_url',
-        'rating_avg',
-        'rating_count',
-      ]);
     } catch (e, st) {
       await SyncLog.write('masters', 'unexpected error: $e\n$st');
       rethrow;
@@ -782,31 +810,7 @@ class CloudService {
   }
 
   Future<MasterCard?> masterCard(String masterId) async {
-    Future<MasterCard?> load(List<String> fields) async {
-      final row = await supabase
-          .from('master_profiles')
-          .select(fields.join(', '))
-          .eq('user_id', masterId)
-          .maybeSingle();
-      if (row == null) return null;
-
-      Map<String, dynamic>? profile;
-      try {
-        final p = await supabase
-            .from('profiles')
-            .select('id, name, phone, role')
-            .eq('id', masterId)
-            .maybeSingle();
-        if (p != null) profile = p;
-      } catch (_) {}
-
-      return MasterCard.fromMap(
-        row,
-        fallbackProfile: profile,
-      );
-    }
-
-    const fullFields = [
+    const fields = [
       'user_id',
       'category',
       'description',
@@ -822,18 +826,29 @@ class CloudService {
       'prepay_amount',
       'prepay_link',
     ];
+    final rows = await _selectResilient(
+      'master_profiles',
+      fields,
+      eqColumn: 'user_id',
+      eqValue: masterId,
+    );
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+
+    Map<String, dynamic>? profile;
     try {
-      return await load(fullFields);
-    } on PostgrestException catch (e) {
-      await SyncLog.write('masterCard', 'full fields error: $e');
-      return await load([
-        'user_id',
-        'category',
-        'avatar_url',
-        'rating_avg',
-        'rating_count',
-      ]);
-    }
+      final p = await supabase
+          .from('profiles')
+          .select('id, name, phone, role')
+          .eq('id', masterId)
+          .maybeSingle();
+      if (p != null) profile = p;
+    } catch (_) {}
+
+    return MasterCard.fromMap(
+      row as Map<String, dynamic>,
+      fallbackProfile: profile,
+    );
   }
 
   Future<MasterCard?> myMasterCard() async {
@@ -1200,30 +1215,33 @@ class CloudService {
   Future<List<MasterCard>> favoriteMasters() async {
     final ids = await myFavoriteIds();
     if (ids.isEmpty) return [];
-    List<dynamic> rows;
-    try {
-      rows = await supabase
-          .from('master_profiles')
-          .select(
-            'user_id, category, description, address, lat, lng, social, '
-            'phone_public, avatar_url, rating_avg, rating_count, '
-            'prepay_enabled, prepay_amount, prepay_link',
-          )
-          .inFilter('user_id', ids.toList());
-    } on PostgrestException catch (e) {
-      if (!_isMissingColumn(e, 'prepay_enabled')) rethrow;
-      rows = await supabase
-          .from('master_profiles')
-          .select(
-            'user_id, category, description, address, lat, lng, social, '
-            'phone_public, avatar_url, rating_avg, rating_count',
-          )
-          .inFilter('user_id', ids.toList());
-    }
-    final profileRows = await supabase
-        .from('profiles')
-        .select('id, name, phone, role')
-        .inFilter('id', ids.toList());
+    final rows = await _selectResilient(
+      'master_profiles',
+      const [
+        'user_id',
+        'category',
+        'description',
+        'address',
+        'lat',
+        'lng',
+        'social',
+        'phone_public',
+        'avatar_url',
+        'rating_avg',
+        'rating_count',
+        'prepay_enabled',
+        'prepay_amount',
+        'prepay_link',
+      ],
+      inColumn: 'user_id',
+      inValues: ids.toList(),
+    );
+    final profileRows = await _selectResilient(
+      'profiles',
+      const ['id', 'name', 'phone', 'role'],
+      inColumn: 'id',
+      inValues: ids.toList(),
+    );
     final profileMap = <String, Map<String, dynamic>>{
       for (final p in profileRows) _parseString(p['id']): p,
     };

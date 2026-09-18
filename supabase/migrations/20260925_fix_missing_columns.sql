@@ -59,3 +59,15 @@ alter table public.profiles
 drop policy if exists "profiles_select_master" on public.profiles;
 create policy "profiles_select_master" on public.profiles
   for select using (role in ('master', 'salon'));
+
+-- 6. Мастер/салон видит профили СВОИХ клиентов (имя и телефон в записях).
+--    Иначе в заявках у мастера клиент отображается просто «Клиент».
+drop policy if exists "profiles_select_my_clients" on public.profiles;
+create policy "profiles_select_my_clients" on public.profiles
+  for select using (
+    exists (
+      select 1 from public.appointments a
+      where a.client_id = profiles.id
+        and a.master_id = auth.uid()
+    )
+  );

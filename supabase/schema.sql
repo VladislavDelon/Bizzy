@@ -206,6 +206,16 @@ create policy "profiles_select_own"    on public.profiles
   for select using (auth.uid() = id);
 create policy "profiles_select_master" on public.profiles
   for select using (role in ('master', 'salon'));
+-- Мастер/салон видит профили своих клиентов (имя/телефон в записях).
+drop policy if exists "profiles_select_my_clients" on public.profiles;
+create policy "profiles_select_my_clients" on public.profiles
+  for select using (
+    exists (
+      select 1 from public.appointments a
+      where a.client_id = profiles.id
+        and a.master_id = auth.uid()
+    )
+  );
 create policy "profiles_update_own"    on public.profiles
   for update using (auth.uid() = id) with check (auth.uid() = id);
 

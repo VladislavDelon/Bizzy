@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
+import 'package:table_calendar/table_calendar.dart';
 
 import 'package:bizzy_app/main.dart';
 import 'package:bizzy_app/tasks/task_model.dart';
@@ -553,9 +554,11 @@ void main() {
     expect(find.text('Личное дело'), findsOneWidget);
     expect(find.textContaining('1 личных дел'), findsOneWidget);
 
-    // Календарь: дело тоже в списке выбранного дня.
-    await tester.tap(find.text('Календарь'));
+    // Месяц встроен в «Записи»: открываем календарь иконкой —
+    // дело остаётся в списке выбранного дня.
+    await tester.tap(find.byIcon(Icons.calendar_month));
     await tester.pumpAndSettle();
+    expect(find.byType(TableCalendar<Object>), findsOneWidget);
     expect(find.text('Пробежка'), findsOneWidget);
     expect(find.text('Личное дело'), findsOneWidget);
   });

@@ -775,34 +775,44 @@ class CloudService {
         eqValue: category,
         orderBy: 'rating_avg',
       );
-      final userIds = <String>[
-        for (final r in rows) _parseString(r['user_id'])
-      ].where((id) => id.isNotEmpty).toSet().toList();
 
+      // Одним запросом — все профили мастеров/салонов: и для имён
+      // карточек, и чтобы провайдеры без карточки не терялись.
       final profileMap = <String, Map<String, dynamic>>{};
-      if (userIds.isNotEmpty) {
-        try {
-          final profiles = await _selectResilient(
-            'profiles',
-            const ['id', 'name', 'phone', 'role'],
-            inColumn: 'id',
-            inValues: userIds,
-          );
-          for (final p in profiles) {
-            profileMap[_parseString(p['id'])] = p;
-          }
-        } catch (_) {
-          // Профили не критичны — карточки всё равно отобразятся.
+      try {
+        final profiles = await _selectResilient(
+          'profiles',
+          const ['id', 'name', 'phone', 'role'],
+          inColumn: 'role',
+          inValues: const ['master', 'salon'],
+        );
+        for (final p in profiles) {
+          profileMap[_parseString(p['id'])] = p;
         }
+      } catch (_) {
+        // Профили не критичны — карточки всё равно отобразятся.
       }
 
-      return [
+      final result = <MasterCard>[
         for (final r in rows)
           MasterCard.fromMap(
             r,
             fallbackProfile: profileMap[_parseString(r['user_id'])],
           )
       ];
+
+      // Провайдеры без карточки в master_profiles — показываем по профилю
+      // (иначе они невидимы клиентам до первого сохранения анкеты).
+      final known = result.map((c) => c.userId).toSet();
+      for (final p in profileMap.values) {
+        final pid = _parseString(p['id']);
+        if (pid.isEmpty || known.contains(pid)) continue;
+        if (category != null && category.isNotEmpty && category != 'Другое') {
+          continue; // у безкарточных категория всегда «Другое»
+        }
+        result.add(MasterCard.fromMap(const {}, fallbackProfile: p));
+      }
+      return result;
     } catch (e, st) {
       await SyncLog.write('masters', 'unexpected error: $e\n$st');
       rethrow;

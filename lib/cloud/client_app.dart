@@ -113,6 +113,7 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
   String _kindFilter = 'all'; // 'all' | 'salon' | 'master'
   bool _loading = true;
   bool _failed = false;
+  String _lastError = '';
 
   /// Координаты клиента: из профиля, либо определённые по GPS в этой сессии.
   double? _myLat;
@@ -200,7 +201,10 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
     } catch (e, st) {
       await SyncLog.write('client_catalog', '$e\n$st');
       if (!mounted) return;
-      setState(() => _failed = true);
+      setState(() {
+        _failed = true;
+        _lastError = '$e';
+      });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -296,13 +300,25 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
           ? const Center(child: CircularProgressIndicator())
           : _failed
               ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('Не удалось загрузить каталог'),
-                      TextButton(
-                          onPressed: _load, child: const Text('Повторить')),
-                    ],
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Не удалось загрузить каталог'),
+                        if (_lastError.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              _lastError,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        TextButton(
+                            onPressed: _load, child: const Text('Повторить')),
+                      ],
+                    ),
                   ),
                 )
               : RefreshIndicator(
@@ -407,11 +423,14 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
                         ),
                       ),
                       if (_visibleMasters.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.all(32),
+                        Padding(
+                          padding: const EdgeInsets.all(32),
                           child: Center(
                             child: Text(
-                              'По вашему запросу никого не нашлось',
+                              _masters.isEmpty
+                                  ? 'Пока нет ни одного мастера или салона.\n'
+                                      'Они появятся в каталоге после регистрации.'
+                                  : 'По вашему запросу никого не нашлось',
                               textAlign: TextAlign.center,
                             ),
                           ),

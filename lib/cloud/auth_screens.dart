@@ -192,7 +192,7 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
         : [Colors.black, scheme.primary.withValues(alpha: 0.12)];
     final logo = AnimatedLogo(
       animation: _controller,
-      size: 220,
+      size: 150,
     );
 
     return Scaffold(
@@ -205,116 +205,109 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
           ),
         ),
         child: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) => SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints:
-                    BoxConstraints(minHeight: constraints.maxHeight - 48),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Spacer(flex: 2),
-                    logo,
-                    const SizedBox(height: 32),
-                    AnimatedBuilder(
-                      animation: _controller,
-                      builder: (context, child) {
-                        return Opacity(
-                          opacity: _welcomeOpacity.value,
-                          child: FractionalTranslation(
-                            translation: _welcomeSlide.value,
-                            child: child,
-                          ),
-                        );
-                      },
-                      child: Column(
-                        children: [
-                          Text(
-                            'Добро пожаловать в',
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          Text(
-                            'Bizzy',
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineLarge
-                                ?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: scheme.primary,
-                                ),
-                          ),
-                        ],
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Spacer(),
+                logo,
+                const SizedBox(height: 20),
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) {
+                    return Opacity(
+                      opacity: _welcomeOpacity.value,
+                      child: FractionalTranslation(
+                        translation: _welcomeSlide.value,
+                        child: child,
                       ),
-                    ),
-                    const SizedBox(height: 40),
-                    AnimatedBuilder(
-                      animation: _controller,
-                      builder: (context, child) {
-                        return Opacity(
-                          opacity: _questionOpacity.value,
-                          child: child,
-                        );
-                      },
-                      child: Text(
-                        'Кто вы?',
+                    );
+                  },
+                  child: Column(
+                    children: [
+                      Text(
+                        'Добро пожаловать в',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    AnimatedBuilder(
-                      animation: _controller,
-                      builder: (context, child) {
-                        return Opacity(
-                          opacity: _cardsOpacity.value,
-                          child: FractionalTranslation(
-                            translation: _cardsSlide.value,
-                            child: child,
-                          ),
-                        );
-                      },
-                      child: Column(
-                        children: [
-                          _RoleCard(
-                            icon: Icons.person_search,
-                            title: 'Я клиент',
-                            subtitle:
-                                'Ищу мастера и хочу записываться на услуги',
-                            onTap: () => _pick(context, 'client'),
-                          ),
-                          const SizedBox(height: 16),
-                          _RoleCard(
-                            icon: Icons.content_cut,
-                            title: 'Я мастер',
-                            subtitle: 'Оказываю услуги и веду записи клиентов',
-                            onTap: () => _pick(context, 'master'),
-                          ),
-                          const SizedBox(height: 16),
-                          _RoleCard(
-                            icon: Icons.storefront,
-                            title: 'Салон',
-                            subtitle:
-                                'Владею салоном — сотрудники, клиенты, расписание',
-                            onTap: () => _pick(context, 'salon'),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Spacer(),
-                    if (_appVersion.isNotEmpty)
                       Text(
-                        'Версия $_appVersion',
+                        'Bizzy',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurface.withValues(alpha: 0.5),
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineLarge
+                            ?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: scheme.primary,
                             ),
                       ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
+                const SizedBox(height: 24),
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) {
+                    return Opacity(
+                      opacity: _questionOpacity.value,
+                      child: child,
+                    );
+                  },
+                  child: Text(
+                    'Кто вы?',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) {
+                    return Opacity(
+                      opacity: _cardsOpacity.value,
+                      child: FractionalTranslation(
+                        translation: _cardsSlide.value,
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: Column(
+                    children: [
+                      _RoleCard(
+                        icon: Icons.person_search,
+                        title: 'Я клиент',
+                        subtitle: 'Ищу мастера и хочу записываться на услуги',
+                        onTap: () => _pick(context, 'client'),
+                      ),
+                      const SizedBox(height: 12),
+                      _RoleCard(
+                        icon: Icons.content_cut,
+                        title: 'Я мастер',
+                        subtitle: 'Оказываю услуги и веду записи клиентов',
+                        onTap: () => _pick(context, 'master'),
+                      ),
+                      const SizedBox(height: 12),
+                      _RoleCard(
+                        icon: Icons.storefront,
+                        title: 'Салон',
+                        subtitle:
+                            'Владею салоном — сотрудники, клиенты, расписание',
+                        onTap: () => _pick(context, 'salon'),
+                      ),
+                    ],
+                  ),
+                ),
+                const Spacer(flex: 2),
+                if (_appVersion.isNotEmpty)
+                  Text(
+                    'Версия $_appVersion',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurface.withValues(alpha: 0.5),
+                        ),
+                  ),
+              ],
             ),
           ),
         ),
@@ -391,6 +384,7 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
   final _formKey = GlobalKey<FormState>();
   final _loginController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _nameController = TextEditingController();
   final _cloud = CloudService();
   bool _registerMode = false;
   bool _busy = false;
@@ -401,6 +395,7 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
   void dispose() {
     _loginController.dispose();
     _passwordController.dispose();
+    _nameController.dispose();
     super.dispose();
   }
 
@@ -438,6 +433,7 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
           login: login,
           password: password,
           role: widget.role,
+          name: _nameController.text.trim(),
         );
       } else {
         await _cloud.signIn(login, password);
@@ -476,14 +472,38 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 24),
-                if (_registerMode)
+                if (_registerMode) ...[
+                  TextFormField(
+                    controller: _nameController,
+                    enabled: !_busy,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: InputDecoration(
+                      labelText: switch (widget.role) {
+                        'salon' => 'Название салона',
+                        _ => 'Ваше имя',
+                      },
+                      hintText: switch (widget.role) {
+                        'salon' => 'Как называется ваш салон',
+                        'master' => 'Как к вам обращаться',
+                        _ => 'Как вас зовут',
+                      },
+                      border: const OutlineInputBorder(),
+                    ),
+                    validator: (v) {
+                      final s = v?.trim() ?? '';
+                      if (s.length < 2) return 'Минимум 2 символа';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Text(
-                      'Имя и телефон можно будет указать позже в профиле',
+                      'Телефон можно будет указать позже в профиле',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
+                ],
                 TextFormField(
                   controller: _loginController,
                   enabled: !_busy,

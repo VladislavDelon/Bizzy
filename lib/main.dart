@@ -3284,17 +3284,18 @@ class _MainShellState extends State<MainShell> {
         onDelete: _deleteAppointment,
         onTasksChanged: _loadTasks,
       ),
-      CalendarTab(
-        database: _db,
-        company: widget.company,
-        user: widget.user,
-        appointments: _allAppointments,
-        tasks: _allTasks,
-        loading: _loading,
-        onEdit: _showAppointmentDialog,
-        onDelete: _deleteAppointment,
-        onTasksChanged: _loadTasks,
-      ),
+      // У салона вторая вкладка — справочник мастеров,
+      // у частного мастера — «Мои дела» (у салона они в «Ещё»).
+      widget.cloudRole == 'salon'
+          ? ContactsScreen(
+              database: _db,
+              type: ContactType.master,
+              companyId: widget.company.id,
+            )
+          : TasksScreen(
+              database: _db,
+              user: widget.user,
+            ),
       ClientsTab(
         database: _db,
         company: widget.company,
@@ -3373,15 +3374,23 @@ class _MainShellState extends State<MainShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (index) => setState(() => _currentIndex = index),
+        onDestinationSelected: (index) {
+          setState(() => _currentIndex = index);
+          // Освежаем точки-дела на неделе после правок в «Моих делах».
+          _loadTasks();
+        },
         destinations: [
           const NavigationDestination(
-            icon: Icon(Icons.home_filled),
-            label: 'Главное',
+            icon: Icon(Icons.event_note),
+            label: 'Записи',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.calendar_today),
-            label: 'Календарь',
+          NavigationDestination(
+            icon: Icon(
+              widget.cloudRole == 'salon'
+                  ? Icons.content_cut
+                  : Icons.task_alt,
+            ),
+            label: widget.cloudRole == 'salon' ? 'Мастера' : 'Мои дела',
           ),
           NavigationDestination(
             icon: Badge(
@@ -3448,6 +3457,8 @@ class HomeTab extends StatefulWidget {
 
 class _HomeTabState extends State<HomeTab> {
   late DateTime _selectedDay;
+  bool _monthView = false;
+  DateTime _focusedDay = DateTime.now();
 
   @override
   void initState() {
@@ -3562,73 +3573,157 @@ class _HomeTabState extends State<HomeTab> {
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          child: SizedBox(
-            height: 72,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: 7,
-              itemBuilder: (context, index) {
-                final day = _weekStart.add(Duration(days: index));
-                final selected = isSameDay(day, _selectedDay);
-                final hasAppointments = widget.appointments
-                    .any((a) => isSameDay(a.dateTime, day));
-                final hasTasks = widget.tasks
-                    .any((t) => isSameDay(t.dueAt, day));
-                return GestureDetector(
-                  onTap: () => _selectDay(day),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeInOut,
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: selected ? const Color(0xFFFFD600) : Colors.transparent,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          DateFormat.E('ru_RU').format(day).toUpperCase(),
-                          style: TextStyle(
-                            color: selected ? Colors.black : Colors.grey[700],
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _monthView
+                    ? TableCalendar<Object>(
+                        locale: 'ru_RU',
+                        firstDay: DateTime.utc(2020, 1, 1),
+                        lastDay: DateTime.utc(2030, 12, 31),
+                        focusedDay: _focusedDay,
+                        selectedDayPredicate: (day) =>
+                            isSameDay(_selectedDay, day),
+                        calendarFormat: CalendarFormat.month,
+                        availableCalendarFormats: const {
+                          CalendarFormat.month: 'Месяц',
+                        },
+                        headerStyle: const HeaderStyle(
+                          formatButtonVisible: false,
+                        ),
+                        calendarStyle: const CalendarStyle(
+                          markerDecoration: BoxDecoration(
+                            color: Colors.yellow,
+                            shape: BoxShape.circle,
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${day.day}',
-                          style: TextStyle(
-                            color: selected ? Colors.black : Colors.black87,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        calendarBuilders: CalendarBuilders<Object>(
+                          markerBuilder: (context, day, events) {
+                            if (events.isEmpty) return null;
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                for (final e in events.take(4))
+                                  _DayDot(
+                                    color: e is TaskItem
+                                        ? Colors.white
+                                        : const Color(0xFFFFD600),
+                                    bordered: e is TaskItem,
+                                  ),
+                              ],
+                            );
+                          },
                         ),
-                        const SizedBox(height: 3),
-                        SizedBox(
-                          height: 6,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (hasAppointments) const _DayDot(),
-                              if (hasTasks)
-                                const _DayDot(
-                                  color: Colors.white,
-                                  bordered: true,
+                        eventLoader: (day) => <Object>[
+                          ...widget.appointments
+                              .where((a) => isSameDay(a.dateTime, day)),
+                          ...widget.tasks
+                              .where((t) => isSameDay(t.dueAt, day)),
+                        ],
+                        onDaySelected: (selectedDay, focusedDay) {
+                          _selectDay(selectedDay);
+                          setState(() {
+                            _focusedDay = focusedDay;
+                            _monthView = false;
+                          });
+                        },
+                        onPageChanged: (focusedDay) {
+                          _focusedDay = focusedDay;
+                        },
+                      )
+                    : SizedBox(
+                        height: 72,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: 7,
+                          itemBuilder: (context, index) {
+                            final day =
+                                _weekStart.add(Duration(days: index));
+                            final selected = isSameDay(day, _selectedDay);
+                            final hasAppointments = widget.appointments
+                                .any((a) => isSameDay(a.dateTime, day));
+                            final hasTasks = widget.tasks
+                                .any((t) => isSameDay(t.dueAt, day));
+                            return GestureDetector(
+                              onTap: () => _selectDay(day),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeInOut,
+                                margin:
+                                    const EdgeInsets.symmetric(horizontal: 4),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
                                 ),
-                            ],
-                          ),
+                                decoration: BoxDecoration(
+                                  color: selected
+                                      ? const Color(0xFFFFD600)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Column(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      DateFormat.E('ru_RU')
+                                          .format(day)
+                                          .toUpperCase(),
+                                      style: TextStyle(
+                                        color: selected
+                                            ? Colors.black
+                                            : Colors.grey[700],
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${day.day}',
+                                      style: TextStyle(
+                                        color: selected
+                                            ? Colors.black
+                                            : Colors.black87,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    SizedBox(
+                                      height: 6,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (hasAppointments)
+                                            const _DayDot(),
+                                          if (hasTasks)
+                                            const _DayDot(
+                                              color: Colors.white,
+                                              bordered: true,
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
                         ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
+                      ),
+              ),
+              IconButton(
+                tooltip: _monthView ? 'Неделя' : 'Месяц',
+                icon: Icon(
+                  _monthView ? Icons.view_week : Icons.calendar_month,
+                ),
+                onPressed: () => setState(() {
+                  _monthView = !_monthView;
+                  if (_monthView) _focusedDay = _selectedDay;
+                }),
+              ),
+            ],
           ),
         ),
         Expanded(
@@ -3714,174 +3809,6 @@ class _HomeTabState extends State<HomeTab> {
         ),
       ],
     );
-  }
-}
-
-class CalendarTab extends StatefulWidget {
-  const CalendarTab({
-    super.key,
-    required this.database,
-    required this.company,
-    required this.user,
-    required this.appointments,
-    required this.tasks,
-    required this.loading,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onTasksChanged,
-  });
-
-  final AppointmentsDatabase database;
-  final Company company;
-  final User user;
-  final List<Appointment> appointments;
-  final List<TaskItem> tasks;
-  final bool loading;
-  final Future<void> Function({
-    Appointment? appointment,
-    required DateTime initialDate,
-  }) onEdit;
-  final Future<void> Function(int) onDelete;
-  final Future<void> Function() onTasksChanged;
-
-  @override
-  State<CalendarTab> createState() => _CalendarTabState();
-}
-
-class _CalendarTabState extends State<CalendarTab> {
-  CalendarFormat _calendarFormat = CalendarFormat.month;
-  DateTime _focusedDay = DateTime.now();
-  late DateTime _selectedDay;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedDay = _focusedDay;
-  }
-
-  Future<void> _openTasks() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (context) => TasksScreen(
-          database: widget.database,
-          user: widget.user,
-        ),
-      ),
-    );
-    await widget.onTasksChanged();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final dayAppointments = widget.appointments
-        .where((a) => isSameDay(a.dateTime, _selectedDay))
-        .toList()
-      ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
-    final dayTasks = widget.tasks
-        .where((t) => isSameDay(t.dueAt, _selectedDay))
-        .toList();
-    final dayItems = <_DayEntry>[
-      for (final a in dayAppointments) _DayEntry.appointment(a),
-      for (final t in dayTasks) _DayEntry.task(t),
-    ]..sort((a, b) => a.time.compareTo(b.time));
-
-    return widget.loading
-        ? const Center(child: CircularProgressIndicator())
-        : Column(
-            children: [
-              TableCalendar<Object>(
-                locale: 'ru_RU',
-                firstDay: DateTime.utc(2020, 1, 1),
-                lastDay: DateTime.utc(2030, 12, 31),
-                focusedDay: _focusedDay,
-                selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-                calendarFormat: _calendarFormat,
-                calendarStyle: const CalendarStyle(
-                  markerDecoration: BoxDecoration(
-                    color: Colors.yellow,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                calendarBuilders: CalendarBuilders<Object>(
-                  markerBuilder: (context, day, events) {
-                    if (events.isEmpty) return null;
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (final e in events.take(4))
-                          _DayDot(
-                            color: e is TaskItem
-                                ? Colors.white
-                                : const Color(0xFFFFD600),
-                            bordered: e is TaskItem,
-                          ),
-                      ],
-                    );
-                  },
-                ),
-                eventLoader: (day) => <Object>[
-                  ...widget.appointments
-                      .where((a) => isSameDay(a.dateTime, day)),
-                  ...widget.tasks
-                      .where((t) => isSameDay(t.dueAt, day)),
-                ],
-                availableCalendarFormats: const {
-                  CalendarFormat.month: 'Месяц',
-                  CalendarFormat.twoWeeks: '2 недели',
-                  CalendarFormat.week: 'Неделя',
-                },
-                onDaySelected: (selectedDay, focusedDay) {
-                  setState(() {
-                    _selectedDay = selectedDay;
-                    _focusedDay = focusedDay;
-                  });
-                },
-                onFormatChanged: (format) {
-                  setState(() => _calendarFormat = format);
-                },
-                onPageChanged: (focusedDay) {
-                  _focusedDay = focusedDay;
-                },
-              ),
-              Expanded(
-                child: dayItems.isEmpty
-                    ? const Center(
-                        child: Text('На этот день записей нет.'),
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        itemCount: dayItems.length,
-                        itemBuilder: (context, index) {
-                          final entry = dayItems[index];
-                          final task = entry.task;
-                          if (task != null) {
-                            return _PersonalTaskTile(
-                              task: task,
-                              onTap: _openTasks,
-                            );
-                          }
-                          final a = entry.appointment!;
-                          return Card(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 4,
-                            ),
-                            child: ListTile(
-                              title: Text(a.clientName),
-                              subtitle: Text('${a.master} • ${a.service}'),
-                              trailing: Text(_formatTime(a.dateTime)),
-                              onTap: () => widget.onEdit(
-                                appointment: a,
-                                initialDate: a.dateTime,
-                              ),
-                              onLongPress: () => widget.onDelete(a.id!),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          );
   }
 }
 

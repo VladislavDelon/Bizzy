@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../notifications/push_service.dart';
 import 'cloud_service.dart';
+import 'credentials_dialog.dart';
 import 'geo_service.dart';
 import 'map_screens.dart';
 import 'master_public_profile.dart';
@@ -44,7 +45,6 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   final _geo = GeoService();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _emailController = TextEditingController();
   final _descController = TextEditingController();
   final _addressController = TextEditingController();
   final _socialController = TextEditingController();
@@ -78,7 +78,6 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
-    _emailController.dispose();
     _descController.dispose();
     _addressController.dispose();
     _socialController.dispose();
@@ -113,7 +112,6 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _categories = categories;
         _nameController.text = profile?.name ?? '';
         _phoneController.text = profile?.phone ?? '';
-        _emailController.text = _cloud.displayLogin;
         _isSalon = profile?.isSalon ?? false;
         _category = card?.category ?? categories.firstOrNull;
         _descController.text = card?.description ?? '';
@@ -218,82 +216,6 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось удалить фото')),
-      );
-    }
-  }
-
-  /// Отдельный компактный диалог смены пароля:
-  /// сперва новый пароль, затем повтор.
-  Future<void> _changePassword() async {
-    final newCtrl = TextEditingController();
-    final confirmCtrl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Сменить пароль'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: newCtrl,
-                obscureText: true,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Новый пароль',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (v) => (v == null || v.length < 6)
-                    ? 'Минимум 6 символов'
-                    : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: confirmCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Повторите новый пароль',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (v) =>
-                    v != newCtrl.text ? 'Пароли не совпадают' : null,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (formKey.currentState!.validate()) {
-                Navigator.of(context).pop(true);
-              }
-            },
-            child: const Text('Сохранить'),
-          ),
-        ],
-      ),
-    );
-    final password = newCtrl.text;
-    newCtrl.dispose();
-    confirmCtrl.dispose();
-    if (ok != true || !mounted) return;
-    try {
-      await _cloud.updateAuth(password: password);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Пароль обновлён')),
-      );
-    } catch (e) {
-      await SyncLog.write('password_change', e.toString());
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось сменить пароль')),
       );
     }
   }
@@ -452,14 +374,6 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       _error = null;
     });
     try {
-      final login = _emailController.text.trim();
-      final needLogin = !widget.isFirstSetup &&
-          login.isNotEmpty &&
-          login != _cloud.displayLogin;
-      if (needLogin) {
-        await _cloud.updateAuth(login: login);
-      }
-
       // Координаты: выбранные на карте, либо геокодинг из текста адреса.
       final address = _addressController.text.trim();
       var lat = _lat;
@@ -516,13 +430,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          _isSalon
-              ? 'Профиль салона'
-              : (widget.isFirstSetup
-                  ? 'Профиль мастера'
-                  : 'Мой профиль мастера'),
-        ),
+        title: Text(_isSalon ? 'Профиль салона' : 'Мой профиль'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -651,43 +559,25 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _emailController,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Логин',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
                 const SizedBox(height: 12),
-                InputDecorator(
+                DropdownButtonFormField<String>(
+                  initialValue: _category,
+                  isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'Категория',
                     border: OutlineInputBorder(),
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   ),
-                  isEmpty: _category == null,
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: _category,
-                      isExpanded: true,
-                      isDense: true,
-                      hint: const Text('Выберите категорию'),
-                      items: _categories
-                          .map(
-                            (c) => DropdownMenuItem(
-                              value: c,
-                              child: Text(c),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: _saving
-                          ? null
-                          : (v) => setState(() => _category = v),
-                    ),
-                  ),
+                  items: _categories
+                      .map(
+                        (c) => DropdownMenuItem(
+                          value: c,
+                          child: Text(c),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _saving
+                      ? null
+                      : (v) => setState(() => _category = v),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -922,9 +812,11 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                 if (!widget.isFirstSetup) ...[
                   const SizedBox(height: 12),
                   FilledButton.tonalIcon(
-                    onPressed: _saving ? null : _changePassword,
-                    icon: const Icon(Icons.lock_outline),
-                    label: const Text('Сменить пароль'),
+                    onPressed: _saving
+                        ? null
+                        : () => showCredentialsEditor(context),
+                    icon: const Icon(Icons.key_outlined),
+                    label: const Text('Изменить логин и пароль'),
                   ),
                   const SizedBox(height: 12),
                   FilledButton.tonalIcon(

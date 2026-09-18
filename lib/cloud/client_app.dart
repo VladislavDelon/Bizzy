@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../currency.dart';
 import '../notifications/push_service.dart';
 import 'cloud_service.dart';
+import 'credentials_dialog.dart';
 import 'geo_service.dart';
 import 'map_screens.dart';
 import 'master_public_profile.dart';
@@ -1912,7 +1913,7 @@ class _ClientProfileTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Профиль')),
+      appBar: AppBar(title: const Text('Мой профиль')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -1978,6 +1979,12 @@ class _ClientProfileTab extends StatelessWidget {
             icon: const Icon(Icons.edit),
             label: const Text('Изменить профиль'),
           ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => showCredentialsEditor(context),
+            icon: const Icon(Icons.key_outlined),
+            label: const Text('Изменить логин и пароль'),
+          ),
           const SizedBox(height: 24),
           FilledButton.tonalIcon(
             onPressed: () => onSignOut(),
@@ -2028,10 +2035,7 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
   final _geo = GeoService();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _emailController = TextEditingController();
   final _addressController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmController = TextEditingController();
   String _avatarUrl = '';
   double? _lat;
   double? _lng;
@@ -2044,7 +2048,6 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
     super.initState();
     _nameController.text = widget.profile.name;
     _phoneController.text = widget.profile.phone;
-    _emailController.text = _cloud.displayLogin;
     _addressController.text = widget.profile.address;
     _avatarUrl = widget.profile.avatarUrl;
     _lat = widget.profile.lat;
@@ -2055,10 +2058,7 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
-    _emailController.dispose();
     _addressController.dispose();
-    _passwordController.dispose();
-    _confirmController.dispose();
     super.dispose();
   }
 
@@ -2142,19 +2142,7 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
     if (_saving) return;
     final name = _nameController.text.trim();
     final phone = _phoneController.text.trim();
-    final login = _emailController.text.trim();
     final address = _addressController.text.trim();
-    final password = _passwordController.text;
-    final confirm = _confirmController.text;
-
-    if (password.isNotEmpty && password != confirm) {
-      setState(() => _error = 'Пароли не совпадают');
-      return;
-    }
-    if (password.isNotEmpty && password.length < 6) {
-      setState(() => _error = 'Пароль должен быть не короче 6 символов');
-      return;
-    }
 
     setState(() {
       _saving = true;
@@ -2184,15 +2172,6 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
         clearLocation: cleared,
       );
 
-      final needLogin =
-          login.isNotEmpty && login != _cloud.displayLogin;
-      if (needLogin || password.isNotEmpty) {
-        await _cloud.updateAuth(
-          login: needLogin ? login : null,
-          password: password.isNotEmpty ? password : null,
-        );
-      }
-
       final updated = await _cloud.myProfile();
       if (!mounted) return;
       if (updated == null) throw Exception('Не удалось загрузить профиль');
@@ -2214,7 +2193,7 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Изменить профиль')),
+      appBar: AppBar(title: const Text('Мой профиль')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -2272,15 +2251,6 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
           ),
           const SizedBox(height: 12),
           TextField(
-            controller: _emailController,
-            autocorrect: false,
-            decoration: const InputDecoration(
-              labelText: 'Логин',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
             controller: _addressController,
             textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(
@@ -2320,22 +2290,12 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _passwordController,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'Новый пароль (оставьте пустым, чтобы не менять)',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _confirmController,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'Повторите новый пароль',
-              border: OutlineInputBorder(),
-            ),
+          FilledButton.tonalIcon(
+            onPressed: _saving
+                ? null
+                : () => showCredentialsEditor(context),
+            icon: const Icon(Icons.key_outlined),
+            label: const Text('Изменить логин и пароль'),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),

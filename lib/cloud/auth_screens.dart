@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../main.dart';
 import 'cloud_service.dart';
 
 /// Анимированный логотип с масштабом, поворотом, появлением и золотым свечением.
@@ -441,10 +442,38 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
+      // Аккаунт мог быть создан до облака — пробуем найти его
+      // в локальной базе и перенести в Supabase с тем же паролем.
+      if (e is AuthException &&
+          e.message.toLowerCase().contains('invalid') &&
+          await _migrateLocalAccount(login, password)) {
+        if (mounted) Navigator.of(context).pop();
+        return;
+      }
       setState(() {
         _busy = false;
         _error = _describeError(e);
       });
+    }
+  }
+
+  /// Перенос старого локального аккаунта в облако: если логин и пароль
+  /// совпадают с локальной базой — регистрируем его в Supabase и входим.
+  Future<bool> _migrateLocalAccount(String login, String password) async {
+    try {
+      final local =
+          await AppointmentsDatabase().authenticate(login, password);
+      if (local == null) return false;
+      await _cloud.signUp(
+        login: login,
+        password: password,
+        role: widget.role,
+        name: local.login,
+      );
+      await _cloud.signIn(login, password);
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 

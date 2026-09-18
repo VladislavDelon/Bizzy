@@ -5340,7 +5340,7 @@ class _MoreTabState extends State<MoreTab> {
           ListTile(
             leading: const Icon(Icons.storefront_outlined),
             title: Text(
-              widget.cloudRole == 'salon' ? 'Профиль салона' : 'Профиль мастера',
+              widget.cloudRole == 'salon' ? 'Профиль салона' : 'Мой профиль',
             ),
             subtitle: const Text('Категория и описание для клиентов'),
             onTap: () => Navigator.of(context).push<void>(

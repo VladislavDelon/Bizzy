@@ -86,10 +86,14 @@ int _parseInt(dynamic value, {int fallback = 0}) {
 bool _isMissingColumn(PostgrestException e, String column) =>
     e.code == '42703' || e.message.contains(column);
 
-/// Имя отсутствующей колонки из ошибки PGRST204
-/// («Could not find the 'avatar_url' column of 'profiles'...»).
+/// Имя отсутствующей колонки из ошибки Postgrest:
+/// PGRST204 «Could not find the 'avatar_url' column of 'profiles'...»
+/// или 42703 «column master_profiles.address does not exist».
 String? _missingColumnName(PostgrestException e) =>
-    RegExp(r"'(\w+)' column").firstMatch(e.message)?.group(1);
+    RegExp(r"'(\w+)' column").firstMatch(e.message)?.group(1) ??
+    RegExp(r'column\s+(?:\w+\.)?(\w+)\s+does not exist')
+        .firstMatch(e.message)
+        ?.group(1);
 
 /// Выполняет [run] с [payload]; при PGRST204 выкидывает отсутствующую
 /// колонку из payload и повторяет — старые базы без свежих миграций
@@ -722,6 +726,8 @@ class CloudService {
         email: email,
         password:
             password?.isNotEmpty == true ? hardPassword(password!) : null,
+        // Дублируем логин в metadata — displayLogin читает его оттуда.
+        data: login == null || login.isEmpty ? null : {'login': login.trim()},
       ),
     );
     if (res.user == null) {

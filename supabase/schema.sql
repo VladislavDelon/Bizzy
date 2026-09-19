@@ -11,6 +11,8 @@ create table if not exists public.profiles (
   address text not null default '',
   lat double precision,
   lng double precision,
+  -- Клиент сам решает, виден ли его номер мастерам.
+  phone_public boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -75,8 +77,17 @@ create table if not exists public.master_profiles (
   prepay_enabled boolean not null default false,
   prepay_amount numeric not null default 0,
   prepay_link text not null default '',
+  -- Салонная команда: мастер привязан к салону; у салона — ключ регистрации
+  -- мастеров и флаг автоназначения заявок.
+  salon_id uuid references public.profiles(id) on delete set null,
+  salon_key text,
+  auto_assign boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+create unique index if not exists master_profiles_salon_key_uidx
+  on public.master_profiles (salon_key)
+  where salon_key is not null;
 
 -- ========== УСЛУГИ МАСТЕРА (облако) ==========
 create table if not exists public.services (
@@ -413,3 +424,79 @@ create policy "client_reviews_update" on public.client_reviews
   for update using (auth.uid() = master_id) with check (auth.uid() = master_id);
 create policy "client_reviews_delete" on public.client_reviews
   for delete using (auth.uid() = master_id);
+
+-- ========== САЛОННАЯ КОМАНДА ==========
+-- Салон читает заявки своих мастеров.
+drop policy if exists "appt_select_salon_team" on public.appointments;
+create policy "appt_select_salon_team" on public.appointments
+  for select using (
+    exists (
+      select 1 from public.master_profiles mp
+      where mp.user_id = appointments.master_id
+        and mp.salon_id = auth.uid()
+    )
+  );
+
+-- Салон меняет заявки команды (назначить/переназначить мастера).
+drop policy if exists "appt_update_salon_team" on public.appointments;
+create policy "appt_update_salon_team" on public.appointments
+  for update using (
+    exists (
+      select 1 from public.master_profiles mp
+      where mp.user_id = appointments.master_id
+        and mp.salon_id = auth.uid()
+    )
+  ) with check (
+    auth.uid() = master_id
+    or exists (
+      select 1 from public.master_profiles mp
+      where mp.user_id = appointments.master_id
+        and mp.salon_id = auth.uid()
+    )
+  );
+
+-- Салон открепляет мастера (salon_id -> null) в чужой карточке своей команды.
+drop policy if exists "mp_update_salon_team" on public.master_profiles;
+create policy "mp_update_salon_team" on public.master_profiles
+  for update using (salon_id = auth.uid())
+  with check (salon_id is null or salon_id = auth.uid());
+
+-- Салон видит профили клиентов, записавшихся к его мастерам.
+drop policy if exists "profiles_select_team_clients" on public.profiles;
+create policy "profiles_select_team_clients" on public.profiles
+  for select using (
+    exists (
+      select 1
+      from public.appointments a
+      join public.master_profiles mp on mp.user_id = a.master_id
+      where a.client_id = profiles.id
+        and mp.salon_id = auth.uid()
+    )
+  );
+
+-- Автоназначение: наименее загруженный мастер салона на дату.
+-- security definer — клиенту не нужны права на чужие записи.
+create or replace function public.pick_salon_master(p_salon uuid, p_day date)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_master uuid;
+begin
+  select mp.user_id into v_master
+  from public.master_profiles mp
+  where mp.salon_id = p_salon
+  order by (
+    select count(*)
+    from public.appointments a
+    where a.master_id = mp.user_id
+      and a.starts_at >= p_day::timestamptz
+      and a.starts_at < (p_day + 1)::timestamptz
+      and a.status <> 'cancelled'
+  ) asc, mp.user_id
+  limit 1;
+  return v_master;
+end;
+$$;

@@ -386,6 +386,7 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
   final _loginController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
+  final _salonKeyController = TextEditingController();
   final _cloud = CloudService();
   bool _registerMode = false;
   bool _busy = false;
@@ -397,6 +398,7 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
     _loginController.dispose();
     _passwordController.dispose();
     _nameController.dispose();
+    _salonKeyController.dispose();
     super.dispose();
   }
 
@@ -435,6 +437,7 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
           password: password,
           role: widget.role,
           name: _nameController.text.trim(),
+          salonKey: _salonKeyController.text.trim(),
         );
       } else {
         await _cloud.signIn(login, password);
@@ -591,6 +594,26 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
                     ),
                   ),
                 ),
+                if (_registerMode && widget.role == 'master') ...[
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _salonKeyController,
+                    enabled: !_busy,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Ключ салона (необязательно)',
+                      hintText: 'BZ-XXXXXX — если вы сотрудник салона',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Без ключа вы регистрируетесь как самозанятый мастер',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: 16),
                   Text(

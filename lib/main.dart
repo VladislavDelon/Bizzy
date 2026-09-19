@@ -7,6 +7,7 @@ import 'package:bizzy_app/cloud/auth_screens.dart';
 import 'package:bizzy_app/cloud/client_app.dart';
 import 'package:bizzy_app/cloud/cloud_service.dart';
 import 'package:bizzy_app/cloud/master_screens.dart';
+import 'package:bizzy_app/cloud/supabase_config.dart';
 import 'package:bizzy_app/currency.dart';
 import 'package:bizzy_app/notifications/notifications_screen.dart';
 import 'package:bizzy_app/notifications/push_service.dart';
@@ -78,16 +79,12 @@ Future<void> _loadCurrency() async {
   appCurrency.value = Currency.fromString(prefs.getString('bizzy_currency'));
 }
 
-const _supabaseUrl = 'https://ngnikkkjxyfhnnwqbzma.supabase.co';
-const _supabasePublishableKey =
-    'sb_publishable_K_sBU9qflN7ybTtSSXtjTw_H6CtqpNO';
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await TaskNotificationService.init();
   await Supabase.initialize(
-    url: _supabaseUrl,
-    publishableKey: _supabasePublishableKey,
+    url: supabaseUrl,
+    publishableKey: supabasePublishableKey,
   );
   await initializeDateFormatting('ru_RU', null);
   await _loadTheme();
@@ -3284,13 +3281,15 @@ class _MainShellState extends State<MainShell> {
         onDelete: _deleteAppointment,
         onTasksChanged: _loadTasks,
       ),
-      // У салона вторая вкладка — справочник мастеров,
-      // у частного мастера — «Мои дела» (у салона они в «Ещё»).
+      // У салона вторая вкладка — команда мастеров (ключ + облачный
+      // список + локальный справочник), у частного мастера — «Мои дела».
       widget.cloudRole == 'salon'
-          ? ContactsScreen(
-              database: _db,
-              type: ContactType.master,
-              companyId: widget.company.id,
+          ? SalonTeamScreen(
+              localDirectory: ContactsScreen(
+                database: _db,
+                type: ContactType.master,
+                companyId: widget.company.id,
+              ),
             )
           : TasksScreen(
               database: _db,
@@ -3925,6 +3924,9 @@ class _ClientsTabState extends State<ClientsTab> {
   bool _failed = false;
   bool _showFinance = false;
 
+  /// Облачные профили по clientId — имя, «на Bizzy с…», телефон.
+  Map<String, CloudProfile> _clientProfiles = {};
+
   @override
   void initState() {
     super.initState();
@@ -3954,12 +3956,34 @@ class _ClientsTabState extends State<ClientsTab> {
         return db.compareTo(da);
       });
       setState(() => _contacts = contacts);
+      _loadClientProfiles(contacts);
     } catch (_) {
       if (!mounted) return;
       setState(() => _failed = true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// Подтягивает профили облачных клиентов (дата регистрации, имя).
+  Future<void> _loadClientProfiles(List<Contact> contacts) async {
+    if (!cloudSignedIn) return;
+    final ids = contacts
+        .map((c) => c.clientId)
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty) return;
+    try {
+      final cloud = CloudService();
+      final profiles = <String, CloudProfile>{};
+      for (final id in ids) {
+        final p = await cloud.profileById(id);
+        if (p != null) profiles[id] = p;
+      }
+      if (!mounted || profiles.isEmpty) return;
+      setState(() => _clientProfiles = profiles);
+    } catch (_) {}
   }
 
   Future<void> _addClient() async {
@@ -4016,6 +4040,107 @@ class _ClientsTabState extends State<ClientsTab> {
         const SnackBar(content: Text('Не удалось удалить клиента')),
       );
     }
+  }
+
+  /// Карточка «Информация» о клиенте: имя, телефон, «на Bizzy с…»,
+  /// отзывы мастеров о нём. Для облачного клиента (clientId не пуст)
+  /// подтягивает профиль и отзывы из Supabase.
+  Future<void> _showClientInfo(Contact contact) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(contact.name),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: contact.clientId.isEmpty
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (contact.phone.isNotEmpty)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.phone_outlined),
+                        title: Text(contact.phone),
+                      ),
+                    const Text('Локальный клиент — облачных данных нет.'),
+                  ],
+                )
+              : FutureBuilder<List<Object?>>(
+                  future: Future.wait([
+                    CloudService().profileById(contact.clientId),
+                    CloudService().clientReviews(contact.clientId),
+                  ]),
+                  builder: (context, snap) {
+                    if (!snap.hasData) {
+                      return const SizedBox(
+                        height: 80,
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    final p = snap.data![0] as CloudProfile?;
+                    final reviews = snap.data![1] as List<ClientReview>;
+                    final phone = contact.phone.isNotEmpty
+                        ? contact.phone
+                        : ((p != null && p.phonePublic) ? p.phone : '');
+                    return ListView(
+                      shrinkWrap: true,
+                      children: [
+                        if (p?.createdAt != null)
+                          Text(
+                            bizzySince(p!.createdAt),
+                            style:
+                                Theme.of(context).textTheme.bodySmall,
+                          ),
+                        if (phone.isNotEmpty)
+                          ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.phone_outlined),
+                            title: Text(phone),
+                            onTap: () =>
+                                launchUrl(Uri.parse('tel:$phone')),
+                          ),
+                        const SizedBox(height: 8),
+                        Text(
+                          reviews.isEmpty
+                              ? 'Отзывов о клиенте пока нет'
+                              : 'Отзывы мастеров (${reviews.length})',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        for (final r in reviews)
+                          ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.star,
+                                    size: 16, color: Colors.amber),
+                                Text('${r.rating}'),
+                              ],
+                            ),
+                            title: Text(r.comment.isEmpty
+                                ? 'Без комментария'
+                                : r.comment),
+                            subtitle: r.masterName.isNotEmpty
+                                ? Text(r.masterName)
+                                : null,
+                          ),
+                      ],
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Закрыть'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _openClientDetail(Contact contact) async {
@@ -4198,6 +4323,13 @@ class _ClientsTabState extends State<ClientsTab> {
                             itemCount: contacts.length,
                             itemBuilder: (context, index) {
                               final contact = contacts[index];
+                              final cloud = _clientProfiles[contact.clientId];
+                              // Реальное имя из облака приоритетнее
+                              // имени из записи («Клиент» и т.п.).
+                              final displayName = (cloud != null &&
+                                      cloud.name.isNotEmpty)
+                                  ? cloud.name
+                                  : contact.name;
                               return Card(
                                 margin: const EdgeInsets.symmetric(
                                   horizontal: 12,
@@ -4212,13 +4344,20 @@ class _ClientsTabState extends State<ClientsTab> {
                                         ? const Icon(Icons.person_outline)
                                         : null,
                                   ),
-                                  title: Text(contact.name),
+                                  title: Text(displayName),
                                   subtitle: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
                                       if (contact.phone.isNotEmpty)
                                         Text(contact.phone),
+                                      if (cloud?.createdAt != null)
+                                        Text(
+                                          bizzySince(cloud!.createdAt),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall,
+                                        ),
                                       if (contact.lastService.isNotEmpty)
                                         _priceText(
                                           contact.lastPrice,
@@ -4235,13 +4374,19 @@ class _ClientsTabState extends State<ClientsTab> {
                                   ),
                                   trailing: PopupMenuButton<String>(
                                     onSelected: (value) {
-                                      if (value == 'edit') {
+                                      if (value == 'info') {
+                                        _showClientInfo(contact);
+                                      } else if (value == 'edit') {
                                         _editClient(contact);
                                       } else if (value == 'delete') {
                                         _deleteClient(contact);
                                       }
                                     },
                                     itemBuilder: (context) => const [
+                                      PopupMenuItem(
+                                        value: 'info',
+                                        child: Text('Информация'),
+                                      ),
                                       PopupMenuItem(
                                         value: 'edit',
                                         child: Text('Редактировать'),
@@ -5317,25 +5462,28 @@ class _MoreTabState extends State<MoreTab> {
                   'Нет интернета. Доступны локальные записи и «Мои дела».'),
             ),
           ),
-        ListTile(
-          leading: const Icon(Icons.task_alt),
-          title: const Text('Мои дела'),
-          subtitle: const Text('Личные задачи и напоминания'),
-          onTap: () {
-            final mainShell =
-                context.findAncestorStateOfType<_MainShellState>();
-            Navigator.of(context)
-                .push<void>(
-                  MaterialPageRoute(
-                    builder: (context) => TasksScreen(
-                      database: widget.database,
-                      user: widget.user,
+        // У частного мастера «Мои дела» уже на главной панели —
+        // в «Ещё» они остаются только у салона.
+        if (widget.cloudRole != 'master')
+          ListTile(
+            leading: const Icon(Icons.task_alt),
+            title: const Text('Мои дела'),
+            subtitle: const Text('Личные задачи и напоминания'),
+            onTap: () {
+              final mainShell =
+                  context.findAncestorStateOfType<_MainShellState>();
+              Navigator.of(context)
+                  .push<void>(
+                    MaterialPageRoute(
+                      builder: (context) => TasksScreen(
+                        database: widget.database,
+                        user: widget.user,
+                      ),
                     ),
-                  ),
-                )
-                .then((_) => mainShell?.refreshAppointments());
-          },
-        ),
+                  )
+                  .then((_) => mainShell?.refreshAppointments());
+            },
+          ),
         if (cloudSignedIn && !widget.offlineMode) ...[
           ListTile(
             leading: const Icon(Icons.storefront_outlined),

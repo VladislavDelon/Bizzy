@@ -5,6 +5,8 @@ import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'supabase_config.dart';
+
 /// Точка доступа к Supabase-клиенту.
 SupabaseClient get supabase => Supabase.instance.client;
 
@@ -151,6 +153,28 @@ extension _ResilientSelect on CloudService {
   }
 }
 
+/// «На Bizzy с …»: человекочитаемый стаж аккаунта.
+String bizzySince(DateTime? createdAt) {
+  if (createdAt == null) return '';
+  final days = DateTime.now().difference(createdAt).inDays;
+  if (days < 30) return 'новичок на Bizzy';
+  const months = [
+    'января',
+    'февраля',
+    'марта',
+    'апреля',
+    'мая',
+    'июня',
+    'июля',
+    'августа',
+    'сентября',
+    'октября',
+    'ноября',
+    'декабря',
+  ];
+  return 'на Bizzy с ${months[createdAt.month - 1]} ${createdAt.year}';
+}
+
 double _parseDouble(dynamic value, {double fallback = 0}) {
   if (value == null) return fallback;
   if (value is double) return value;
@@ -240,6 +264,8 @@ class CloudProfile {
     this.address = '',
     this.lat,
     this.lng,
+    this.createdAt,
+    this.phonePublic = true,
   });
 
   final String id;
@@ -250,6 +276,10 @@ class CloudProfile {
   final String address;
   final double? lat;
   final double? lng;
+  final DateTime? createdAt;
+
+  /// Клиент разрешает показывать свой номер мастерам/салонам.
+  final bool phonePublic;
 
   bool get isMaster => role == 'master';
   bool get isSalon => role == 'salon';
@@ -265,6 +295,8 @@ class CloudProfile {
         address: _parseString(map['address']),
         lat: map['lat'] == null ? null : _parseDouble(map['lat']),
         lng: map['lng'] == null ? null : _parseDouble(map['lng']),
+        createdAt: _parseDateTime(map['created_at']),
+        phonePublic: _parseBool(map['phone_public'], fallback: true),
       );
 
   Map<String, dynamic> toMap() => {
@@ -276,6 +308,8 @@ class CloudProfile {
         'address': address,
         'lat': lat,
         'lng': lng,
+        'created_at': createdAt?.toIso8601String(),
+        'phone_public': phonePublic,
       };
 }
 
@@ -299,6 +333,10 @@ class MasterCard {
     this.prepayEnabled = false,
     this.prepayAmount = 0,
     this.prepayLink = '',
+    this.createdAt,
+    this.salonId,
+    this.salonKey = '',
+    this.autoAssign = false,
   });
 
   final String userId;
@@ -324,6 +362,18 @@ class MasterCard {
 
   /// Pay-ссылка банка мастера (Kaspi, Halyk и т.п.).
   final String prepayLink;
+
+  /// Дата регистрации профиля — «на Bizzy с …».
+  final DateTime? createdAt;
+
+  /// id салона-работодателя (null — самозанятый мастер).
+  final String? salonId;
+
+  /// Уникальный ключ салона для регистрации его мастеров.
+  final String salonKey;
+
+  /// Салон: автоматически распределять заявки между своими мастерами.
+  final bool autoAssign;
 
   bool get hasLocation => lat != null && lng != null;
   bool get isSalon => role == 'salon';
@@ -358,6 +408,12 @@ class MasterCard {
       prepayEnabled: _parseBool(map['prepay_enabled'], fallback: false),
       prepayAmount: _parseDouble(map['prepay_amount']),
       prepayLink: _parseString(map['prepay_link']),
+      createdAt: _parseDateTime(profile?['created_at']),
+      salonId: map['salon_id'] == null
+          ? null
+          : _parseString(map['salon_id']),
+      salonKey: _parseString(map['salon_key']),
+      autoAssign: _parseBool(map['auto_assign'], fallback: false),
     );
   }
 
@@ -654,6 +710,7 @@ class CloudService {
     required String role,
     String name = '',
     String phone = '',
+    String salonKey = '',
   }) =>
       supabase.auth.signUp(
         email: loginToEmail(login),
@@ -664,6 +721,7 @@ class CloudService {
           'name': name.isEmpty ? login.trim() : name,
           'phone': phone,
           'login': login.trim(),
+          if (salonKey.isNotEmpty) 'salon_key': salonKey,
         },
       );
 
@@ -707,6 +765,7 @@ class CloudService {
     String? address,
     double? lat,
     double? lng,
+    bool? phonePublic,
     bool clearLocation = false,
   }) =>
       _runWithMissingColumnFallback(<String, dynamic>{
@@ -716,6 +775,7 @@ class CloudService {
         'address': ?address,
         'lat': ?lat,
         'lng': ?lng,
+        'phone_public': ?phonePublic,
         if (clearLocation) ...{'lat': null, 'lng': null},
       }, (p) => supabase.from('profiles').update(p).eq('id', uid!));
 
@@ -777,6 +837,9 @@ class CloudService {
       'prepay_enabled',
       'prepay_amount',
       'prepay_link',
+      'salon_id',
+      'salon_key',
+      'auto_assign',
     ];
     try {
       final rows = await _selectResilient(
@@ -793,7 +856,7 @@ class CloudService {
       try {
         final profiles = await _selectResilient(
           'profiles',
-          const ['id', 'name', 'phone', 'role'],
+          const ['id', 'name', 'phone', 'role', 'created_at', 'phone_public'],
           inColumn: 'role',
           inValues: const ['master', 'salon'],
         );
@@ -846,6 +909,9 @@ class CloudService {
       'prepay_enabled',
       'prepay_amount',
       'prepay_link',
+      'salon_id',
+      'salon_key',
+      'auto_assign',
     ];
     final rows = await _selectResilient(
       'master_profiles',
@@ -858,12 +924,13 @@ class CloudService {
 
     Map<String, dynamic>? profile;
     try {
-      final p = await supabase
-          .from('profiles')
-          .select('id, name, phone, role')
-          .eq('id', masterId)
-          .maybeSingle();
-      if (p != null) profile = p;
+      final p = await _selectResilient(
+        'profiles',
+        const ['id', 'name', 'phone', 'role', 'created_at', 'phone_public'],
+        eqColumn: 'id',
+        eqValue: masterId,
+      );
+      if (p.isNotEmpty) profile = p.first as Map<String, dynamic>;
     } catch (_) {}
 
     return MasterCard.fromMap(
@@ -880,10 +947,20 @@ class CloudService {
 
   /// Создаёт пустую карточку мастера/салона, если её ещё нет —
   /// чтобы аккаунт сразу был виден клиентам в каталоге.
+  /// Мастеру с ключом салона в metadata сразу ставит привязку.
   Future<void> ensureMasterCard() async {
     if (uid == null) return;
-    if (await myMasterCard() != null) return;
-    await upsertMasterProfile(category: 'Другое', description: '');
+    if (await myMasterCard() == null) {
+      await upsertMasterProfile(category: 'Другое', description: '');
+      final meta = supabase.auth.currentUser?.userMetadata ?? const {};
+      if (meta['role'] == 'master') {
+        try {
+          await _applySalonKeyIfAny();
+        } catch (e, st) {
+          await SyncLog.write('salon_key_apply', '$e\n$st');
+        }
+      }
+    }
   }
 
   Future<void> upsertMasterProfile({
@@ -1253,13 +1330,16 @@ class CloudService {
         'prepay_enabled',
         'prepay_amount',
         'prepay_link',
+        'salon_id',
+        'salon_key',
+        'auto_assign',
       ],
       inColumn: 'user_id',
       inValues: ids.toList(),
     );
     final profileRows = await _selectResilient(
       'profiles',
-      const ['id', 'name', 'phone', 'role'],
+      const ['id', 'name', 'phone', 'role', 'created_at', 'phone_public'],
       inColumn: 'id',
       inValues: ids.toList(),
     );
@@ -1524,6 +1604,183 @@ class CloudService {
 
   Future<void> deleteMasterAppointment(int id) =>
       supabase.from('master_appointments').delete().eq('id', id);
+
+  // ---------- Salon team (мастера салона) ----------
+
+  /// Профиль любого пользователя по id — для «Информации» о клиенте.
+  Future<CloudProfile?> profileById(String id) async {
+    final rows = await _selectResilient(
+      'profiles',
+      const [
+        'id',
+        'name',
+        'phone',
+        'role',
+        'created_at',
+        'phone_public',
+        'avatar_url'
+      ],
+      eqColumn: 'id',
+      eqValue: id,
+    );
+    if (rows.isEmpty) return null;
+    return CloudProfile.fromMap(rows.first as Map<String, dynamic>);
+  }
+
+  /// Мастера, привязанные к моему салону (master_profiles.salon_id = я).
+  Future<List<MasterCard>> salonMasters() async {
+    final rows = await _selectResilient(
+      'master_profiles',
+      const [
+        'user_id',
+        'category',
+        'description',
+        'address',
+        'lat',
+        'lng',
+        'social',
+        'phone_public',
+        'avatar_url',
+        'rating_avg',
+        'rating_count',
+        'prepay_enabled',
+        'prepay_amount',
+        'prepay_link',
+        'salon_id',
+        'salon_key',
+        'auto_assign',
+      ],
+      eqColumn: 'salon_id',
+      eqValue: uid!,
+    );
+    if (rows.isEmpty) return [];
+    final ids = [for (final r in rows) _parseString(r['user_id'])];
+    final profileRows = await _selectResilient(
+      'profiles',
+      const ['id', 'name', 'phone', 'role', 'created_at', 'phone_public'],
+      inColumn: 'id',
+      inValues: ids,
+    );
+    final profileMap = <String, Map<String, dynamic>>{
+      for (final p in profileRows) _parseString(p['id']): p,
+    };
+    return [
+      for (final r in rows)
+        MasterCard.fromMap(
+          r as Map<String, dynamic>,
+          fallbackProfile: profileMap[_parseString(r['user_id'])],
+        ),
+    ];
+  }
+
+  /// Уникальный ключ салона: возвращает существующий или генерирует.
+  /// Мастера вводят его при регистрации, чтобы привязаться к салону.
+  Future<String> ensureSalonKey() async {
+    await ensureMasterCard();
+    final card = await myMasterCard();
+    if (card != null && card.salonKey.isNotEmpty) return card.salonKey;
+    final key =
+        'BZ-${uid!.replaceAll('-', '').substring(0, 6).toUpperCase()}';
+    await supabase
+        .from('master_profiles')
+        .update({'salon_key': key}).eq('user_id', uid!);
+    return key;
+  }
+
+  /// Привязка мастера к салону по ключу из metadata регистрации.
+  /// Вызывается при создании карточки мастера.
+  Future<void> _applySalonKeyIfAny() async {
+    final meta = supabase.auth.currentUser?.userMetadata ?? const {};
+    final key = meta['salon_key'];
+    if (key is! String || key.trim().isEmpty) return;
+    final rows = await supabase
+        .from('master_profiles')
+        .select('user_id')
+        .eq('salon_key', key.trim())
+        .neq('user_id', uid!);
+    if (rows.isEmpty) return;
+    await supabase
+        .from('master_profiles')
+        .update({'salon_id': rows.first['user_id']})
+        .eq('user_id', uid!);
+  }
+
+  /// Салон: открепить мастера (он становится самозанятым).
+  Future<void> detachMaster(String masterId) => supabase
+      .from('master_profiles')
+      .update({'salon_id': null}).eq('user_id', masterId);
+
+  /// Салон: создать аккаунт мастера, не выходя из своей сессии —
+  /// регистрация идёт через отдельный SupabaseClient.
+  /// Возвращает null при успехе или текст ошибки.
+  Future<String?> createMasterAccount({
+    required String login,
+    required String password,
+    required String name,
+    required String phone,
+  }) async {
+    final key = await ensureSalonKey();
+    final temp = SupabaseClient(supabaseUrl, supabasePublishableKey);
+    try {
+      await temp.auth.signUp(
+        email: loginToEmail(login),
+        password: hardPassword(password),
+        data: {
+          'role': 'master',
+          'name': name,
+          'phone': phone,
+          'login': login.trim(),
+          'salon_key': key,
+        },
+      );
+      return null;
+    } on AuthException catch (e) {
+      return e.message;
+    } finally {
+      await temp.dispose();
+    }
+  }
+
+  /// Салон: переключатель автоназначения заявок на мастеров.
+  Future<void> setAutoAssign(bool value) => supabase
+      .from('master_profiles')
+      .update({'auto_assign': value}).eq('user_id', uid!);
+
+  /// Салон: назначить заявку конкретному мастеру.
+  Future<void> assignBooking(int bookingId, String masterId) => supabase
+      .from('appointments')
+      .update({'master_id': masterId}).eq('id', bookingId);
+
+  /// Заявки салона: свои + все записи своих мастеров.
+  Future<List<CloudBooking>> salonBookings() async {
+    final team = <String>{uid!};
+    for (final m in await salonMasters()) {
+      if (m.userId.isNotEmpty) team.add(m.userId);
+    }
+    final rows = await supabase
+        .from('appointments')
+        .select(
+            '*, client:profiles!appointments_client_id_fkey(name, phone)')
+        .inFilter('master_id', team.toList())
+        .order('starts_at');
+    return [for (final r in rows) CloudBooking.fromMap(r)];
+  }
+
+  /// Автоназначение: мастер салона с наименьшим числом записей
+  /// на выбранную дату — через RPC pick_salon_master (security
+  /// definer, клиенту не нужны права на чужие записи).
+  /// Возвращает null, если мастеров нет или функция не задеплоена.
+  Future<String?> pickSalonMaster(String salonId, DateTime day) async {
+    final res = await supabase.rpc(
+      'pick_salon_master',
+      params: {
+        'p_salon': salonId,
+        'p_day':
+            '${day.year.toString().padLeft(4, '0')}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}',
+      },
+    );
+    return res == null ? null : _parseString(res);
+  }
 }
 
 /// Клиент мастера в облаке.

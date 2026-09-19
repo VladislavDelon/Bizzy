@@ -506,6 +506,12 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
                                       ),
                                     ],
                                   ),
+                                if (bizzySince(m.createdAt).isNotEmpty)
+                                  Text(
+                                    bizzySince(m.createdAt),
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                  ),
                               ],
                             ),
                             isThreeLine: true,
@@ -1030,8 +1036,18 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
       _time.minute,
     );
     try {
+      var masterId = widget.master.userId;
+      // Салон с автоназначением: заявку получает наименее
+      // загруженный на дату мастер. При ошибке — как раньше, салону.
+      if (widget.master.isSalon && widget.master.autoAssign) {
+        try {
+          final picked =
+              await _cloud.pickSalonMaster(masterId, startsAt);
+          if (picked != null) masterId = picked;
+        } catch (_) {}
+      }
       final booking = await _cloud.bookAppointment(
-        masterId: widget.master.userId,
+        masterId: masterId,
         serviceId: _service?.id,
         serviceName: _service?.name ?? custom,
         startsAt: startsAt,
@@ -2057,6 +2073,7 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
   String _avatarUrl = '';
   double? _lat;
   double? _lng;
+  bool _phonePublic = true;
   bool _pickingAvatar = false;
   bool _saving = false;
   String? _error;
@@ -2070,6 +2087,7 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
     _avatarUrl = widget.profile.avatarUrl;
     _lat = widget.profile.lat;
     _lng = widget.profile.lng;
+    _phonePublic = widget.profile.phonePublic;
   }
 
   @override
@@ -2187,6 +2205,7 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
         address: address,
         lat: cleared ? null : lat,
         lng: cleared ? null : lng,
+        phonePublic: _phonePublic,
         clearLocation: cleared,
       );
 
@@ -2265,6 +2284,34 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
             decoration: const InputDecoration(
               labelText: 'Телефон',
               border: OutlineInputBorder(),
+            ),
+          ),
+          InkWell(
+            onTap: _saving
+                ? null
+                : () => setState(() => _phonePublic = !_phonePublic),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Checkbox(
+                    value: _phonePublic,
+                    onChanged: _saving
+                        ? null
+                        : (v) => setState(() => _phonePublic = v ?? false),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  Expanded(
+                    child: Text(
+                      'Показывать номер мастерам и салонам',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 12),

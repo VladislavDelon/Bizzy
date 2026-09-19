@@ -854,6 +854,11 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
   bool _loading = true;
   bool _failed = false;
 
+  /// Салон: мастера команды и флаг автоназначения.
+  bool _isSalon = false;
+  List<MasterCard> _team = [];
+  bool _autoAssign = false;
+
   @override
   void initState() {
     super.initState();
@@ -863,13 +868,37 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
   Set<int> get _reviewedBookingIds =>
       _myClientReviews.map((r) => r.bookingId).toSet();
 
+  /// Имя исполнителя заявки для салона (пусто — сам салон).
+  String _masterLabel(String masterId) {
+    if (masterId == _cloud.uid) return '';
+    for (final m in _team) {
+      if (m.userId == masterId) {
+        return m.name.isEmpty ? 'Мастер' : m.name;
+      }
+    }
+    return '';
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _failed = false;
     });
     try {
-      final bookings = await _cloud.masterBookings();
+      final profile = await _cloud.myProfile();
+      final isSalon = profile?.isSalon ?? false;
+      List<MasterCard> team = [];
+      var autoAssign = false;
+      List<CloudBooking> bookings;
+      if (isSalon) {
+        try {
+          team = await _cloud.salonMasters();
+          autoAssign = (await _cloud.myMasterCard())?.autoAssign ?? false;
+        } catch (_) {}
+        bookings = await _cloud.salonBookings();
+      } else {
+        bookings = await _cloud.masterBookings();
+      }
       List<ClientReview> reviews = [];
       try {
         reviews = await _cloud.myClientReviews();
@@ -878,6 +907,9 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
       }
       if (!mounted) return;
       setState(() {
+        _isSalon = isSalon;
+        _team = team;
+        _autoAssign = autoAssign;
         _bookings = bookings;
         _myClientReviews = reviews;
         _loading = false;
@@ -889,6 +921,85 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
         _failed = true;
         _loading = false;
       });
+    }
+  }
+
+  /// Салон: выбор мастера для заявки.
+  Future<void> _assignTo(CloudBooking b) async {
+    if (_team.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Сначала добавьте мастеров во вкладке «Мастера»')),
+      );
+      return;
+    }
+    final picked = await showDialog<MasterCard>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Назначить мастера'),
+        children: [
+          for (final m in _team)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(m),
+              child: Row(
+                children: [
+                  const Icon(Icons.content_cut, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(m.name.isEmpty ? 'Мастер' : m.name),
+                  ),
+                  if (b.masterId == m.userId)
+                    const Icon(Icons.check, size: 18),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      await _cloud.assignBooking(b.id, picked.userId);
+      if (picked.userId.isNotEmpty) {
+        await PushNotificationService.sendPush(
+          toUserId: picked.userId,
+          title: 'Новая запись',
+          body:
+              'Салон назначил вам заявку на ${b.serviceName} ${_fmt(b.startsAt)}',
+          data: {'appointment_id': b.id, 'status': b.status},
+        );
+      }
+      await _load();
+    } catch (e) {
+      await SyncLog.write('assignBooking', e.toString());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось назначить: $e')),
+      );
+    }
+  }
+
+  /// Салон: переключение «Автоматическое назначение / Вручную».
+  Future<void> _toggleAutoAssign() async {
+    final next = !_autoAssign;
+    try {
+      await _cloud.setAutoAssign(next);
+      if (!mounted) return;
+      setState(() => _autoAssign = next);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            next
+                ? 'Автоназначение включено: заявки распределяются между мастерами'
+                : 'Автоназначение выключено: назначаете вручную',
+          ),
+        ),
+      );
+    } catch (e) {
+      await SyncLog.write('auto_assign', e.toString());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось переключить: $e')),
+      );
     }
   }
 
@@ -998,7 +1109,26 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Заявки клиентов')),
+      appBar: AppBar(
+        title: const Text('Заявки клиентов'),
+        actions: [
+          if (_isSalon)
+            PopupMenuButton<String>(
+              tooltip: 'Назначение записей',
+              onSelected: (v) {
+                if (v == 'auto') _toggleAutoAssign();
+              },
+              itemBuilder: (context) => [
+                CheckedPopupMenuItem(
+                  value: 'auto',
+                  checked: _autoAssign,
+                  child: const Text(
+                      'Автоназначение записей на мастеров'),
+                ),
+              ],
+            ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _failed
@@ -1070,6 +1200,34 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
                                       style:
                                           Theme.of(context).textTheme.bodySmall,
                                     ),
+                                    if (_isSalon &&
+                                        _masterLabel(b.masterId)
+                                            .isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.assignment_ind_outlined,
+                                            size: 16,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Мастер: ${_masterLabel(b.masterId)}',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary,
+                                                ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
                                     if (b.notes.isNotEmpty) ...[
                                       const SizedBox(height: 4),
                                       Text(
@@ -1151,6 +1309,13 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
                                             tooltip: 'Профиль клиента',
                                             onPressed: () => _openClient(b),
                                             icon: const Icon(Icons.person),
+                                          ),
+                                        if (_isSalon)
+                                          IconButton(
+                                            tooltip: 'Назначить мастера',
+                                            onPressed: () => _assignTo(b),
+                                            icon: const Icon(Icons
+                                                .assignment_ind_outlined),
                                           ),
                                         if (b.prepaymentStatus == 'claimed')
                                           FilledButton.tonalIcon(
@@ -1456,6 +1621,452 @@ class _RateClientDialogState extends State<RateClientDialog> {
           child: const Text('Отправить'),
         ),
       ],
+    );
+  }
+}
+
+/// Вкладка «Мастера» у салона: ключ регистрации, команда из облака,
+/// создание аккаунтов мастеров + локальный справочник ниже.
+class SalonTeamScreen extends StatefulWidget {
+  const SalonTeamScreen({
+    super.key,
+    required this.localDirectory,
+  });
+
+  /// Локальный справочник мастеров (ContactsScreen) — встраивается
+  /// под облачным блоком.
+  final Widget localDirectory;
+
+  @override
+  State<SalonTeamScreen> createState() => _SalonTeamScreenState();
+}
+
+class _SalonTeamScreenState extends State<SalonTeamScreen> {
+  final _cloud = CloudService();
+  String _key = '';
+  bool _showKey = false;
+  List<MasterCard> _team = [];
+  bool _loading = true;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    try {
+      final key = await _cloud.ensureSalonKey();
+      final team = await _cloud.salonMasters();
+      if (!mounted) return;
+      setState(() {
+        _key = key;
+        _team = team;
+        _loading = false;
+      });
+    } catch (e, st) {
+      await SyncLog.write('salon_team', '$e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _failed = true;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _copyKey() async {
+    await Clipboard.setData(ClipboardData(text: _key));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Ключ скопирован')),
+    );
+  }
+
+  /// Открепить мастера от салона — он станет самозанятым.
+  Future<void> _detach(MasterCard m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Открепить ${m.name.isEmpty ? 'мастера' : m.name}?'),
+        content: const Text(
+          'Мастер останется в Bizzy как самозанятый и пропадёт из вашей команды.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Открепить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _cloud.detachMaster(m.userId);
+      await _load();
+    } catch (e) {
+      await SyncLog.write('detach_master', e.toString());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось открепить: $e')),
+      );
+    }
+  }
+
+  /// Смена логина/пароля мастера — через Edge Function salon-master-auth.
+  Future<void> _editCredentials(MasterCard m) async {
+    final loginCtrl = TextEditingController();
+    final passCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Данные входа: ${m.name.isEmpty ? 'мастер' : m.name}'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: loginCtrl,
+                autocorrect: false,
+                decoration: const InputDecoration(
+                  labelText: 'Новый логин',
+                  hintText: 'Пусто — не менять',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: passCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Новый пароль',
+                  hintText: 'Пусто — не менять',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (v) => (v != null && v.isNotEmpty && v.length < 6)
+                    ? 'Минимум 6 символов'
+                    : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.of(context).pop(true);
+              }
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+    final login = loginCtrl.text.trim();
+    final password = passCtrl.text;
+    loginCtrl.dispose();
+    passCtrl.dispose();
+    if (ok != true || !mounted) return;
+    if (login.isEmpty && password.isEmpty) return;
+    try {
+      final res = await supabase.functions.invoke(
+        'salon-master-auth',
+        body: {
+          'master_id': m.userId,
+          if (login.isNotEmpty) 'login': login,
+          if (password.isNotEmpty) 'password': password,
+        },
+      );
+      final err = res.data is Map ? res.data['error'] : null;
+      if (err != null) throw Exception('$err');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Данные мастера обновлены')),
+      );
+    } catch (e) {
+      await SyncLog.write('master_credentials', e.toString());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Не удалось обновить: $e\n'
+            'Проверьте, что функция salon-master-auth задеплоена.',
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Создание аккаунта мастера — второй клиент, сессия салона не слетает.
+  Future<void> _createMaster() async {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final loginCtrl = TextEditingController();
+    final passCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    var saving = false;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Аккаунт мастера'),
+          content: Form(
+            key: formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: nameCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Имя мастера',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (v) =>
+                        (v == null || v.trim().length < 2) ? 'Имя?' : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Телефон',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: loginCtrl,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Логин',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (v) {
+                      final s = v?.trim() ?? '';
+                      if (s.length < 3) return 'Минимум 3 символа';
+                      if (s.contains(' ')) return 'Без пробелов';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: passCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Пароль',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (v) => (v == null || v.length < 6)
+                        ? 'Минимум 6 символов'
+                        : null,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Мастер войдёт через «Вход как мастер» с этими логином и паролем.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.of(context).pop(false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (!formKey.currentState!.validate()) return;
+                      setDialogState(() => saving = true);
+                      final err = await _cloud.createMasterAccount(
+                        login: loginCtrl.text.trim(),
+                        password: passCtrl.text,
+                        name: nameCtrl.text.trim(),
+                        phone: phoneCtrl.text.trim(),
+                      );
+                      if (!context.mounted) return;
+                      if (err == null) {
+                        Navigator.of(context).pop(true);
+                      } else {
+                        setDialogState(() => saving = false);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Ошибка: $err')),
+                        );
+                      }
+                    },
+              child: const Text('Создать'),
+            ),
+          ],
+        ),
+      ),
+    );
+    nameCtrl.dispose();
+    phoneCtrl.dispose();
+    loginCtrl.dispose();
+    passCtrl.dispose();
+    if (ok != true || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Аккаунт создан — мастер появится в команде после входа'),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Уникальный ключ для регистрации мастеров',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Отправьте его мастеру — при регистрации он '
+                      'автоматически попадёт в вашу команду.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _key.isEmpty
+                                ? '—'
+                                : (_showKey ? _key : '••••••••'),
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(letterSpacing: 2),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: _showKey ? 'Скрыть' : 'Показать',
+                          onPressed: () =>
+                              setState(() => _showKey = !_showKey),
+                          icon: Icon(
+                            _showKey
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Скопировать',
+                          onPressed: _key.isEmpty ? null : _copyKey,
+                          icon: const Icon(Icons.copy),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_failed)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  const Text('Не удалось загрузить команду'),
+                  TextButton(onPressed: _load, child: const Text('Повторить')),
+                ],
+              ),
+            )
+          else ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Моя команда (${_team.length})',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: _createMaster,
+                    icon: const Icon(Icons.person_add_alt, size: 18),
+                    label: const Text('Создать аккаунт'),
+                  ),
+                ],
+              ),
+            ),
+            if (_team.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Пока никого нет — отправьте ключ мастеру или создайте ему аккаунт.',
+                  textAlign: TextAlign.center,
+                ),
+              )
+            else
+              for (final m in _team)
+                ListTile(
+                  leading: CircleAvatar(
+                    backgroundImage: m.avatarUrl.isNotEmpty
+                        ? NetworkImage(m.avatarUrl)
+                        : null,
+                    child: m.avatarUrl.isEmpty
+                        ? const Icon(Icons.content_cut)
+                        : null,
+                  ),
+                  title: Text(m.name.isEmpty ? 'Мастер' : m.name),
+                  subtitle: Text(m.category),
+                  trailing: PopupMenuButton<String>(
+                    onSelected: (v) {
+                      if (v == 'creds') _editCredentials(m);
+                      if (v == 'detach') _detach(m);
+                    },
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(
+                        value: 'creds',
+                        child: Text('Сменить логин и пароль'),
+                      ),
+                      PopupMenuItem(
+                        value: 'detach',
+                        child: Text('Открепить от салона'),
+                      ),
+                    ],
+                  ),
+                ),
+          ],
+          Divider(color: scheme.outlineVariant),
+          Expanded(child: widget.localDirectory),
+        ],
+      ),
     );
   }
 }

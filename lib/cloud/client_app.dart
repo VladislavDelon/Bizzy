@@ -243,10 +243,11 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
           _favorites.remove(m.userId);
         }
       });
-    } catch (_) {
+    } catch (e) {
+      await SyncLog.write('favorite_toggle', e.toString());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось обновить избранное')),
+        SnackBar(content: Text('Не удалось обновить избранное: $e')),
       );
     }
   }
@@ -545,6 +546,7 @@ class _ClientFavoritesTabState extends State<ClientFavoritesTab> {
   List<MasterCard> _masters = [];
   bool _loading = true;
   bool _failed = false;
+  String? _error;
 
   @override
   void initState() {
@@ -556,6 +558,7 @@ class _ClientFavoritesTabState extends State<ClientFavoritesTab> {
     setState(() {
       _loading = true;
       _failed = false;
+      _error = null;
     });
     try {
       final masters = await _cloud.favoriteMasters();
@@ -564,7 +567,10 @@ class _ClientFavoritesTabState extends State<ClientFavoritesTab> {
     } catch (e, st) {
       await SyncLog.write('client_favorites', '$e\n$st');
       if (!mounted) return;
-      setState(() => _failed = true);
+      setState(() {
+        _failed = true;
+        _error = '$e';
+      });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -576,10 +582,11 @@ class _ClientFavoritesTabState extends State<ClientFavoritesTab> {
       if (!mounted) return;
       setState(
           () => _masters.removeWhere((x) => x.userId == m.userId));
-    } catch (_) {
+    } catch (e) {
+      await SyncLog.write('favorite_remove', e.toString());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось убрать из избранного')),
+        SnackBar(content: Text('Не удалось убрать из избранного: $e')),
       );
     }
   }
@@ -609,6 +616,16 @@ class _ClientFavoritesTabState extends State<ClientFavoritesTab> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Text('Не удалось загрузить избранное'),
+                      if (_error != null)
+                        Padding(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 24),
+                          child: Text(
+                            _error!,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
                       TextButton(
                           onPressed: _load, child: const Text('Повторить')),
                     ],
@@ -740,11 +757,12 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
     setState(() => was ? _favoriteIds.remove(id) : _favoriteIds.add(id));
     try {
       await _cloud.toggleFavorite(id);
-    } catch (_) {
+    } catch (e) {
+      await SyncLog.write('favorite_toggle', e.toString());
       if (mounted) {
         setState(() => was ? _favoriteIds.add(id) : _favoriteIds.remove(id));
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Не удалось обновить избранное')),
+          SnackBar(content: Text('Не удалось обновить избранное: $e')),
         );
       }
     }

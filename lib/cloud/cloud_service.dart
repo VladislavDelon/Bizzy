@@ -334,7 +334,12 @@ class MasterCard {
   }) {
     final profile = _pickProfileMap(map['profiles']) ?? fallbackProfile;
     return MasterCard(
-      userId: _parseString(map['user_id']),
+      // У «бескарточных» провайдеров (собранных из profiles) user_id
+      // в map отсутствует — берём id профиля, иначе избранное и запись
+      // падают на пустом uuid.
+      userId: map['user_id'] != null
+          ? _parseString(map['user_id'])
+          : _parseString(profile?['id']),
       name: profile != null ? _parseString(profile['name']) : '',
       phone: profile != null ? _parseString(profile['phone']) : '',
       role: profile != null
@@ -1300,9 +1305,26 @@ class CloudService {
           .eq('master_id', masterId);
       return false;
     }
-    await supabase
-        .from('favorites')
-        .insert({'client_id': uid, 'master_id': masterId});
+    try {
+      await supabase
+          .from('favorites')
+          .insert({'client_id': uid, 'master_id': masterId});
+    } on PostgrestException catch (e) {
+      // 23505 — уже есть в избранном: считаем успехом.
+      if (e.code == '23505') return true;
+      // 23503 — нет своей строки в profiles (старый аккаунт,
+      // регистрация до триггера): создаём профиль и повторяем.
+      if (e.code != '23503') rethrow;
+      final meta = supabase.auth.currentUser?.userMetadata ?? const {};
+      await ensureProfile(
+        role: meta['role'] as String? ?? 'client',
+        name: meta['name'] as String? ?? '',
+        phone: meta['phone'] as String? ?? '',
+      );
+      await supabase
+          .from('favorites')
+          .insert({'client_id': uid, 'master_id': masterId});
+    }
     return true;
   }
 

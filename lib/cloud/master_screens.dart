@@ -1896,12 +1896,17 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
                   : () async {
                       if (!formKey.currentState!.validate()) return;
                       setDialogState(() => saving = true);
-                      final err = await _cloud.createMasterAccount(
-                        login: loginCtrl.text.trim(),
-                        password: passCtrl.text,
-                        name: nameCtrl.text.trim(),
-                        phone: phoneCtrl.text.trim(),
-                      );
+                      String? err;
+                      try {
+                        err = await _cloud.createMasterAccount(
+                          login: loginCtrl.text.trim(),
+                          password: passCtrl.text,
+                          name: nameCtrl.text.trim(),
+                          phone: phoneCtrl.text.trim(),
+                        );
+                      } catch (e) {
+                        err = e.toString();
+                      }
                       if (!context.mounted) return;
                       if (err == null) {
                         Navigator.of(context).pop(true);

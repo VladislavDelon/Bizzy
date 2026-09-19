@@ -1719,9 +1719,10 @@ class CloudService {
     required String name,
     required String phone,
   }) async {
-    final key = await ensureSalonKey();
-    final temp = SupabaseClient(supabaseUrl, supabasePublishableKey);
+    SupabaseClient? temp;
     try {
+      final key = await ensureSalonKey();
+      temp = SupabaseClient(supabaseUrl, supabasePublishableKey);
       await temp.auth.signUp(
         email: loginToEmail(login),
         password: hardPassword(password),
@@ -1736,8 +1737,12 @@ class CloudService {
       return null;
     } on AuthException catch (e) {
       return e.message;
+    } catch (e) {
+      // Сеть, RLS и прочие не-Auth ошибки — возвращаем текст,
+      // чтобы диалог показал причину, а не завис.
+      return e.toString();
     } finally {
-      await temp.dispose();
+      await temp?.dispose();
     }
   }
 

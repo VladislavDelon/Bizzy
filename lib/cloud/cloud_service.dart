@@ -337,6 +337,7 @@ class MasterCard {
     this.salonId,
     this.salonKey = '',
     this.autoAssign = false,
+    this.managedBySalon = false,
   });
 
   final String userId;
@@ -374,6 +375,10 @@ class MasterCard {
 
   /// Салон: автоматически распределять заявки между своими мастерами.
   final bool autoAssign;
+
+  /// Аккаунт создан салоном через «Новый мастер» — только таким
+  /// салон может менять логин/пароль. Приглашённым — не может.
+  final bool managedBySalon;
 
   bool get hasLocation => lat != null && lng != null;
   bool get isSalon => role == 'salon';
@@ -414,6 +419,8 @@ class MasterCard {
           : _parseString(map['salon_id']),
       salonKey: _parseString(map['salon_key']),
       autoAssign: _parseBool(map['auto_assign'], fallback: false),
+      managedBySalon:
+          _parseBool(map['managed_by_salon'], fallback: false),
     );
   }
 
@@ -840,6 +847,7 @@ class CloudService {
       'salon_id',
       'salon_key',
       'auto_assign',
+      'managed_by_salon',
     ];
     try {
       final rows = await _selectResilient(
@@ -912,6 +920,7 @@ class CloudService {
       'salon_id',
       'salon_key',
       'auto_assign',
+      'managed_by_salon',
     ];
     final rows = await _selectResilient(
       'master_profiles',
@@ -1333,6 +1342,7 @@ class CloudService {
         'salon_id',
         'salon_key',
         'auto_assign',
+        'managed_by_salon',
       ],
       inColumn: 'user_id',
       inValues: ids.toList(),
@@ -1649,6 +1659,7 @@ class CloudService {
         'salon_id',
         'salon_key',
         'auto_assign',
+        'managed_by_salon',
       ],
       eqColumn: 'salon_id',
       eqValue: uid!,
@@ -1699,16 +1710,27 @@ class CloudService {
         .eq('salon_key', key.trim())
         .neq('user_id', uid!);
     if (rows.isEmpty) return;
-    await supabase
-        .from('master_profiles')
-        .update({'salon_id': rows.first['user_id']})
-        .eq('user_id', uid!);
+    // Аккаунт, созданный салоном («salon_managed» в metadata),
+    // помечается managed_by_salon — салону доступны его логин/пароль.
+    await _runWithMissingColumnFallback(
+      {
+        'salon_id': rows.first['user_id'],
+        'managed_by_salon': meta['salon_managed'] == true,
+      },
+      (p) =>
+          supabase.from('master_profiles').update(p).eq('user_id', uid!),
+    );
   }
 
-  /// Салон: открепить мастера (он становится самозанятым).
-  Future<void> detachMaster(String masterId) => supabase
-      .from('master_profiles')
-      .update({'salon_id': null}).eq('user_id', masterId);
+  /// Салон: уволить мастера (он становится самозанятым).
+  Future<void> detachMaster(String masterId) =>
+      _runWithMissingColumnFallback(
+        {'salon_id': null, 'managed_by_salon': false},
+        (p) => supabase
+            .from('master_profiles')
+            .update(p)
+            .eq('user_id', masterId),
+      );
 
   /// Салон: создать аккаунт мастера, не выходя из своей сессии —
   /// регистрация идёт через отдельный SupabaseClient.
@@ -1732,6 +1754,9 @@ class CloudService {
           'phone': phone,
           'login': login.trim(),
           'salon_key': key,
+          // Аккаунт создан салоном — пометится managed_by_salon при
+          // первом входе мастера, тогда салону доступны его логин/пароль.
+          'salon_managed': true,
         },
       );
       return null;
@@ -1785,6 +1810,151 @@ class CloudService {
       },
     );
     return res == null ? null : _parseString(res);
+  }
+
+  /// Поиск самозанятых мастеров по имени, телефону или UUID —
+  /// для приглашения в команду салона. Чужие команды не показываем.
+  Future<List<MasterCard>> searchFreeMasters(String query) async {
+    final q = query.trim();
+    if (q.length < 2) return [];
+    var or = 'name.ilike.%$q%,phone.ilike.%$q%';
+    if (RegExp(r'^[0-9a-fA-F-]{32,36}$').hasMatch(q)) {
+      or += ',id.eq.$q';
+    }
+    final profiles = await supabase
+        .from('profiles')
+        .select('id, name, phone, role, created_at, phone_public')
+        .eq('role', 'master')
+        .or(or)
+        .neq('id', uid!)
+        .limit(20);
+    if (profiles.isEmpty) return [];
+    final ids = [for (final p in profiles) _parseString(p['id'])];
+    final cards = await _selectResilient(
+      'master_profiles',
+      const [
+        'user_id',
+        'category',
+        'description',
+        'address',
+        'lat',
+        'lng',
+        'social',
+        'phone_public',
+        'avatar_url',
+        'rating_avg',
+        'rating_count',
+        'prepay_enabled',
+        'prepay_amount',
+        'prepay_link',
+        'salon_id',
+        'salon_key',
+        'auto_assign',
+        'managed_by_salon',
+      ],
+      inColumn: 'user_id',
+      inValues: ids,
+    );
+    final cardMap = <String, Map<String, dynamic>>{
+      for (final c in cards) _parseString(c['user_id']): c,
+    };
+    return [
+      for (final p in profiles)
+        MasterCard.fromMap(
+          cardMap[_parseString(p['id'])] ?? const {},
+          fallbackProfile: p,
+        ),
+    ];
+  }
+
+  /// Салон → приглашение мастеру в команду.
+  /// Повторное приглашение после отказа снова ставит «pending».
+  Future<void> sendTeamInvite(String masterId) => supabase
+      .from('team_invites')
+      .upsert(
+        {'salon_id': uid, 'master_id': masterId, 'status': 'pending'},
+        onConflict: 'salon_id, master_id',
+      );
+
+  /// Приглашения, отправленные моим салоном (со статусами).
+  Future<List<TeamInvite>> sentTeamInvites() async {
+    final rows = await supabase
+        .from('team_invites')
+        .select('*, master:profiles!team_invites_master_id_fkey(name)')
+        .eq('salon_id', uid!)
+        .order('created_at', ascending: false);
+    return [for (final r in rows) TeamInvite.fromMap(r, isSalonSide: true)];
+  }
+
+  /// Входящие приглашения для мастера (pending — ждут ответа).
+  Future<List<TeamInvite>> myTeamInvites() async {
+    final rows = await supabase
+        .from('team_invites')
+        .select('*, salon:profiles!team_invites_salon_id_fkey(name)')
+        .eq('master_id', uid!)
+        .eq('status', 'pending')
+        .order('created_at', ascending: false);
+    return [for (final r in rows) TeamInvite.fromMap(r)];
+  }
+
+  /// Мастер отвечает на приглашение: при «принять» привязывается
+  /// к салону (salon_id в своей карточке — пишет сам владелец).
+  Future<void> respondTeamInvite(TeamInvite invite, bool accept) async {
+    await supabase
+        .from('team_invites')
+        .update({'status': accept ? 'accepted' : 'declined'})
+        .eq('id', invite.id);
+    if (!accept) return;
+    await supabase
+        .from('master_profiles')
+        .update({'salon_id': invite.salonId})
+        .eq('user_id', uid!);
+  }
+
+  /// Записи конкретного мастера — для салона («Информация о записях»).
+  /// Чтение разрешено политикой appt_select_salon_team.
+  Future<List<CloudBooking>> masterBookingsFor(String masterId) async {
+    final rows = await supabase
+        .from('appointments')
+        .select(
+            '*, client:profiles!appointments_client_id_fkey(name, phone)')
+        .eq('master_id', masterId)
+        .order('starts_at', ascending: false);
+    return [for (final r in rows) CloudBooking.fromMap(r)];
+  }
+}
+
+/// Приглашение мастера в команду салона.
+class TeamInvite {
+  const TeamInvite({
+    required this.id,
+    required this.salonId,
+    required this.masterId,
+    required this.status,
+    required this.createdAt,
+    this.otherName = '',
+  });
+
+  final int id;
+  final String salonId;
+  final String masterId;
+  final String status; // pending | accepted | declined
+  final DateTime? createdAt;
+
+  /// Имя «второй стороны»: для мастера — салон, для салона — мастер.
+  final String otherName;
+
+  factory TeamInvite.fromMap(Map<String, dynamic> map,
+      {bool isSalonSide = false}) {
+    final other = _pickProfileMap(isSalonSide ? map['master'] : map['salon']);
+    return TeamInvite(
+      id: _parseInt(map['id']),
+      salonId: _parseString(map['salon_id']),
+      masterId: _parseString(map['master_id']),
+      status: _parseString(map['status'], fallback: 'pending'),
+      createdAt: _parseDateTime(map['created_at']),
+      otherName: other == null ? '' : _parseString(other['name']),
+    );
   }
 }
 

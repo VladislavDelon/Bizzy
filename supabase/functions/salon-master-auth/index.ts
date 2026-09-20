@@ -55,14 +55,19 @@ Deno.serve(async (req) => {
   } = await caller.auth.getUser();
   if (!user) return json({ error: 'unauthorized' }, 401);
 
-  // Менять можно только мастера, привязанного к этому салону.
+  // Менять можно только мастера, которого салон создал сам
+  // (managed_by_salon). Приглашённым в команду салон личные
+  // данные менять не может.
   const { data: mp } = await caller
     .from('master_profiles')
-    .select('salon_id')
+    .select('salon_id, managed_by_salon')
     .eq('user_id', masterId)
     .maybeSingle();
   if (!mp || mp.salon_id !== user.id) {
     return json({ error: 'master is not in your team' }, 403);
+  }
+  if (mp.managed_by_salon !== true) {
+    return json({ error: 'not salon-managed account' }, 403);
   }
 
   const admin = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');

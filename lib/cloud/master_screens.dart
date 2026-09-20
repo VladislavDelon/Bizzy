@@ -859,6 +859,9 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
   List<MasterCard> _team = [];
   bool _autoAssign = false;
 
+  /// Входящие приглашения от салонов (для мастера).
+  List<TeamInvite> _invites = [];
+
   @override
   void initState() {
     super.initState();
@@ -905,6 +908,10 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
       } catch (e, st) {
         await SyncLog.write('myClientReviews', '$e\n$st');
       }
+      List<TeamInvite> invites = [];
+      try {
+        invites = await _cloud.myTeamInvites();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _isSalon = isSalon;
@@ -912,6 +919,7 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
         _autoAssign = autoAssign;
         _bookings = bookings;
         _myClientReviews = reviews;
+        _invites = invites;
         _loading = false;
       });
     } catch (e, st) {
@@ -999,6 +1007,28 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Не удалось переключить: $e')),
+      );
+    }
+  }
+
+  /// Мастер отвечает на приглашение салона: принять → в команде.
+  Future<void> _respondInvite(TeamInvite invite, bool accept) async {
+    try {
+      await _cloud.respondTeamInvite(invite, accept);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(accept
+              ? 'Вы в команде салона — заявки будут приходить сюда'
+              : 'Приглашение отклонено'),
+        ),
+      );
+      await _load();
+    } catch (e) {
+      await SyncLog.write('team_invite', e.toString());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось ответить: $e')),
       );
     }
   }
@@ -1143,7 +1173,7 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
                 )
               : RefreshIndicator(
                   onRefresh: _load,
-                  child: _bookings.isEmpty
+                  child: _bookings.isEmpty && _invites.isEmpty
                       ? ListView(
                           children: const [
                             SizedBox(height: 120),
@@ -1158,8 +1188,70 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
                         )
                       : ListView.builder(
                           padding: const EdgeInsets.only(bottom: 88),
-                          itemCount: _bookings.length,
+                          itemCount: _invites.length + _bookings.length +
+                              (_bookings.isEmpty ? 1 : 0),
                           itemBuilder: (context, index) {
+                            if (index < _invites.length) {
+                              final inv = _invites[index];
+                              return Card(
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .primaryContainer,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Приглашение в салон',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleSmall,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '«${inv.otherName.isEmpty ? 'Салон' : inv.otherName}» '
+                                        'приглашает вас в свою команду.',
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Wrap(
+                                        spacing: 8,
+                                        children: [
+                                          FilledButton.tonalIcon(
+                                            onPressed: () =>
+                                                _respondInvite(inv, true),
+                                            icon: const Icon(Icons.check),
+                                            label: const Text('Принять'),
+                                          ),
+                                          OutlinedButton(
+                                            onPressed: () =>
+                                                _respondInvite(inv, false),
+                                            child: const Text('Отклонить'),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
+                            index -= _invites.length;
+                            if (_bookings.isEmpty) {
+                              return const Padding(
+                                padding: EdgeInsets.all(32),
+                                child: Center(
+                                  child: Text(
+                                    'Заявок пока нет.',
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              );
+                            }
                             final b = _bookings[index];
                             return Card(
                               margin: const EdgeInsets.symmetric(
@@ -1630,12 +1722,13 @@ class _RateClientDialogState extends State<RateClientDialog> {
 class SalonTeamScreen extends StatefulWidget {
   const SalonTeamScreen({
     super.key,
-    required this.localDirectory,
+    required this.localDirectoryBuilder,
   });
 
-  /// Локальный справочник мастеров (ContactsScreen) — встраивается
-  /// под облачным блоком.
-  final Widget localDirectory;
+  /// Локальный справочник мастеров — встраивается под облачным
+  /// блоком. [onAddMaster] пробрасывается в FAB «Новый мастер»,
+  /// чтобы кнопка создавала облачный аккаунт.
+  final Widget Function(VoidCallback onAddMaster) localDirectoryBuilder;
 
   @override
   State<SalonTeamScreen> createState() => _SalonTeamScreenState();
@@ -1646,6 +1739,7 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
   String _key = '';
   bool _showKey = false;
   List<MasterCard> _team = [];
+  List<TeamInvite> _invites = [];
   bool _loading = true;
   bool _failed = false;
 
@@ -1663,10 +1757,15 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
     try {
       final key = await _cloud.ensureSalonKey();
       final team = await _cloud.salonMasters();
+      List<TeamInvite> invites = [];
+      try {
+        invites = await _cloud.sentTeamInvites();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _key = key;
         _team = team;
+        _invites = invites;
         _loading = false;
       });
     } catch (e, st) {
@@ -1719,6 +1818,129 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
         SnackBar(content: Text('Не удалось открепить: $e')),
       );
     }
+  }
+
+  String _statusLabel(String status) => switch (status) {
+        'pending' => 'Новая заявка',
+        'confirmed' => 'Подтверждена',
+        'cancelled' => 'Отменена',
+        'completed' => 'Завершена',
+        _ => status,
+      };
+
+  String _fmt(DateTime dt) =>
+      '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} '
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+  /// Отозвать отправленное приглашение (ещё не принятое).
+  Future<void> _revokeInvite(TeamInvite inv) async {
+    try {
+      await supabase.from('team_invites').delete().eq('id', inv.id);
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось: $e')),
+      );
+    }
+  }
+
+  /// Поиск самозанятых мастеров по имени/телефону/ID и отправка
+  /// приглашения — мастер подтверждает у себя и попадает в команду.
+  Future<void> _openSearch() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _MasterSearchDialog(
+        cloud: _cloud,
+        teamIds: _team.map((m) => m.userId).toSet(),
+        onInvite: (m) async {
+          await _cloud.sendTeamInvite(m.userId);
+          await PushNotificationService.sendPush(
+            toUserId: m.userId,
+            title: 'Приглашение в салон',
+            body: 'Салон приглашает вас в команду — откройте «Заявки»',
+          );
+        },
+        onChanged: _load,
+      ),
+    );
+  }
+
+  /// «Информация о записях»: сколько записей у мастера и на какую сумму
+  /// закрыты. Салон читает заявки своей команды по RLS-политике.
+  Future<void> _showBookings(MasterCard m) async {
+    List<CloudBooking> bookings;
+    try {
+      bookings = await _cloud.masterBookingsFor(m.userId);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось загрузить записи: $e')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final completed =
+        bookings.where((b) => b.status == 'completed').toList();
+    final cancelled =
+        bookings.where((b) => b.status == 'cancelled').length;
+    final sum = completed.fold<double>(0, (s, b) => s + b.servicePrice);
+    String money(double v) => v == v.roundToDouble()
+        ? v.toStringAsFixed(0)
+        : v.toStringAsFixed(2);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        builder: (context, scroll) => ListView(
+          controller: scroll,
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          children: [
+            Text(
+              m.name.isEmpty ? 'Мастер' : m.name,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                Chip(label: Text('Всего: ${bookings.length}')),
+                Chip(label: Text('Завершено: ${completed.length}')),
+                Chip(label: Text('Отменено: $cancelled')),
+                Chip(label: Text('Закрыто на ${money(sum)}')),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (bookings.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: Text('Записей пока нет')),
+              )
+            else
+              for (final b in bookings)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(b.serviceName),
+                  subtitle: Text(
+                    '${_fmt(b.startsAt)} • '
+                    '${b.clientName.isEmpty ? 'Клиент' : b.clientName}',
+                  ),
+                  trailing: Text(
+                    '${_statusLabel(b.status)}\n${money(b.servicePrice)}',
+                    textAlign: TextAlign.end,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Смена логина/пароля мастера — через Edge Function salon-master-auth.
@@ -2022,22 +2244,23 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
                     ),
                   ),
                   FilledButton.tonalIcon(
-                    onPressed: _createMaster,
-                    icon: const Icon(Icons.person_add_alt, size: 18),
-                    label: const Text('Создать аккаунт'),
+                    onPressed: _openSearch,
+                    icon: const Icon(Icons.search, size: 18),
+                    label: const Text('Найти мастера'),
                   ),
                 ],
               ),
             ),
-            if (_team.isEmpty)
+            if (_team.isEmpty && _invites.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(16),
                 child: Text(
-                  'Пока никого нет — отправьте ключ мастеру или создайте ему аккаунт.',
+                  'Пока никого нет — отправьте ключ мастеру, найдите его '
+                  'поиском или создайте аккаунт кнопкой «+» внизу.',
                   textAlign: TextAlign.center,
                 ),
               )
-            else
+            else ...[
               for (final m in _team)
                 ListTile(
                   leading: CircleAvatar(
@@ -2049,29 +2272,211 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
                         : null,
                   ),
                   title: Text(m.name.isEmpty ? 'Мастер' : m.name),
-                  subtitle: Text(m.category),
+                  subtitle: Text(
+                    m.category +
+                        (m.managedBySalon ? ' • аккаунт салона' : ''),
+                  ),
                   trailing: PopupMenuButton<String>(
                     onSelected: (v) {
                       if (v == 'creds') _editCredentials(m);
                       if (v == 'detach') _detach(m);
                     },
-                    itemBuilder: (context) => const [
-                      PopupMenuItem(
-                        value: 'creds',
-                        child: Text('Сменить логин и пароль'),
-                      ),
-                      PopupMenuItem(
+                    itemBuilder: (context) => [
+                      // Логин/пароль менять можно только у аккаунтов,
+                      // созданных салоном — приглашённым нельзя.
+                      if (m.managedBySalon)
+                        const PopupMenuItem(
+                          value: 'creds',
+                          child: Text('Сменить логин и пароль'),
+                        ),
+                      const PopupMenuItem(
                         value: 'detach',
-                        child: Text('Открепить от салона'),
+                        child: Text('Уволить'),
                       ),
                     ],
                   ),
+                  onTap: () => _showBookings(m),
                 ),
+              for (final inv in _invites.where((i) => i.status == 'pending'))
+                ListTile(
+                  leading: const Icon(Icons.mail_outline),
+                  title: Text(
+                    inv.otherName.isEmpty ? 'Приглашение' : inv.otherName,
+                  ),
+                  subtitle: const Text('Приглашение отправлено — ждём'),
+                  trailing: IconButton(
+                    tooltip: 'Отозвать приглашение',
+                    icon: const Icon(Icons.close),
+                    onPressed: () => _revokeInvite(inv),
+                  ),
+                ),
+            ],
           ],
           Divider(color: scheme.outlineVariant),
-          Expanded(child: widget.localDirectory),
+          Expanded(child: widget.localDirectoryBuilder(_createMaster)),
         ],
       ),
+    );
+  }
+}
+
+/// Диалог поиска мастера по имени/телефону/ID — для приглашения
+/// самозанятого мастера в команду салона.
+class _MasterSearchDialog extends StatefulWidget {
+  const _MasterSearchDialog({
+    required this.cloud,
+    required this.teamIds,
+    required this.onInvite,
+    required this.onChanged,
+  });
+
+  final CloudService cloud;
+  final Set<String> teamIds;
+  final Future<void> Function(MasterCard) onInvite;
+  final VoidCallback onChanged;
+
+  @override
+  State<_MasterSearchDialog> createState() => _MasterSearchDialogState();
+}
+
+class _MasterSearchDialogState extends State<_MasterSearchDialog> {
+  final _controller = TextEditingController();
+  List<MasterCard> _results = [];
+  bool _searching = false;
+  bool _searched = false;
+  String? _error;
+
+  /// userId мастеров, которым приглашение уже отправлено в этом диалоге.
+  final Set<String> _invited = {};
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search() async {
+    setState(() {
+      _searching = true;
+      _error = null;
+    });
+    try {
+      final res = await widget.cloud.searchFreeMasters(_controller.text);
+      if (!mounted) return;
+      setState(() {
+        _results = res;
+        _searched = true;
+        _searching = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '$e';
+        _searching = false;
+      });
+    }
+  }
+
+  Future<void> _invite(MasterCard m) async {
+    try {
+      await widget.onInvite(m);
+      if (!mounted) return;
+      setState(() => _invited.add(m.userId));
+      widget.onChanged();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Приглашение отправлено')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось пригласить: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Найти мастера'),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 380,
+        child: Column(
+          children: [
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Имя, телефон или ID мастера',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.search),
+                  onPressed: _search,
+                ),
+              ),
+              onSubmitted: (_) => _search(),
+            ),
+            const SizedBox(height: 8),
+            if (_searching)
+              const Expanded(
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_error != null)
+              Expanded(child: Center(child: Text('Ошибка: $_error')))
+            else if (_searched && _results.isEmpty)
+              const Expanded(
+                child: Center(child: Text('Никого не найдено')),
+              )
+            else
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _results.length,
+                  itemBuilder: (context, i) {
+                    final m = _results[i];
+                    final inTeam = widget.teamIds.contains(m.userId);
+                    final busy =
+                        m.salonId != null && !widget.teamIds.contains(m.userId);
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: CircleAvatar(
+                        backgroundImage: m.avatarUrl.isNotEmpty
+                            ? NetworkImage(m.avatarUrl)
+                            : null,
+                        child: m.avatarUrl.isEmpty
+                            ? const Icon(Icons.content_cut)
+                            : null,
+                      ),
+                      title: Text(m.name.isEmpty ? 'Мастер' : m.name),
+                      subtitle: Text(
+                        [
+                          m.category,
+                          if (m.phone.isNotEmpty) m.phone,
+                        ].join(' • '),
+                      ),
+                      trailing: inTeam
+                          ? const Text('В команде')
+                          : busy
+                              ? const Text('В другом салоне')
+                              : _invited.contains(m.userId)
+                                  ? const Text('Отправлено')
+                                  : TextButton(
+                                      onPressed: () => _invite(m),
+                                      child: const Text('Пригласить'),
+                                    ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Закрыть'),
+        ),
+      ],
     );
   }
 }

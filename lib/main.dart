@@ -3285,10 +3285,11 @@ class _MainShellState extends State<MainShell> {
       // список + локальный справочник), у частного мастера — «Мои дела».
       widget.cloudRole == 'salon'
           ? SalonTeamScreen(
-              localDirectory: ContactsScreen(
+              localDirectoryBuilder: (onAddMaster) => ContactsScreen(
                 database: _db,
                 type: ContactType.master,
                 companyId: widget.company.id,
+                onAddOverride: onAddMaster,
               ),
             )
           : TasksScreen(
@@ -5561,12 +5562,17 @@ class ContactsScreen extends StatefulWidget {
     required this.type,
     required this.companyId,
     this.selectContact = false,
+    this.onAddOverride,
   });
 
   final AppointmentsDatabase database;
   final ContactType type;
   final int companyId;
   final bool selectContact;
+
+  /// Если задан — кнопка «+ Новый …» вызывает его вместо локального
+  /// диалога (у салона FAB создаёт облачный аккаунт мастера).
+  final VoidCallback? onAddOverride;
 
   @override
   State<ContactsScreen> createState() => _ContactsScreenState();
@@ -5821,7 +5827,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         heroTag: null,
-        onPressed: _addContact,
+        onPressed: widget.onAddOverride ?? _addContact,
         icon: const Icon(Icons.add),
         label: Text(widget.type.addTitle),
       ),

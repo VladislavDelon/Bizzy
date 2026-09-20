@@ -82,6 +82,9 @@ create table if not exists public.master_profiles (
   salon_id uuid references public.profiles(id) on delete set null,
   salon_key text,
   auto_assign boolean not null default false,
+  -- true у мастеров, которых салон создал через «Новый мастер» —
+  -- только им салон может менять логин/пароль.
+  managed_by_salon boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -500,3 +503,27 @@ begin
   return v_master;
 end;
 $$;
+
+-- ========== ПРИГЛАШЕНИЯ В САЛОН ==========
+create table if not exists public.team_invites (
+  id bigint generated always as identity primary key,
+  salon_id uuid not null references public.profiles(id) on delete cascade,
+  master_id uuid not null references public.profiles(id) on delete cascade,
+  status text not null default 'pending'
+    check (status in ('pending', 'accepted', 'declined')),
+  created_at timestamptz not null default now(),
+  unique (salon_id, master_id)
+);
+
+alter table public.team_invites enable row level security;
+
+drop policy if exists "ti_salon" on public.team_invites;
+create policy "ti_salon" on public.team_invites
+  for all using (auth.uid() = salon_id) with check (auth.uid() = salon_id);
+
+drop policy if exists "ti_master_read" on public.team_invites;
+create policy "ti_master_read" on public.team_invites
+  for select using (auth.uid() = master_id);
+drop policy if exists "ti_master_update" on public.team_invites;
+create policy "ti_master_update" on public.team_invites
+  for update using (auth.uid() = master_id) with check (auth.uid() = master_id);

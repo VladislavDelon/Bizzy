@@ -52,7 +52,13 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   final _addressController = TextEditingController();
   final _socialController = TextEditingController();
   List<String> _categories = [];
-  String? _category;
+
+  /// Выбранные виды услуг — мастер/салон находится в поиске
+  /// по каждой. Первая выбранная = основная (category).
+  final Set<String> _pickedCategories = {};
+
+  /// Основная категория — первая из выбранных.
+  String? get _category => _pickedCategories.firstOrNull;
   String _avatarUrl = '';
   bool _phonePublic = false;
   bool _pickingAvatar = false;
@@ -94,8 +100,21 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
 
   Future<void> _load() async {
     try {
-      final categories = await _cloud.categories();
-      var profile = await _cloud.myProfile();
+      // Категории, профиль, карточка и портфолио — параллельно.
+      final results = await Future.wait([
+        _cloud.categories(),
+        _cloud.myProfile(),
+        _cloud
+            .myMasterCard()
+            .then<MasterCard?>((v) => v)
+            .catchError((_) => null),
+        _cloud
+            .myPortfolio()
+            .then<List<PortfolioPhoto>>((v) => v)
+            .catchError((_) => <PortfolioPhoto>[]),
+      ]);
+      final categories = results[0] as List<String>;
+      var profile = results[1] as CloudProfile?;
       if (profile == null) {
         // Профиль мог не создаться при старой сломанной регистрации —
         // создаём по роли из metadata, иначе сохранение не сработает.
@@ -106,13 +125,8 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
           phone: meta['phone'] as String? ?? '',
         );
       }
-      final card = await _cloud.myMasterCard();
-      List<PortfolioPhoto> portfolio = [];
-      try {
-        portfolio = await _cloud.myPortfolio();
-      } catch (e, st) {
-        await SyncLog.write('portfolio', 'Загрузка портфолио: $e\n$st');
-      }
+      final card = results[2] as MasterCard?;
+      final portfolio = results[3] as List<PortfolioPhoto>;
       List<TeamInvite> invites = [];
       if (!profile.isSalon) {
         try {
@@ -125,7 +139,18 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _nameController.text = profile?.name ?? '';
         _phoneController.text = profile?.phone ?? '';
         _isSalon = profile?.isSalon ?? false;
-        _category = card?.category ?? categories.firstOrNull;
+        _pickedCategories
+          ..clear()
+          ..addAll(
+            card != null && card.categories.isNotEmpty
+                ? card.categories
+                : [
+                    if ((card?.category ?? '').isNotEmpty)
+                      card!.category
+                    else if (categories.isNotEmpty)
+                      categories.first,
+                  ],
+          );
         _descController.text = card?.description ?? '';
         _addressController.text = card?.address ?? '';
         _socialController.text = card?.social ?? '';
@@ -506,6 +531,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       );
       await _cloud.upsertMasterProfile(
         category: _category!,
+        categories: _pickedCategories.toList(),
         description: _descController.text.trim(),
         address: address,
         lat: lat,
@@ -667,24 +693,35 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _category,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Категория',
-                    border: OutlineInputBorder(),
+                // Мультивыбор видов услуг: салон «парикмахерская +
+                // ресницы» находится в поиске по обоим фильтрам.
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Виды услуг (можно несколько)',
+                    style: Theme.of(context).textTheme.labelLarge,
                   ),
-                  items: _categories
-                      .map(
-                        (c) => DropdownMenuItem(
-                          value: c,
-                          child: Text(c),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: _saving
-                      ? null
-                      : (v) => setState(() => _category = v),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    for (final c in _categories)
+                      FilterChip(
+                        label: Text(c),
+                        selected: _pickedCategories.contains(c),
+                        onSelected: _saving
+                            ? null
+                            : (sel) => setState(() {
+                                  if (sel) {
+                                    _pickedCategories.add(c);
+                                  } else {
+                                    _pickedCategories.remove(c);
+                                  }
+                                }),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -1025,28 +1062,36 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
     try {
       final profile = await _cloud.myProfile();
       final isSalon = profile?.isSalon ?? false;
-      List<MasterCard> team = [];
-      var autoAssign = false;
-      List<CloudBooking> bookings;
-      if (isSalon) {
-        try {
-          team = await _cloud.salonMasters();
-          autoAssign = (await _cloud.myMasterCard())?.autoAssign ?? false;
-        } catch (_) {}
-        bookings = await _cloud.salonBookings();
-      } else {
-        bookings = await _cloud.masterBookings();
-      }
-      List<ClientReview> reviews = [];
-      try {
-        reviews = await _cloud.myClientReviews();
-      } catch (e, st) {
-        await SyncLog.write('myClientReviews', '$e\n$st');
-      }
-      List<TeamInvite> invites = [];
-      try {
-        invites = await _cloud.myTeamInvites();
-      } catch (_) {}
+      // Команда, заявки, отзывы и приглашения — параллельно.
+      final results = await Future.wait([
+        if (isSalon)
+          _cloud.salonMasters()
+              .then<List<MasterCard>>((v) => v)
+              .catchError((_) => <MasterCard>[])
+        else
+          Future.value(<MasterCard>[]),
+        if (isSalon)
+          _cloud
+              .myMasterCard()
+              .then<MasterCard?>((v) => v)
+              .catchError((_) => null)
+        else
+          Future<MasterCard?>.value(null),
+        isSalon ? _cloud.salonBookings() : _cloud.masterBookings(),
+        _cloud
+            .myClientReviews()
+            .then<List<ClientReview>>((v) => v)
+            .catchError((_) => <ClientReview>[]),
+        _cloud
+            .myTeamInvites()
+            .then<List<TeamInvite>>((v) => v)
+            .catchError((_) => <TeamInvite>[]),
+      ]);
+      final team = results[0] as List<MasterCard>;
+      final autoAssign = (results[1] as MasterCard?)?.autoAssign ?? false;
+      final bookings = results[2] as List<CloudBooking>;
+      final reviews = results[3] as List<ClientReview>;
+      final invites = results[4] as List<TeamInvite>;
       if (!mounted) return;
       setState(() {
         _isSalon = isSalon;
@@ -2064,12 +2109,17 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
       _failed = false;
     });
     try {
-      final key = await _cloud.ensureSalonKey();
-      final team = await _cloud.salonMasters();
-      List<TeamInvite> invites = [];
-      try {
-        invites = await _cloud.sentTeamInvites();
-      } catch (_) {}
+      // Ключ, команда и приглашения — параллельно.
+      final results = await Future.wait([
+        _cloud.ensureSalonKey(),
+        _cloud.salonMasters(),
+        _cloud.sentTeamInvites()
+            .then<List<TeamInvite>>((v) => v)
+            .catchError((_) => <TeamInvite>[]),
+      ]);
+      final key = results[0] as String;
+      final team = results[1] as List<MasterCard>;
+      final invites = results[2] as List<TeamInvite>;
       // Салон открыл «Мастера» — ответы мастеров считаем
       // просмотренными, бейдж на вкладке гаснет.
       try {

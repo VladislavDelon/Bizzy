@@ -211,6 +211,15 @@ class _TasksScreenState extends State<TasksScreen> {
                               ? Colors.black
                               : Colors.white,
                         ),
+                        // Выбранный день — жёлтый с чёрной цифрой.
+                        selectedDecoration: const BoxDecoration(
+                          color: Color(0xFFFFD600),
+                          shape: BoxShape.circle,
+                        ),
+                        selectedTextStyle: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                     const Divider(height: 1),

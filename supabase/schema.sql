@@ -64,6 +64,9 @@ on conflict (name) do nothing;
 create table if not exists public.master_profiles (
   user_id uuid primary key references public.profiles(id) on delete cascade,
   category text not null default 'Другое',
+  -- Все виды услуг: «Парикмахер» + «Мастер по ресницам» —
+  -- провайдер находится в поиске по каждой. category = основная.
+  categories text[] not null default '{}',
   description text not null default '',
   avatar_url text not null default '',
   address text not null default '',
@@ -426,10 +429,15 @@ create policy "client_reviews_insert" on public.client_reviews
   for insert with check (
     auth.uid() = master_id
     and exists (
-      select 1 from public.appointments a
+      select 1
+      from public.appointments a
+      left join public.master_profiles mp on mp.user_id = a.master_id
       where a.id = booking_id
-        and a.master_id = auth.uid()
         and a.client_id = client_id
+        and (
+          a.master_id = auth.uid()
+          or mp.salon_id = auth.uid()
+        )
     )
   );
 create policy "client_reviews_update" on public.client_reviews
@@ -610,6 +618,32 @@ create policy "gift_client_read" on public.offer_gifts
 drop policy if exists "gift_client_delete" on public.offer_gifts;
 create policy "gift_client_delete" on public.offer_gifts
   for delete using (auth.uid() = client_id);
+
+-- Погашения Honey: клиент использовал предложение при записи —
+-- повторно применить нельзя (unique + отметка «Использовано»).
+create table if not exists public.offer_redemptions (
+  id bigint generated always as identity primary key,
+  offer_id bigint not null references public.offers(id) on delete cascade,
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  appointment_id bigint references public.appointments(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (offer_id, client_id)
+);
+
+alter table public.offer_redemptions enable row level security;
+
+drop policy if exists "redemption_client" on public.offer_redemptions;
+create policy "redemption_client" on public.offer_redemptions
+  for all using (auth.uid() = client_id) with check (auth.uid() = client_id);
+
+drop policy if exists "redemption_provider_read" on public.offer_redemptions;
+create policy "redemption_provider_read" on public.offer_redemptions
+  for select using (
+    exists (
+      select 1 from public.offers o
+      where o.id = offer_id and o.provider_id = auth.uid()
+    )
+  );
 
 -- Предоплата по конкретному клиенту.
 create table if not exists public.client_prepay_rules (

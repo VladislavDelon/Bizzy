@@ -76,45 +76,58 @@ class _ClientHomeState extends State<ClientHome> {
         onProfileUpdated: widget.onProfileUpdated,
       ),
     ];
-    return Scaffold(
-      // Стеклянная тема: контент заходит под полупрозрачную
-      // навигацию с блюром.
-      extendBody: bizzyGlassActive(context),
-      body: pages[_tab],
-      bottomNavigationBar: bizzyNavBar(
-        context,
-        child: NavigationBar(
-          selectedIndex: _tab,
-          onDestinationSelected: (i) => setState(() => _tab = i),
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.room_service_outlined),
-              selectedIcon: Icon(Icons.room_service),
-              label: 'Услуги',
+    return ValueListenableBuilder<bool>(
+      valueListenable: appBizzyLook,
+      builder: (context, look, _) {
+        // «Вид Bizzy» — жёлтые акценты клиентского приложения
+        // уходят в оранжевый; кнопки сами становятся градиентными
+        // через bizzyFilledButton/bizzyFab.
+        final scaffold = Scaffold(
+          // Стеклянная тема: контент заходит под полупрозрачную
+          // навигацию с блюром.
+          extendBody: bizzyGlassActive(context),
+          body: pages[_tab],
+          bottomNavigationBar: bizzyNavBar(
+            context,
+            child: NavigationBar(
+              selectedIndex: _tab,
+              onDestinationSelected: (i) => setState(() => _tab = i),
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.room_service_outlined),
+                  selectedIcon: Icon(Icons.room_service),
+                  label: 'Услуги',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.favorite_outline),
+                  selectedIcon: Icon(Icons.favorite),
+                  label: 'Избранное',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.card_giftcard_outlined),
+                  selectedIcon: Icon(Icons.card_giftcard),
+                  label: 'Honey',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.event_note_outlined),
+                  selectedIcon: Icon(Icons.event_note),
+                  label: 'Записи',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.person_outline),
+                  selectedIcon: Icon(Icons.person),
+                  label: 'Профиль',
+                ),
+              ],
             ),
-            NavigationDestination(
-              icon: Icon(Icons.favorite_outline),
-              selectedIcon: Icon(Icons.favorite),
-              label: 'Избранное',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.card_giftcard_outlined),
-              selectedIcon: Icon(Icons.card_giftcard),
-              label: 'Honey',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.event_note_outlined),
-              selectedIcon: Icon(Icons.event_note),
-              label: 'Записи',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.person_outline),
-              selectedIcon: Icon(Icons.person),
-              label: 'Профиль',
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+        if (!look) return scaffold;
+        return Theme(
+          data: bizzyClientTheme(Theme.of(context)),
+          child: scaffold,
+        );
+      },
     );
   }
 }
@@ -227,12 +240,18 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
       _failed = false;
     });
     try {
-      final categories = await _cloud.categories();
-      final masters = await _cloud.masters(category: _category);
-      var favorites = <String>{};
-      try {
-        favorites = await _cloud.myFavoriteIds();
-      } catch (_) {}
+      // Категории, мастера и избранное — параллельно, каталог
+      // открывается за один раунд-трип.
+      final results = await Future.wait([
+        _cloud.categories(),
+        _cloud.masters(category: _category),
+        _cloud.myFavoriteIds()
+            .then<Set<String>>((v) => v)
+            .catchError((_) => <String>{}),
+      ]);
+      final categories = results[0] as List<String>;
+      final masters = results[1] as List<MasterCard>;
+      final favorites = results[2] as Set<String>;
       if (!mounted) return;
       setState(() {
         _categories = categories;
@@ -252,7 +271,8 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
   }
 
   /// Определяет положение клиента по GPS и пересортировывает список.
-  Future<void> _detectLocation() async {
+  /// Тихий режим — без снэкбаров (вызывается при открытии карты).
+  Future<void> _detectLocation({bool quiet = false}) async {
     try {
       final point = await _geo.currentPosition();
       if (!mounted) return;
@@ -261,11 +281,13 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
         _myLng = point.lng;
         _masters = _sortedByDistance(_masters);
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Геопозиция определена')),
-      );
+      if (!quiet && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Геопозиция определена')),
+        );
+      }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || quiet) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$e')),
       );
@@ -293,6 +315,9 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
   }
 
   void _openMap() {
+    // Геопозиция определяется внутри карты автоматически;
+    // если уже известна — передаём, чтобы центрировать мгновенно.
+    if (_myLat == null) _detectLocation(quiet: true);
     Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (context) => MastersMapScreen(
@@ -326,11 +351,6 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
           'Привет, ${widget.profile.name.isEmpty ? 'клиент' : widget.profile.name}!',
         ),
         actions: [
-          IconButton(
-            tooltip: 'Моё местоположение',
-            icon: const Icon(Icons.my_location),
-            onPressed: _loading ? null : _detectLocation,
-          ),
           IconButton(
             tooltip: 'Мастера на карте',
             icon: const Icon(Icons.map_outlined),
@@ -790,6 +810,7 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
   MasterCard? _master;
   List<CloudServiceItem> _services = [];
   List<PortfolioPhoto> _portfolio = [];
+  List<SalonOffer> _offers = [];
   Set<String> _favoriteIds = {};
   bool _loading = true;
   String? _error;
@@ -820,34 +841,41 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
 
   Future<void> _load() async {
     try {
+      // Всё независимое — параллельно: профиль открывается за один
+      // раунд-трип. Вторичные блоки (портфолио, избранное, Honey)
+      // не валят экран при ошибке.
+      final pid = widget.master.userId;
       final results = await Future.wait([
-        _cloud.masterCard(widget.master.userId),
-        _cloud.servicesOf(widget.master.userId),
+        _cloud.masterCard(pid),
+        _cloud.servicesOf(pid),
+        _cloud.portfolioOf(pid)
+            .then<List<PortfolioPhoto>>((v) => v)
+            .catchError((_) => <PortfolioPhoto>[]),
+        _cloud.myFavoriteIds()
+            .then<Set<String>>((v) => v)
+            .catchError((_) => <String>{}),
+        _cloud.offersOf(pid)
+            .then<List<SalonOffer>>((v) => v)
+            .catchError((_) => <SalonOffer>[]),
+        _cloud.myRedeemedOfferIds()
+            .then<Set<int>>((v) => v)
+            .catchError((_) => <int>{}),
       ]);
       final rawServices = results[1] as List<CloudServiceItem>;
-      List<PortfolioPhoto> portfolio = [];
-      try {
-        portfolio = await _cloud.portfolioOf(widget.master.userId);
-      } catch (e, st) {
-        await SyncLog.write('master_detail_portfolio', '$e\n$st');
-      }
-      Set<String> favs = {};
-      try {
-        favs = await _cloud.myFavoriteIds();
-      } catch (_) {}
-      await SyncLog.write(
-        'master_detail',
-        'masterId=${widget.master.userId}, '
-        'services=${rawServices.length}, '
-        'published=${rawServices.where((s) => s.published).length}, '
-        'portfolio=${portfolio.length}',
-      );
+      final portfolio = results[2] as List<PortfolioPhoto>;
+      final favs = results[3] as Set<String>;
+      final usedIds = results[5] as Set<int>;
+      final offers = [
+        for (final o in results[4] as List<SalonOffer>)
+          usedIds.contains(o.id) ? o.copyUsed() : o,
+      ];
       if (!mounted) return;
       setState(() {
         _master = (results[0] as MasterCard?) ?? widget.master;
         _services = rawServices.where((s) => s.published).toList();
         _portfolio = portfolio;
         _favoriteIds = favs;
+        _offers = offers;
         _loading = false;
       });
     } catch (e, st) {
@@ -860,13 +888,14 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
     }
   }
 
-  Future<void> _book() async {
+  Future<void> _book([CloudServiceItem? service, SalonOffer? offer]) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => BookAppointmentDialog(
         master: _master ?? widget.master,
         services: _services,
-        offer: widget.offer,
+        offer: offer ?? widget.offer,
+        initialService: service,
       ),
     );
     if (result == true && mounted) Navigator.of(context).pop(true);
@@ -898,7 +927,12 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
       master: _master ?? widget.master,
       services: _services,
       portfolio: _portfolio,
-      onBook: _book,
+      offers: _offers,
+      onBook: () => _book(),
+      // Тап по услуге — запись сразу с выбранной услугой.
+      onBookService: _book,
+      // Тап по Honey — запись сразу с этой скидкой.
+      onBookOffer: (o) => _book(null, o),
       onRefresh: _load,
       isFavorite: _favoriteIds.contains(widget.master.userId),
       onToggleFavorite: _toggleFavorite,
@@ -913,6 +947,7 @@ class BookAppointmentDialog extends StatefulWidget {
     required this.master,
     required this.services,
     this.offer,
+    this.initialService,
   });
 
   final MasterCard master;
@@ -921,6 +956,9 @@ class BookAppointmentDialog extends StatefulWidget {
   /// Honey, по которому записывается клиент: действующая скидка
   /// режет цену выбранной услуги, подарок гасится после записи.
   final SalonOffer? offer;
+
+  /// Услуга, по которой тапнули в профиле — сразу выбрана.
+  final CloudServiceItem? initialService;
 
   @override
   State<BookAppointmentDialog> createState() => _BookAppointmentDialogState();
@@ -954,10 +992,12 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
           : widget.master.prepayAmount;
 
   /// Действует ли скидка Honey на выбранную услугу прямо сейчас.
+  /// Использованный Honey скидку не даёт — только инфо-баннер.
   bool get _offerApplies {
     final o = widget.offer;
     return o != null &&
         o.isLive &&
+        !o.used &&
         o.discountPercent > 0 &&
         o.appliesTo(_service?.id);
   }
@@ -981,6 +1021,8 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
   @override
   void initState() {
     super.initState();
+    // Тап по услуге в профиле — она сразу выбрана в диалоге.
+    _service = widget.initialService;
     _loadSlots(_date);
     _loadClientPrepay();
   }
@@ -1139,6 +1181,21 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
       // по акции, даже без отдельного поля в старой базе.
       var notes = _notes.text.trim();
       final offer = widget.offer;
+      // Разовое использование: если Honey уже погашен — записываем
+      // без скидки? Нет: предложение использовано — отменяем запись
+      // по нему, пусть клиент бронирует обычную цену осознанно.
+      if (offer != null && offer.isLive && !offer.used) {
+        try {
+          if (await _cloud.hasRedeemed(offer.id)) {
+            if (!mounted) return;
+            setState(() {
+              _saving = false;
+              _error = 'Вы уже использовали этот Honey';
+            });
+            return;
+          }
+        } catch (_) {}
+      }
       if (offer != null && offer.isLive) {
         notes = notes.isEmpty
             ? 'По Honey «${offer.title}»'
@@ -1156,11 +1213,18 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
         notes: notes,
         prepaymentStatus: _needsPrepay ? 'claimed' : 'none',
       );
-      // Подаренный Honey — разовый: гасим после успешной записи.
-      if (offer != null && offer.isGift) {
+      // Погашаем Honey: подарок исчезает из блока «Подарено вам»,
+      // а в offer_redemptions остаётся отметка «Использовано» —
+      // повторно это предложение применить нельзя.
+      if (offer != null && offer.isLive && !offer.used) {
         try {
-          await _cloud.consumeGift(offer.id);
+          await _cloud.redeemOffer(offer.id, booking.id);
         } catch (_) {}
+        if (offer.isGift) {
+          try {
+            await _cloud.consumeGift(offer.id);
+          } catch (_) {}
+        }
       }
       await PushNotificationService.sendPush(
         toUserId: booking.masterId,
@@ -1214,11 +1278,13 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        widget.offer!.isLive
-                            ? 'Honey «${widget.offer!.title}»'
-                                '${widget.offer!.discountPercent > 0 ? ' · −${widget.offer!.discountPercent.toStringAsFixed(0)}%' : ''}'
-                            : 'Срок Honey «${widget.offer!.title}» истёк — '
-                                'скидка не применяется',
+                        widget.offer!.used
+                            ? 'Honey «${widget.offer!.title}» уже использован'
+                            : widget.offer!.isLive
+                                ? 'Honey «${widget.offer!.title}»'
+                                    '${widget.offer!.discountPercent > 0 ? ' · −${widget.offer!.discountPercent.toStringAsFixed(0)}%' : ''}'
+                                : 'Срок Honey «${widget.offer!.title}» истёк — '
+                                    'скидка не применяется',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -1511,7 +1577,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
           onPressed: _saving ? null : () => Navigator.of(context).pop(),
           child: const Text('Отмена'),
         ),
-        FilledButton(
+        bizzyFilledButton(
           onPressed:
               (_saving || (_needsPrepay && !_prepayDone)) ? null : _submit,
           child: Text(
@@ -1553,12 +1619,16 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
       _failed = false;
     });
     try {
-      final bookings = await _cloud.clientBookings();
-      final ratings = <int, int>{};
-      for (final b in bookings) {
-        final r = await _cloud.ratingFor(b.id);
-        if (r != null) ratings[b.id] = r;
-      }
+      // Записи и мои оценки — одним параллельным запросом вместо
+      // серии ratingFor по каждой записи.
+      final results = await Future.wait([
+        _cloud.clientBookings(),
+        _cloud.myRatings()
+            .then<Map<int, int>>((v) => v)
+            .catchError((_) => <int, int>{}),
+      ]);
+      final bookings = results[0] as List<CloudBooking>;
+      final ratings = results[1] as Map<int, int>;
       if (!mounted) return;
       setState(() {
         _bookings = bookings;
@@ -1761,7 +1831,16 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  FilledButton.icon(
+                  if (_canRate(b))
+                    FilledButton.icon(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        _rate(b);
+                      },
+                      icon: const Icon(Icons.star),
+                      label: const Text('Поставить оценку'),
+                    ),
+                  FilledButton.tonalIcon(
                     onPressed: () {
                       Navigator.of(ctx).pop();
                       _repeat(b);
@@ -1769,15 +1848,6 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                     icon: const Icon(Icons.repeat),
                     label: const Text('Повторить запись'),
                   ),
-                  if (_canRate(b))
-                    FilledButton.tonalIcon(
-                      onPressed: () {
-                        Navigator.of(ctx).pop();
-                        _rate(b);
-                      },
-                      icon: const Icon(Icons.star),
-                      label: const Text('Оценить'),
-                    ),
                   if (b.status == 'pending' || b.status == 'confirmed')
                     OutlinedButton.icon(
                       onPressed: () {
@@ -1981,6 +2051,41 @@ class _RateBookingDialogState extends State<RateBookingDialog> {
   bool _saving = false;
   String? _error;
 
+  /// Кому уходит оценка: «salon» — если запись делал исполнитель
+  /// из команды салона, иначе конкретному мастеру.
+  bool _targetIsSalon = false;
+  String _targetName = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveTarget();
+  }
+
+  /// Определяем адресата оценки: у мастера с salon_id оценка
+  /// прикрепляется салону, у самозанятого — мастеру.
+  Future<void> _resolveTarget() async {
+    try {
+      final card = await _cloud.masterCard(widget.booking.masterId);
+      final salonId = card?.salonId;
+      var isSalon = false;
+      var name = widget.booking.masterName;
+      if (salonId != null && salonId.isNotEmpty) {
+        isSalon = true;
+        final salon = await _cloud.masterCard(salonId);
+        if (salon != null && salon.name.isNotEmpty) name = salon.name;
+      } else if (card != null && card.isSalon) {
+        isSalon = true;
+        if (card.name.isNotEmpty) name = card.name;
+      }
+      if (!mounted) return;
+      setState(() {
+        _targetIsSalon = isSalon;
+        _targetName = name;
+      });
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _comment.dispose();
@@ -2014,11 +2119,16 @@ class _RateBookingDialogState extends State<RateBookingDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Оцените мастера'),
+      title: Text(_targetIsSalon ? 'Оцените салон' : 'Оцените мастера'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(widget.booking.serviceName),
+          Text(
+            _targetName.isNotEmpty
+                ? '$_targetName • ${widget.booking.serviceName}'
+                : widget.booking.serviceName,
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -2055,7 +2165,7 @@ class _RateBookingDialogState extends State<RateBookingDialog> {
           onPressed: _saving ? null : () => Navigator.of(context).pop(),
           child: const Text('Позже'),
         ),
-        FilledButton(
+        bizzyFilledButton(
           onPressed: _saving ? null : _submit,
           child: const Text('Отправить'),
         ),
@@ -2200,7 +2310,8 @@ class _ClientProfileTab extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: () => showAppearancePicker(context),
+            onPressed: () =>
+                showAppearancePicker(context, showBizzyLook: true),
             icon: const Icon(Icons.palette_outlined),
             label: Text(
               'Внешний вид · ${themeModeLabel(appThemeMode.value)}',

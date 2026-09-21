@@ -10,7 +10,23 @@ final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier(ThemeMode.system);
 
 const bizzySeedColor = Color(0xFFFFD600);
 
+/// Клиентская фишка «Вид Bizzy»: жёлтые акценты превращаются
+/// в оранжево-жёлтый градиент. Только для роли «клиент».
+final ValueNotifier<bool> appBizzyLook = ValueNotifier(false);
+
+/// Оранжево-жёлтый градиент «Вид Bizzy» — на кнопках и акцентах.
+const bizzyAccentGradient = LinearGradient(
+  begin: Alignment.centerLeft,
+  end: Alignment.centerRight,
+  colors: [Color(0xFFFF8F00), Color(0xFFFFD600)],
+);
+
+/// Оранжевый заменитель жёлтого акцента там, где градиент
+/// недоступен (индикатор навигации, чипы, иконки).
+const bizzyAccentColor = Color(0xFFFF8F00);
+
 const _themePrefsKey = 'bizzy_theme_mode';
+const _bizzyLookKey = 'bizzy_look';
 
 ThemeMode themeModeFromString(String? value) {
   return switch (value) {
@@ -39,6 +55,17 @@ Future<void> saveAppTheme(ThemeMode value) async {
   await prefs.setString(_themePrefsKey, themeModeToString(value));
 }
 
+Future<void> loadBizzyLook() async {
+  final prefs = await SharedPreferences.getInstance();
+  appBizzyLook.value = prefs.getBool(_bizzyLookKey) ?? false;
+}
+
+Future<void> saveBizzyLook(bool value) async {
+  appBizzyLook.value = value;
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setBool(_bizzyLookKey, value);
+}
+
 String themeModeLabel(ThemeMode value) {
   return switch (value) {
     ThemeMode.light => 'Светлая',
@@ -48,7 +75,12 @@ String themeModeLabel(ThemeMode value) {
 }
 
 /// Диалог «Внешний вид» — доступен из профилей всех ролей.
-Future<void> showAppearancePicker(BuildContext context) async {
+/// [showBizzyLook] — у клиентов добавляет переключатель «Вид Bizzy»
+/// (оранжево-жёлтый градиент на кнопках и акцентах).
+Future<void> showAppearancePicker(
+  BuildContext context, {
+  bool showBizzyLook = false,
+}) async {
   await showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
@@ -89,6 +121,19 @@ Future<void> showAppearancePicker(BuildContext context) async {
                   Icons.dark_mode_outlined,
                   'Тёмный фон, спокойный контраст',
                 ),
+                if (showBizzyLook)
+                  ValueListenableBuilder<bool>(
+                    valueListenable: appBizzyLook,
+                    builder: (context, on, _) => SwitchListTile(
+                      secondary: const Icon(Icons.auto_awesome),
+                      title: const Text('Вид Bizzy'),
+                      subtitle: const Text(
+                        'Оранжево-жёлтый градиент на кнопках и акцентах',
+                      ),
+                      value: on,
+                      onChanged: saveBizzyLook,
+                    ),
+                  ),
                 const SizedBox(height: 8),
               ],
             ),
@@ -334,5 +379,152 @@ ThemeData bizzyTheme(Brightness brightness) {
         TargetPlatform.android: ZoomPageTransitionsBuilder(),
       },
     ),
+  );
+}
+
+/// Тема клиента при включённом «Вид Bizzy»: жёлтые акценты
+/// (primary, индикатор навигации, FAB) уходят в оранжевый.
+/// Сами кнопки делаются градиентными через [bizzyFilledButton]
+/// и [bizzyFab] — тема не умеет градиенты, только цвета.
+ThemeData bizzyClientTheme(ThemeData base) {
+  final cs = base.colorScheme;
+  return base.copyWith(
+    colorScheme: cs.copyWith(
+      primary: const Color(0xFFE65100),
+      inversePrimary: bizzyAccentColor,
+    ),
+    navigationBarTheme: base.navigationBarTheme.copyWith(
+      indicatorColor: bizzyAccentColor.withValues(alpha: 0.85),
+    ),
+    floatingActionButtonTheme: base.floatingActionButtonTheme.copyWith(
+      backgroundColor: bizzyAccentColor,
+      foregroundColor: Colors.black,
+    ),
+    progressIndicatorTheme: base.progressIndicatorTheme.copyWith(
+      color: bizzyAccentColor,
+    ),
+  );
+}
+
+/// Основная кнопка: при «Вид Bizzy» — оранжево-жёлтый градиент,
+/// иначе обычный FilledButton. Использовать в клиентских экранах.
+Widget bizzyFilledButton({
+  required VoidCallback? onPressed,
+  required Widget child,
+  IconData? icon,
+}) {
+  return ValueListenableBuilder<bool>(
+    valueListenable: appBizzyLook,
+    builder: (context, on, _) {
+      if (!on) {
+        return icon == null
+            ? FilledButton(onPressed: onPressed, child: child)
+            : FilledButton.icon(
+                onPressed: onPressed,
+                icon: Icon(icon),
+                label: child,
+              );
+      }
+      return Opacity(
+        opacity: onPressed == null ? 0.5 : 1,
+        child: Material(
+          color: Colors.transparent,
+          child: Ink(
+            decoration: BoxDecoration(
+              gradient: bizzyAccentGradient,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: InkWell(
+              onTap: onPressed,
+              borderRadius: BorderRadius.circular(24),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (icon != null) ...[
+                      Icon(icon, size: 20, color: Colors.black),
+                      const SizedBox(width: 8),
+                    ],
+                    DefaultTextStyle(
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      child: child,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+/// FAB с градиентом при «Вид Bizzy», иначе обычный.
+Widget bizzyFab({
+  required VoidCallback? onPressed,
+  required IconData icon,
+  required String label,
+}) {
+  return ValueListenableBuilder<bool>(
+    valueListenable: appBizzyLook,
+    builder: (context, on, _) {
+      if (!on) {
+        return FloatingActionButton.extended(
+          heroTag: null,
+          onPressed: onPressed,
+          icon: Icon(icon),
+          label: Text(label),
+        );
+      }
+      return Material(
+        color: Colors.transparent,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: bizzyAccentGradient,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: bizzyAccentColor.withValues(alpha: 0.4),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 14,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, color: Colors.black),
+                  const SizedBox(width: 8),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    },
   );
 }

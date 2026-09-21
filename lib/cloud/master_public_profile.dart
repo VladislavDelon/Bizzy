@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app_theme.dart';
 import 'cloud_service.dart';
 
 /// Вид публичного профиля мастера: аватар, рейтинг, описание,
@@ -12,7 +13,10 @@ class MasterPublicProfileView extends StatelessWidget {
     required this.master,
     required this.services,
     this.portfolio = const [],
+    this.offers = const [],
     this.onBook,
+    this.onBookService,
+    this.onBookOffer,
     this.isPreview = false,
     this.onRefresh,
     this.isFavorite,
@@ -24,7 +28,16 @@ class MasterPublicProfileView extends StatelessWidget {
 
   /// Фото работ мастера — сетка в разделе «Работы мастера».
   final List<PortfolioPhoto> portfolio;
+
+  /// Актуальные Honey провайдера — блок «Honey» в профиле.
+  final List<SalonOffer> offers;
   final VoidCallback? onBook;
+
+  /// Тап по услуге — сразу диалог записи с выбранной услугой.
+  final void Function(CloudServiceItem service)? onBookService;
+
+  /// Тап по Honey — диалог записи с применённой скидкой.
+  final void Function(SalonOffer offer)? onBookOffer;
   final bool isPreview;
   final Future<void> Function()? onRefresh;
 
@@ -177,9 +190,106 @@ class MasterPublicProfileView extends StatelessWidget {
               leading: const Icon(Icons.spa),
               title: Text(s.name),
               subtitle: Text('${s.durationMinutes} мин'),
-              trailing: Text(s.price.toStringAsFixed(0)),
+              // Тап по услуге → сразу запись с ней.
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(s.price.toStringAsFixed(0)),
+                  if (onBookService != null) ...[
+                    const SizedBox(width: 6),
+                    Icon(
+                      Icons.event_available,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ],
+                ],
+              ),
+              onTap: onBookService == null
+                  ? null
+                  : () => onBookService!(s),
             ),
           ),
+        if (offers.isNotEmpty) ...[
+          _sectionTitle(context, 'Honey'),
+          for (final o in offers)
+            Card(
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: o.used || onBookOffer == null
+                    ? null
+                    : () => onBookOffer!(o),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      if (o.imageUrl.isNotEmpty)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            o.imageUrl,
+                            width: 44,
+                            height: 44,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, e, s) => Icon(
+                              Icons.card_giftcard,
+                              color: scheme.primary,
+                            ),
+                          ),
+                        )
+                      else
+                        Icon(Icons.card_giftcard, color: scheme.primary),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              o.title,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(
+                                    decoration: o.used
+                                        ? TextDecoration.lineThrough
+                                        : null,
+                                    color: o.used
+                                        ? scheme.outline
+                                        : null,
+                                  ),
+                            ),
+                            Text(
+                              [
+                                if (o.value.isNotEmpty) o.value,
+                                if (o.discountPercent > 0)
+                                  '−${o.discountPercent == o.discountPercent.roundToDouble() ? o.discountPercent.toStringAsFixed(0) : o.discountPercent.toStringAsFixed(1)}%',
+                              ].join(' · '),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (o.used)
+                        Text(
+                          'Использовано',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(color: scheme.outline),
+                        )
+                      else if (onBookOffer != null)
+                        Icon(
+                          Icons.chevron_right,
+                          color: scheme.primary,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
         if (portfolio.isNotEmpty) ...[
           _sectionTitle(context, 'Работы мастера'),
           GridView.count(
@@ -245,11 +355,10 @@ class MasterPublicProfileView extends StatelessWidget {
             ),
       floatingActionButton: onBook == null
           ? null
-          : FloatingActionButton.extended(
-              heroTag: null,
+          : bizzyFab(
               onPressed: onBook,
-              icon: const Icon(Icons.event_available),
-              label: const Text('Записаться'),
+              icon: Icons.event_available,
+              label: 'Записаться',
             ),
     );
   }

@@ -9,17 +9,41 @@ import 'geo_service.dart';
 /// координат нет.
 const LatLng kDefaultMapCenter = LatLng(55.751244, 37.618423);
 
-/// Слой тайлов с русскими подписями (Wikimedia OSM, параметр lang=ru).
-/// Стандартные тайлы OSM подписывают объекты на местном языке страны.
+/// Тайлы CARTO Voyager — чистая быстрая карта с подписями на
+/// языке региона (в РУ/КЗ — на русском). Работает без ключа,
+/// тайлы отдаются с CDN — грузится быстрее Wikimedia/OSM.
 TileLayer osmTileLayer() => TileLayer(
       urlTemplate:
-          'https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}.png?lang=ru',
+          'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+      subdomains: const ['a', 'b', 'c', 'd'],
       userAgentPackageName: 'com.example.bizzy_app',
       maxZoom: 19,
     );
 
+/// Синяя точка «я на карте».
+class _MyLocationMarker extends StatelessWidget {
+  const _MyLocationMarker();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 18,
+      height: 18,
+      decoration: BoxDecoration(
+        color: Colors.blueAccent,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 3),
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, blurRadius: 6),
+        ],
+      ),
+    );
+  }
+}
+
 /// Экран выбора точки на карте. Возвращает [LatLng] через Navigator.pop.
 /// Тап по карте ставит маркер; кнопка подтверждает выбор.
+/// Если точка не задана — карта сама определяет геопозицию.
 class MapPickerScreen extends StatefulWidget {
   const MapPickerScreen({super.key, this.initial});
 
@@ -31,13 +55,30 @@ class MapPickerScreen extends StatefulWidget {
 }
 
 class _MapPickerScreenState extends State<MapPickerScreen> {
+  final _mapController = MapController();
   LatLng? _picked;
 
   @override
   void initState() {
     super.initState();
     final i = widget.initial;
-    if (i != null) _picked = LatLng(i.lat, i.lng);
+    if (i != null) {
+      _picked = LatLng(i.lat, i.lng);
+    } else {
+      // Авто-геопозиция: карта сразу открывается на точке
+      // пользователя — остаётся только подтвердить/подвинуть метку.
+      _locate();
+    }
+  }
+
+  Future<void> _locate() async {
+    try {
+      final p = await GeoService().currentPosition();
+      if (!mounted) return;
+      final point = LatLng(p.lat, p.lng);
+      setState(() => _picked = point);
+      _mapController.move(point, 15);
+    } catch (_) {}
   }
 
   @override
@@ -49,6 +90,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       body: Stack(
         children: [
           FlutterMap(
+            mapController: _mapController,
             options: MapOptions(
               initialCenter: center,
               initialZoom: _picked != null ? 15 : 10,
@@ -72,6 +114,9 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                     ),
                   ],
                 ),
+              const SimpleAttributionWidget(
+                source: Text('© OpenStreetMap contributors © CARTO'),
+              ),
             ],
           ),
           Positioned(
@@ -87,7 +132,8 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
               ),
               child: Text(
                 _picked == null
-                    ? 'Коснитесь карты, чтобы поставить метку'
+                    ? 'Определяем ваше положение…\n'
+                        'Можно коснуться карты и поставить метку'
                     : 'Метку можно передвинуть новым касанием',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall,
@@ -113,8 +159,10 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
 }
 
 /// Карта со всеми мастерами, у которых заданы координаты.
+/// При открытии сама определяет геопозицию клиента и центрируется
+/// на ней — кнопки «найти меня» не нужно.
 /// [onOpen] вызывается при выборе мастера из всплывающей карточки.
-class MastersMapScreen extends StatelessWidget {
+class MastersMapScreen extends StatefulWidget {
   const MastersMapScreen({
     super.key,
     required this.masters,
@@ -128,11 +176,43 @@ class MastersMapScreen extends StatelessWidget {
   final double? clientLat;
   final double? clientLng;
 
+  @override
+  State<MastersMapScreen> createState() => _MastersMapScreenState();
+}
+
+class _MastersMapScreenState extends State<MastersMapScreen> {
+  final _mapController = MapController();
+  double? _myLat;
+  double? _myLng;
+
+  @override
+  void initState() {
+    super.initState();
+    _myLat = widget.clientLat;
+    _myLng = widget.clientLng;
+    if (_myLat == null) _locate();
+  }
+
+  /// Авто-геопозиция при открытии карты: находим клиента,
+  /// ставим синюю точку и подъезжаем камерой.
+  Future<void> _locate() async {
+    try {
+      final p = await GeoService().currentPosition();
+      if (!mounted) return;
+      setState(() {
+        _myLat = p.lat;
+        _myLng = p.lng;
+      });
+      _mapController.move(LatLng(p.lat, p.lng), 13);
+    } catch (_) {}
+  }
+
   LatLng get _initialCenter {
-    if (clientLat != null && clientLng != null) {
-      return LatLng(clientLat!, clientLng!);
+    if (_myLat != null && _myLng != null) {
+      return LatLng(_myLat!, _myLng!);
     }
-    final withCoords = masters.where((m) => m.hasLocation).toList();
+    final withCoords =
+        widget.masters.where((m) => m.hasLocation).toList();
     if (withCoords.isEmpty) return kDefaultMapCenter;
     final lat = withCoords.map((m) => m.lat!).reduce((a, b) => a + b) /
         withCoords.length;
@@ -174,7 +254,9 @@ class MastersMapScreen extends StatelessWidget {
                           style: Theme.of(ctx).textTheme.titleMedium,
                         ),
                         Text(
-                          master.category,
+                          master.categories.isNotEmpty
+                              ? master.categories.join(' · ')
+                              : master.category,
                           style: Theme.of(ctx).textTheme.bodySmall,
                         ),
                         Row(
@@ -215,7 +297,7 @@ class MastersMapScreen extends StatelessWidget {
               FilledButton(
                 onPressed: () {
                   Navigator.of(ctx).pop();
-                  onOpen(master);
+                  widget.onOpen(master);
                 },
                 child: const Text('Открыть профиль'),
               ),
@@ -229,30 +311,27 @@ class MastersMapScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final located = masters.where((m) => m.hasLocation).toList();
+    final located = widget.masters.where((m) => m.hasLocation).toList();
     return Scaffold(
       appBar: AppBar(title: const Text('Мастера на карте')),
       body: Stack(
         children: [
           FlutterMap(
+            mapController: _mapController,
             options: MapOptions(
               initialCenter: _initialCenter,
-              initialZoom: clientLat != null ? 12 : 5,
+              initialZoom: _myLat != null ? 13 : 5,
             ),
             children: [
               osmTileLayer(),
               MarkerLayer(
                 markers: [
-                  if (clientLat != null && clientLng != null)
+                  if (_myLat != null && _myLng != null)
                     Marker(
-                      point: LatLng(clientLat!, clientLng!),
-                      width: 44,
-                      height: 44,
-                      child: const Icon(
-                        Icons.my_location,
-                        size: 32,
-                        color: Colors.blueAccent,
-                      ),
+                      point: LatLng(_myLat!, _myLng!),
+                      width: 24,
+                      height: 24,
+                      child: const _MyLocationMarker(),
                     ),
                   for (final m in located)
                     Marker(
@@ -269,6 +348,9 @@ class MastersMapScreen extends StatelessWidget {
                       ),
                     ),
                 ],
+              ),
+              const SimpleAttributionWidget(
+                source: Text('© OpenStreetMap contributors © CARTO'),
               ),
             ],
           ),

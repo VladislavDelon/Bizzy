@@ -339,6 +339,7 @@ class MasterCard {
     this.autoAssign = false,
     this.managedBySalon = false,
     this.salonSince,
+    this.categories = const [],
   });
 
   final String userId;
@@ -346,6 +347,10 @@ class MasterCard {
   final String phone;
   final String role; // 'master' | 'salon' — салон = компания, мастер = частник
   final String category;
+
+  /// Все виды услуг провайдера — находится в поиске по каждой.
+  /// Пусто в старой базе — тогда действует только [category].
+  final List<String> categories;
   final String description;
   final String address;
   final String social;
@@ -407,6 +412,10 @@ class MasterCard {
           ? _parseString(profile['role'], fallback: 'master')
           : 'master',
       category: _parseString(map['category'], fallback: 'Другое'),
+      categories: [
+        for (final c in (map['categories'] as List? ?? const []))
+          _parseString(c),
+      ],
       description: _parseString(map['description']),
       address: _parseString(map['address']),
       social: _parseString(map['social']),
@@ -449,6 +458,7 @@ class MasterCard {
     bool? prepayEnabled,
     double? prepayAmount,
     String? prepayLink,
+    List<String>? categories,
   }) =>
       MasterCard(
         userId: userId ?? this.userId,
@@ -456,6 +466,7 @@ class MasterCard {
         phone: phone ?? this.phone,
         role: role ?? this.role,
         category: category ?? this.category,
+        categories: categories ?? this.categories,
         description: description ?? this.description,
         address: address ?? this.address,
         social: social ?? this.social,
@@ -845,6 +856,7 @@ class CloudService {
     const fields = [
       'user_id',
       'category',
+      'categories',
       'description',
       'address',
       'lat',
@@ -864,13 +876,34 @@ class CloudService {
       'salon_since',
     ];
     try {
-      final rows = await _selectResilient(
-        'master_profiles',
-        fields,
-        eqColumn: category == null || category.isEmpty ? null : 'category',
-        eqValue: category,
-        orderBy: 'rating_avg',
-      );
+      List<dynamic> rows;
+      if (category != null && category.isNotEmpty) {
+        // Мультикатегории: мастер с «Парикмахер»+«Ресницы» находится
+        // по обоим фильтрам — основная категория ИЛИ вхождение
+        // в массив categories.
+        try {
+          rows = await supabase
+              .from('master_profiles')
+              .select(fields.join(','))
+              .or('category.eq.$category,categories.cs.{$category}')
+              .order('rating_avg', ascending: false);
+        } on PostgrestException {
+          // Старая база без categories — фильтр по основной категории.
+          rows = await _selectResilient(
+            'master_profiles',
+            fields,
+            eqColumn: 'category',
+            eqValue: category,
+            orderBy: 'rating_avg',
+          );
+        }
+      } else {
+        rows = await _selectResilient(
+          'master_profiles',
+          fields,
+          orderBy: 'rating_avg',
+        );
+      }
 
       // Одним запросом — все профили мастеров/салонов: и для имён
       // карточек, и чтобы провайдеры без карточки не терялись.
@@ -919,6 +952,7 @@ class CloudService {
     const fields = [
       'user_id',
       'category',
+      'categories',
       'description',
       'address',
       'lat',
@@ -999,10 +1033,13 @@ class CloudService {
     bool prepayEnabled = false,
     double prepayAmount = 0,
     String prepayLink = '',
+    List<String>? categories,
   }) async {
     final payload = <String, dynamic>{
       'user_id': uid,
       'category': category,
+      // Полный список видов услуг — поиск клиентом идёт по каждой.
+      'categories': categories ?? [category],
       'description': description,
       'address': address,
       'lat': ?lat,
@@ -1349,6 +1386,7 @@ class CloudService {
       const [
         'user_id',
         'category',
+        'categories',
         'description',
         'address',
         'lat',
@@ -1442,19 +1480,46 @@ class CloudService {
   }
 
   // ---------- Ratings ----------
+  /// Оценка записи. Если исполнитель — мастер салона, оценка
+  /// прикрепляется к САЛОНУ (клиент записывался в заведение).
   Future<void> rateBooking({
     required int appointmentId,
     required String masterId,
     required int rating,
     String comment = '',
-  }) =>
-      supabase.from('ratings').insert({
-        'appointment_id': appointmentId,
-        'client_id': uid,
-        'master_id': masterId,
-        'rating': rating,
-        'comment': comment,
-      });
+  }) async {
+    var targetId = masterId;
+    try {
+      final mp = await supabase
+          .from('master_profiles')
+          .select('salon_id')
+          .eq('user_id', masterId)
+          .maybeSingle();
+      final salonId = _parseString(mp?['salon_id']);
+      if (salonId.isNotEmpty) targetId = salonId;
+    } catch (_) {}
+    await supabase.from('ratings').insert({
+      'appointment_id': appointmentId,
+      'client_id': uid,
+      'master_id': targetId,
+      'rating': rating,
+      'comment': comment,
+    });
+  }
+
+  /// Мои оценки одним запросом: appointment_id → звёзды.
+  Future<Map<int, int>> myRatings() async {
+    final id = uid;
+    if (id == null) return {};
+    final rows = await supabase
+        .from('ratings')
+        .select('appointment_id, rating')
+        .eq('client_id', id);
+    return {
+      for (final r in rows)
+        _parseInt(r['appointment_id']): _parseInt(r['rating']),
+    };
+  }
 
   Future<int?> ratingFor(int appointmentId) async {
     final row = await supabase
@@ -1667,6 +1732,7 @@ class CloudService {
       const [
         'user_id',
         'category',
+        'categories',
         'description',
         'address',
         'lat',
@@ -1861,6 +1927,7 @@ class CloudService {
       const [
         'user_id',
         'category',
+        'categories',
         'description',
         'address',
         'lat',
@@ -2106,6 +2173,71 @@ class CloudService {
       .eq('offer_id', offerId)
       .eq('client_id', uid!);
 
+  /// Активные Honey конкретного провайдера — блок в его
+  /// публичном профиле у клиента.
+  Future<List<SalonOffer>> offersOf(String providerId) async {
+    List<dynamic> rows;
+    try {
+      final now = DateTime.now().toUtc().toIso8601String();
+      rows = await supabase
+          .from('offers')
+          .select('*, provider:profiles!offers_provider_id_fkey(name)')
+          .eq('provider_id', providerId)
+          .eq('active', true)
+          .or('valid_until.is.null,valid_until.gte.$now')
+          .or('valid_from.is.null,valid_from.lte.$now')
+          .order('created_at', ascending: false);
+    } on PostgrestException {
+      rows = await supabase
+          .from('offers')
+          .select('*, provider:profiles!offers_provider_id_fkey(name)')
+          .eq('provider_id', providerId)
+          .eq('active', true)
+          .order('created_at', ascending: false);
+    }
+    return [
+      for (final r in rows)
+        SalonOffer.fromMap(r as Map<String, dynamic>),
+    ].where((o) => o.isLive).toList();
+  }
+
+  /// id предложений, которые я уже использовал при записи.
+  /// Старые базы без offer_redemptions — пустое множество.
+  Future<Set<int>> myRedeemedOfferIds() async {
+    final id = uid;
+    if (id == null) return {};
+    final rows = await supabase
+        .from('offer_redemptions')
+        .select('offer_id')
+        .eq('client_id', id);
+    return {for (final r in rows) _parseInt(r['offer_id'])};
+  }
+
+  /// True, если клиент уже использовал этот Honey.
+  Future<bool> hasRedeemed(int offerId) async {
+    final id = uid;
+    if (id == null) return false;
+    final row = await supabase
+        .from('offer_redemptions')
+        .select('id')
+        .eq('offer_id', offerId)
+        .eq('client_id', id)
+        .maybeSingle();
+    return row != null;
+  }
+
+  /// Погасить Honey после успешной записи. unique(offer_id, client_id)
+  /// на сервере не даст использовать предложение дважды.
+  Future<void> redeemOffer(int offerId, int appointmentId) =>
+      supabase.from('offer_redemptions').upsert(
+        {
+          'offer_id': offerId,
+          'client_id': uid,
+          'appointment_id': appointmentId,
+        },
+        onConflict: 'offer_id, client_id',
+      );
+
   /// Клиенты, добавившие меня в избранное — для push о новых
   /// услугах/фото/Honey (RLS разрешает читать свои fan-строки).
   Future<List<String>> fanClientIds() async {
@@ -2209,6 +2341,7 @@ class SalonOffer {
     this.validFrom,
     this.validUntil,
     this.isGift = false,
+    this.used = false,
     this.createdAt,
   });
 
@@ -2242,6 +2375,10 @@ class SalonOffer {
 
   /// Подарено мне конкретно салоном/мастером.
   final bool isGift;
+
+  /// Я уже использовал этот Honey при записи — показываем
+  /// перечёркнутым с пометкой «Использовано».
+  final bool used;
   final bool active;
   final DateTime? createdAt;
 
@@ -2278,6 +2415,27 @@ class SalonOffer {
         validFrom: validFrom,
         validUntil: validUntil,
         isGift: true,
+        used: used,
+        createdAt: createdAt,
+      );
+
+  SalonOffer copyUsed() => SalonOffer(
+        id: id,
+        providerId: providerId,
+        providerName: providerName,
+        title: title,
+        description: description,
+        value: value,
+        active: active,
+        imageUrl: imageUrl,
+        linkUrl: linkUrl,
+        discountPercent: discountPercent,
+        allServices: allServices,
+        serviceIds: serviceIds,
+        validFrom: validFrom,
+        validUntil: validUntil,
+        isGift: isGift,
+        used: true,
         createdAt: createdAt,
       );
 

@@ -7,6 +7,7 @@ import 'package:bizzy_app/app_theme.dart';
 import 'package:bizzy_app/cloud/auth_screens.dart';
 import 'package:bizzy_app/cloud/client_app.dart';
 import 'package:bizzy_app/cloud/cloud_service.dart';
+import 'package:bizzy_app/cloud/credentials_dialog.dart';
 import 'package:bizzy_app/cloud/fan_push.dart';
 import 'package:bizzy_app/cloud/master_screens.dart';
 import 'package:bizzy_app/cloud/offers_screens.dart';
@@ -68,6 +69,7 @@ Future<void> main() async {
   );
   await initializeDateFormatting('ru_RU', null);
   await loadAppTheme();
+  await loadBizzyLook();
   await _loadCurrency();
   await PushNotificationService.init();
   runApp(const BizzyApp());
@@ -2263,7 +2265,10 @@ class SessionStore {
 }
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.showCredentials = false});
+
+  /// Есть облачная сессия — показываем «Изменить логин и пароль».
+  final bool showCredentials;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -2394,7 +2399,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 32),
+                  if (widget.showCredentials) ...[
+                    const SizedBox(height: 24),
+                    // Логин/пароль облачного аккаунта — здесь же,
+                    // чтобы настройки были у всех ролей в одном месте.
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => showCredentialsEditor(context),
+                        icon: const Icon(Icons.key_outlined),
+                        label: const Text('Изменить логин и пароль'),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
@@ -3588,6 +3606,16 @@ class _HomeTabState extends State<HomeTab> {
                                     Brightness.light
                                 ? Colors.black
                                 : Colors.white,
+                          ),
+                          // Выбранный день — жёлтая заливка и чёрная
+                          // цифра, а не дефолтный лиловый круг.
+                          selectedDecoration: const BoxDecoration(
+                            color: bizzySeedColor,
+                            shape: BoxShape.circle,
+                          ),
+                          selectedTextStyle: const TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                         calendarBuilders: CalendarBuilders<Object>(
@@ -5564,11 +5592,23 @@ class _MoreTabState extends State<MoreTab> {
             title: Text(widget.cloudRole == 'salon' ? 'Сотрудники' : 'Мастера'),
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute(
-                builder: (context) => ContactsScreen(
-                  database: widget.database,
-                  type: ContactType.master,
-                  companyId: widget.company.id,
-                ),
+                // У салона «Сотрудники» — облачная команда
+                // (нанятые мастера), а не локальный справочник.
+                builder: (context) => widget.cloudRole == 'salon'
+                    ? SalonTeamScreen(
+                        localDirectoryBuilder: (onAddMaster) =>
+                            ContactsScreen(
+                          database: widget.database,
+                          type: ContactType.master,
+                          companyId: widget.company.id,
+                          onAddOverride: onAddMaster,
+                        ),
+                      )
+                    : ContactsScreen(
+                        database: widget.database,
+                        type: ContactType.master,
+                        companyId: widget.company.id,
+                      ),
               ),
             ),
           ),
@@ -5577,7 +5617,9 @@ class _MoreTabState extends State<MoreTab> {
           title: const Text('Настройки'),
           onTap: () => Navigator.of(context).push<void>(
             MaterialPageRoute(
-              builder: (context) => const SettingsScreen(),
+              builder: (context) => SettingsScreen(
+                showCredentials: cloudSignedIn && !widget.offlineMode,
+              ),
             ),
           ),
         ),

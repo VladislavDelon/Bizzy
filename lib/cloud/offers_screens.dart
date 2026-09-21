@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app_theme.dart';
 import '../currency.dart';
 import 'cloud_service.dart';
 import 'fan_push.dart';
@@ -543,17 +544,31 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
 
   Future<void> _load() async {
     try {
-      final offers = await _cloud.activeOffers();
-      // Подарки — отдельно: если миграция offer_gifts ещё не
-      // применена, витрина всё равно работает.
-      List<SalonOffer> gifts = [];
-      try {
-        gifts = await _cloud.giftedOffers();
-      } catch (_) {}
+      // Витрина, подарки и «уже использованные» — параллельно:
+      // вкладка открывается за один раунд-трип, а не за три.
+      final results = await Future.wait([
+        _cloud.activeOffers(),
+        _cloud.giftedOffers()
+            .then<List<SalonOffer>>((v) => v)
+            .catchError((_) => <SalonOffer>[]),
+        _cloud.myRedeemedOfferIds()
+            .then<Set<int>>((v) => v)
+            .catchError((_) => <int>{}),
+      ]);
+      final usedIds = results[2] as Set<int>;
+      var offers = results[0] as List<SalonOffer>;
+      var gifts = results[1] as List<SalonOffer>;
+      // Подарки не дублируем в общей витрине.
+      final giftIds = gifts.map((g) => g.id).toSet();
+      offers = offers.where((o) => !giftIds.contains(o.id)).toList();
+      List<SalonOffer> mark(List<SalonOffer> list) => [
+            for (final o in list)
+              usedIds.contains(o.id) ? o.copyUsed() : o,
+          ];
       if (!mounted) return;
       setState(() {
-        _offers = offers;
-        _gifts = gifts;
+        _offers = mark(offers);
+        _gifts = mark(gifts);
         _loading = false;
         _error = null;
       });
@@ -762,19 +777,36 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                         ),
                       ],
                       const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: widget.onBookOffer == null
-                              ? null
-                              : () {
-                                  Navigator.of(sheetContext).pop();
-                                  widget.onBookOffer!(offer);
-                                },
-                          icon: const Icon(Icons.event_available),
-                          label: const Text('Записаться'),
+                      if (offer.used)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 12),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme
+                                .surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          child: const Text(
+                            'Использовано',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        )
+                      else
+                        SizedBox(
+                          width: double.infinity,
+                          child: bizzyFilledButton(
+                            onPressed: widget.onBookOffer == null
+                                ? null
+                                : () {
+                                    Navigator.of(sheetContext).pop();
+                                    widget.onBookOffer!(offer);
+                                  },
+                            icon: Icons.event_available,
+                            child: const Text('Записаться'),
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -823,7 +855,23 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                           style: theme.textTheme.labelLarge,
                         ),
                       ),
-                      if (o.value.isNotEmpty)
+                      if (o.used)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme
+                                .colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'Использовано',
+                            style: theme.textTheme.labelSmall,
+                          ),
+                        )
+                      else if (o.value.isNotEmpty)
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
@@ -845,7 +893,11 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                   const SizedBox(height: 8),
                   Text(
                     o.title,
-                    style: theme.textTheme.titleMedium,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      decoration:
+                          o.used ? TextDecoration.lineThrough : null,
+                      color: o.used ? theme.colorScheme.outline : null,
+                    ),
                   ),
                   if (o.description.isNotEmpty) ...[
                     const SizedBox(height: 4),

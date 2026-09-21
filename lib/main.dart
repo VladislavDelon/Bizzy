@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:bizzy_app/app_theme.dart';
 import 'package:bizzy_app/cloud/auth_screens.dart';
 import 'package:bizzy_app/cloud/client_app.dart';
 import 'package:bizzy_app/cloud/cloud_service.dart';
 import 'package:bizzy_app/cloud/master_screens.dart';
+import 'package:bizzy_app/cloud/offers_screens.dart';
 import 'package:bizzy_app/cloud/supabase_config.dart';
 import 'package:bizzy_app/currency.dart';
 import 'package:bizzy_app/notifications/notifications_screen.dart';
@@ -35,8 +37,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-final ValueNotifier<ThemeMode> _themeMode = ValueNotifier(ThemeMode.system);
-
 Widget _priceText(
   double price, {
   String prefix = '',
@@ -53,27 +53,6 @@ Widget _priceText(
   );
 }
 
-ThemeMode _themeModeFromString(String? value) {
-  return switch (value) {
-    'light' => ThemeMode.light,
-    'dark' => ThemeMode.dark,
-    _ => ThemeMode.system,
-  };
-}
-
-String _themeModeToString(ThemeMode value) {
-  return switch (value) {
-    ThemeMode.light => 'light',
-    ThemeMode.dark => 'dark',
-    _ => 'system',
-  };
-}
-
-Future<void> _loadTheme() async {
-  final prefs = await SharedPreferences.getInstance();
-  _themeMode.value = _themeModeFromString(prefs.getString('bizzy_theme_mode'));
-}
-
 Future<void> _loadCurrency() async {
   final prefs = await SharedPreferences.getInstance();
   appCurrency.value = Currency.fromString(prefs.getString('bizzy_currency'));
@@ -87,7 +66,7 @@ Future<void> main() async {
     publishableKey: supabasePublishableKey,
   );
   await initializeDateFormatting('ru_RU', null);
-  await _loadTheme();
+  await loadAppTheme();
   await _loadCurrency();
   await PushNotificationService.init();
   runApp(const BizzyApp());
@@ -117,13 +96,13 @@ class BizzyApp extends StatelessWidget {
       });
     }
     return ListenableBuilder(
-      listenable: _themeMode,
+      listenable: appThemeMode,
       builder: (context, child) => MaterialApp(
         title: 'Bizzy',
         navigatorKey: PushNotificationService.navigatorKey,
-        themeMode: _themeMode.value,
-        theme: _bizzyTheme(Brightness.light),
-        darkTheme: _bizzyTheme(Brightness.dark),
+        themeMode: appThemeMode.value,
+        theme: bizzyTheme(Brightness.light),
+        darkTheme: bizzyTheme(Brightness.dark),
         locale: const Locale('ru'),
         supportedLocales: const [Locale('ru')],
         localizationsDelegates: const [
@@ -151,61 +130,6 @@ String _formatDateTime(DateTime dateTime) {
   final hour = dateTime.hour.toString().padLeft(2, '0');
   final minute = dateTime.minute.toString().padLeft(2, '0');
   return '${dateTime.day}.${dateTime.month}.${dateTime.year} $hour:$minute';
-}
-
-ThemeData _bizzyTheme(Brightness brightness) {
-  const seedColor = Color(0xFFFFD600);
-  final isLight = brightness == Brightness.light;
-  final unselectedColor = isLight ? Colors.grey : Colors.grey[400]!;
-  const selectedIconColor = Colors.black;
-  final selectedLabelColor = isLight ? Colors.black : Colors.white;
-  return ThemeData(
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: seedColor,
-      brightness: brightness,
-    ),
-    useMaterial3: true,
-    scaffoldBackgroundColor: isLight ? Colors.white : Colors.black,
-    appBarTheme: AppBarTheme(
-      backgroundColor: isLight ? Colors.white : Colors.black,
-      foregroundColor: isLight ? Colors.black : Colors.white,
-      iconTheme: IconThemeData(
-        color: isLight ? Colors.black : Colors.white,
-      ),
-      titleTextStyle: TextStyle(
-        color: isLight ? Colors.black : Colors.white,
-        fontSize: 20,
-        fontWeight: FontWeight.w500,
-      ),
-      elevation: 0,
-    ),
-    floatingActionButtonTheme: const FloatingActionButtonThemeData(
-      backgroundColor: seedColor,
-      foregroundColor: Colors.black,
-      extendedTextStyle: TextStyle(color: Colors.black),
-    ),
-    navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: isLight ? null : Colors.black,
-      indicatorColor: seedColor,
-      iconTheme: WidgetStateProperty.resolveWith((states) {
-        final selected = states.contains(WidgetState.selected);
-        return IconThemeData(
-          color: selected ? selectedIconColor : unselectedColor,
-        );
-      }),
-      labelTextStyle: WidgetStateProperty.resolveWith((states) {
-        final selected = states.contains(WidgetState.selected);
-        return TextStyle(
-          color: selected ? selectedLabelColor : unselectedColor,
-        );
-      }),
-    ),
-    pageTransitionsTheme: const PageTransitionsTheme(
-      builders: {
-        TargetPlatform.android: ZoomPageTransitionsBuilder(),
-      },
-    ),
-  );
 }
 
 class AppUpdate {
@@ -2351,13 +2275,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ThemeMode.dark: 'Тёмная',
   };
 
-  late ThemeMode _value = _themeMode.value;
+  late ThemeMode _value = appThemeMode.value;
 
-  Future<void> _save() async {
-    final prefs = await SharedPreferences.getInstance();
-    _themeMode.value = _value;
-    await prefs.setString('bizzy_theme_mode', _themeModeToString(_value));
-  }
+  Future<void> _save() => saveAppTheme(_value);
 
   Future<void> _checkForUpdate(BuildContext context) async {
     if (!Platform.isAndroid) return;
@@ -2426,6 +2346,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               label: Text(e.value),
                             ))
                         .toList(),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Светлая тема — «стеклянная»: полупрозрачные '
+                    'карточки и панель навигации с блюром.',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 24),
                   Text(
@@ -3047,6 +2973,10 @@ class _MainShellState extends State<MainShell> {
   bool _loading = true;
   int _pendingBookings = 0;
 
+  /// Бейдж команды: у салона — новые ответы мастеров на
+  /// приглашения, у мастера — входящие приглашения от салонов.
+  int _teamBadge = 0;
+
   @override
   void initState() {
     super.initState();
@@ -3144,6 +3074,22 @@ class _MainShellState extends State<MainShell> {
     } catch (_) {
       // Нет сети — оставляем старое значение.
     }
+    await _loadTeamBadge();
+  }
+
+  /// Счётчик для бейджа: салону — непросмотренные ответы мастеров,
+  /// мастеру — ожидающие приглашения от салонов.
+  Future<void> _loadTeamBadge() async {
+    if (!cloudSignedIn || widget.offlineMode) return;
+    try {
+      final cloud = CloudService();
+      final count = switch (widget.cloudRole) {
+        'salon' => await cloud.unseenTeamResponses(),
+        'master' => (await cloud.myTeamInvites()).length,
+        _ => 0,
+      };
+      if (mounted) setState(() => _teamBadge = count);
+    } catch (_) {}
   }
 
   Future<void> _loadTasks() async {
@@ -3303,6 +3249,7 @@ class _MainShellState extends State<MainShell> {
         pendingBookings: _pendingBookings,
         appointments: _allAppointments,
         appointmentsLoading: _loading,
+        cloudRole: widget.cloudRole,
       ),
       ServicesTab(
         database: _db,
@@ -3368,47 +3315,75 @@ class _MainShellState extends State<MainShell> {
           ),
         ],
       ),
+      // В светлой «стеклянной» теме контент заходит под
+      // полупрозрачную навигацию — без этого блюру нечего размывать.
+      extendBody: bizzyGlassActive(context),
       body: IndexedStack(
         index: _currentIndex,
         children: tabs,
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
-          setState(() => _currentIndex = index);
-          // Освежаем точки-дела на неделе после правок в «Моих делах».
-          _loadTasks();
-        },
-        destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.event_note),
-            label: 'Записи',
-          ),
-          NavigationDestination(
-            icon: Icon(
-              widget.cloudRole == 'salon'
-                  ? Icons.content_cut
-                  : Icons.task_alt,
+      bottomNavigationBar: bizzyNavBar(
+        context,
+        child: NavigationBar(
+          selectedIndex: _currentIndex,
+          onDestinationSelected: (index) {
+            setState(() => _currentIndex = index);
+            // Салон открыл «Мастера» — ответы на приглашения
+            // считаем просмотренными, бейдж гаснет.
+            if (index == 1 && widget.cloudRole == 'salon') {
+              CloudService()
+                  .markTeamResponsesSeen()
+                  .catchError((_) {})
+                  .whenComplete(_loadTeamBadge);
+            }
+            // Освежаем точки-дела на неделе после правок в «Моих делах».
+            _loadTasks();
+            _loadTeamBadge();
+          },
+          destinations: [
+            const NavigationDestination(
+              icon: Icon(Icons.event_note),
+              label: 'Записи',
             ),
-            label: widget.cloudRole == 'salon' ? 'Мастера' : 'Мои дела',
-          ),
-          NavigationDestination(
-            icon: Badge(
-              isLabelVisible: _pendingBookings > 0,
-              label: Text('$_pendingBookings'),
-              child: const Icon(Icons.people_outline),
+            NavigationDestination(
+              icon: Badge(
+                // У салона — кружок с числом ответов мастеров.
+                isLabelVisible:
+                    widget.cloudRole == 'salon' && _teamBadge > 0,
+                label: Text('$_teamBadge'),
+                child: Icon(
+                  widget.cloudRole == 'salon'
+                      ? Icons.content_cut
+                      : Icons.task_alt,
+                ),
+              ),
+              label: widget.cloudRole == 'salon' ? 'Мастера' : 'Мои дела',
             ),
-            label: 'Клиенты',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.spa),
-            label: 'Услуги',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.menu),
-            label: 'Ещё',
-          ),
-        ],
+            NavigationDestination(
+              icon: Badge(
+                isLabelVisible: _pendingBookings > 0,
+                label: Text('$_pendingBookings'),
+                child: const Icon(Icons.people_outline),
+              ),
+              label: 'Клиенты',
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.spa),
+              label: 'Услуги',
+            ),
+            NavigationDestination(
+              icon: Badge(
+                // У мастера — кружок с числом приглашений от салонов
+                // (они лежат в «Ещё» → «Мой профиль» → «Приглашения»).
+                isLabelVisible:
+                    widget.cloudRole == 'master' && _teamBadge > 0,
+                label: Text('$_teamBadge'),
+                child: const Icon(Icons.menu),
+              ),
+              label: 'Ещё',
+            ),
+          ],
+        ),
       ),
       floatingActionButton: _currentIndex == 0
           ? FloatingActionButton.extended(
@@ -3903,12 +3878,17 @@ class ClientsTab extends StatefulWidget {
     this.pendingBookings = 0,
     this.appointments = const [],
     this.appointmentsLoading = false,
+    this.cloudRole = 'master',
   });
 
   final AppointmentsDatabase database;
   final Company company;
   final bool isVisible;
   final int pendingBookings;
+
+  /// Роль облачного аккаунта: 'master' | 'salon' — у салона
+  /// в шапке дополнительно кнопка «Хони» (предложения клиентам).
+  final String cloudRole;
 
   /// Записи для раздела «Финансы» внутри вкладки.
   final List<Appointment> appointments;
@@ -4269,6 +4249,25 @@ class _ClientsTabState extends State<ClientsTab> {
                 },
               ),
             ),
+            // «Хони» — скидки/сертификаты/бонусы, которые салон
+            // показывает клиентам в их вкладке «Хони».
+            if (widget.cloudRole == 'salon')
+              Card(
+                margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: ListTile(
+                  leading: const Icon(Icons.card_giftcard),
+                  title: const Text('Хони'),
+                  subtitle: const Text(
+                    'Скидки и сертификаты, которые видят клиенты',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute(
+                      builder: (_) => const SalonOffersScreen(),
+                    ),
+                  ),
+                ),
+              ),
           ],
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -4409,11 +4408,14 @@ class _ClientsTabState extends State<ClientsTab> {
       ),
       floatingActionButton: _showFinance
           ? null
-          : FloatingActionButton.extended(
-              heroTag: null,
-              onPressed: _addClient,
-              icon: const Icon(Icons.add),
-              label: const Text('Добавить клиента'),
+          : bizzyTabFab(
+              context,
+              child: FloatingActionButton.extended(
+                heroTag: null,
+                onPressed: _addClient,
+                icon: const Icon(Icons.add),
+                label: const Text('Добавить клиента'),
+              ),
             ),
     );
   }
@@ -5084,11 +5086,14 @@ class _ServicesTabState extends State<ServicesTab> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: null,
-        onPressed: _addService,
-        icon: const Icon(Icons.add),
-        label: const Text('Добавить услугу'),
+      floatingActionButton: bizzyTabFab(
+        context,
+        child: FloatingActionButton.extended(
+          heroTag: null,
+          onPressed: _addService,
+          icon: const Icon(Icons.add),
+          label: const Text('Добавить услугу'),
+        ),
       ),
     );
   }
@@ -5825,11 +5830,14 @@ class _ContactsScreenState extends State<ContactsScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: null,
-        onPressed: widget.onAddOverride ?? _addContact,
-        icon: const Icon(Icons.add),
-        label: Text(widget.type.addTitle),
+      floatingActionButton: bizzyTabFab(
+        context,
+        child: FloatingActionButton.extended(
+          heroTag: null,
+          onPressed: widget.onAddOverride ?? _addContact,
+          icon: const Icon(Icons.add),
+          label: Text(widget.type.addTitle),
+        ),
       ),
     );
   }

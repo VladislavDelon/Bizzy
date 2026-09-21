@@ -85,6 +85,11 @@ create table if not exists public.master_profiles (
   -- true у мастеров, которых салон создал через «Новый мастер» —
   -- только им салон может менять логин/пароль.
   managed_by_salon boolean not null default false,
+  -- Когда мастер вступил в текущий салон. Салону видны только
+  -- записи, созданные ПОСЛЕ вступления — личная история мастера
+  -- до трудоустройства скрыта. NULL у привязанных до появления
+  -- колонки = показывать всё (обратная совместимость).
+  salon_since timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -437,6 +442,8 @@ create policy "appt_select_salon_team" on public.appointments
       select 1 from public.master_profiles mp
       where mp.user_id = appointments.master_id
         and mp.salon_id = auth.uid()
+        and appointments.created_at >= coalesce(
+              mp.salon_since, '-infinity'::timestamptz)
     )
   );
 
@@ -448,6 +455,8 @@ create policy "appt_update_salon_team" on public.appointments
       select 1 from public.master_profiles mp
       where mp.user_id = appointments.master_id
         and mp.salon_id = auth.uid()
+        and appointments.created_at >= coalesce(
+              mp.salon_since, '-infinity'::timestamptz)
     )
   ) with check (
     auth.uid() = master_id
@@ -511,6 +520,8 @@ create table if not exists public.team_invites (
   master_id uuid not null references public.profiles(id) on delete cascade,
   status text not null default 'pending'
     check (status in ('pending', 'accepted', 'declined')),
+  -- Салон уже видел ответ мастера (бейдж на вкладке «Мастера»).
+  salon_seen boolean not null default false,
   created_at timestamptz not null default now(),
   unique (salon_id, master_id)
 );
@@ -527,3 +538,26 @@ create policy "ti_master_read" on public.team_invites
 drop policy if exists "ti_master_update" on public.team_invites;
 create policy "ti_master_update" on public.team_invites
   for update using (auth.uid() = master_id) with check (auth.uid() = master_id);
+
+-- ========== «ХОНИ» — ПРЕДЛОЖЕНИЯ САЛОНОВ ==========
+-- Сертификаты, скидки на первое посещение, бонусы. Создаёт
+-- салон/мастер, клиенты видят витрину во вкладке «Хони».
+create table if not exists public.offers (
+  id bigint generated always as identity primary key,
+  provider_id uuid not null references public.profiles(id) on delete cascade,
+  title text not null,
+  description text not null default '',
+  value text not null default '',
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+alter table public.offers enable row level security;
+
+drop policy if exists "offers_select" on public.offers;
+create policy "offers_select" on public.offers
+  for select using (auth.uid() is not null);
+
+drop policy if exists "offers_write" on public.offers;
+create policy "offers_write" on public.offers
+  for all using (auth.uid() = provider_id) with check (auth.uid() = provider_id);

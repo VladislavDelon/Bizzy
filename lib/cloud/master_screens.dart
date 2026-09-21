@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app_theme.dart';
 import '../notifications/push_service.dart';
 import 'cloud_service.dart';
 import 'credentials_dialog.dart';
@@ -937,6 +938,14 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                         : () => showCredentialsEditor(context),
                     icon: const Icon(Icons.key_outlined),
                     label: const Text('Изменить логин и пароль'),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: () => showAppearancePicker(context),
+                    icon: const Icon(Icons.palette_outlined),
+                    label: Text(
+                      'Внешний вид · ${themeModeLabel(appThemeMode.value)}',
+                    ),
                   ),
                   const SizedBox(height: 12),
                   FilledButton.tonalIcon(
@@ -1881,6 +1890,11 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
       try {
         invites = await _cloud.sentTeamInvites();
       } catch (_) {}
+      // Салон открыл «Мастера» — ответы мастеров считаем
+      // просмотренными, бейдж на вкладке гаснет.
+      try {
+        await _cloud.markTeamResponsesSeen();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _key = key;
@@ -1987,11 +2001,14 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
   }
 
   /// «Информация о записях»: сколько записей у мастера и на какую сумму
-  /// закрыты. Салон читает заявки своей команды по RLS-политике.
+  /// закрыты. Салон читает заявки своей команды по RLS-политике;
+  /// дополнительно отрезаем записи, созданные до вступления мастера
+  /// в салон (salon_since), — его личная история скрыта.
   Future<void> _showBookings(MasterCard m) async {
     List<CloudBooking> bookings;
     try {
-      bookings = await _cloud.masterBookingsFor(m.userId);
+      bookings =
+          await _cloud.masterBookingsFor(m.userId, since: m.salonSince);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 
+import '../app_theme.dart';
 import '../main.dart';
 import 'notification_service.dart';
 import 'task_model.dart';
@@ -273,11 +274,14 @@ class _TasksScreenState extends State<TasksScreen> {
                     ),
                   ],
                 ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: null,
-        onPressed: _add,
-        icon: const Icon(Icons.add),
-        label: const Text('Новое дело'),
+      floatingActionButton: bizzyTabFab(
+        context,
+        child: FloatingActionButton.extended(
+          heroTag: null,
+          onPressed: _add,
+          icon: const Icon(Icons.add),
+          label: const Text('Новое дело'),
+        ),
       ),
     );
   }

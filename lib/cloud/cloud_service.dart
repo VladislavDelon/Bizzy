@@ -338,6 +338,7 @@ class MasterCard {
     this.salonKey = '',
     this.autoAssign = false,
     this.managedBySalon = false,
+    this.salonSince,
   });
 
   final String userId;
@@ -380,6 +381,11 @@ class MasterCard {
   /// салон может менять логин/пароль. Приглашённым — не может.
   final bool managedBySalon;
 
+  /// Когда мастер вступил в текущий салон. Записи мастера,
+  /// созданные раньше этой даты, салону не показываются —
+  /// это его личная история до трудоустройства.
+  final DateTime? salonSince;
+
   bool get hasLocation => lat != null && lng != null;
   bool get isSalon => role == 'salon';
 
@@ -421,6 +427,7 @@ class MasterCard {
       autoAssign: _parseBool(map['auto_assign'], fallback: false),
       managedBySalon:
           _parseBool(map['managed_by_salon'], fallback: false),
+      salonSince: _parseDateTime(map['salon_since']),
     );
   }
 
@@ -523,6 +530,7 @@ class CloudBooking {
     this.masterAddress = '',
     this.servicePrice = 0,
     this.prepaymentStatus = 'none',
+    this.createdAt,
   });
 
   final int id;
@@ -546,6 +554,10 @@ class CloudBooking {
 
   /// 'none' | 'claimed' (клиент отметил оплату) | 'confirmed' (мастер подтвердил).
   final String prepaymentStatus;
+
+  /// Когда создана заявка — салон показывает мастеру только записи
+  /// после его вступления в команду (salon_since).
+  final DateTime? createdAt;
 
   bool get isPast => startsAt.isBefore(DateTime.now());
 
@@ -605,6 +617,7 @@ class CloudBooking {
         map['prepayment_status'],
         fallback: 'none',
       ),
+      createdAt: _parseDateTime(map['created_at']),
     );
   }
 }
@@ -848,6 +861,7 @@ class CloudService {
       'salon_key',
       'auto_assign',
       'managed_by_salon',
+      'salon_since',
     ];
     try {
       final rows = await _selectResilient(
@@ -921,6 +935,7 @@ class CloudService {
       'salon_key',
       'auto_assign',
       'managed_by_salon',
+      'salon_since',
     ];
     final rows = await _selectResilient(
       'master_profiles',
@@ -1343,6 +1358,7 @@ class CloudService {
         'salon_key',
         'auto_assign',
         'managed_by_salon',
+        'salon_since',
       ],
       inColumn: 'user_id',
       inValues: ids.toList(),
@@ -1660,6 +1676,7 @@ class CloudService {
         'salon_key',
         'auto_assign',
         'managed_by_salon',
+        'salon_since',
       ],
       eqColumn: 'salon_id',
       eqValue: uid!,
@@ -1716,6 +1733,8 @@ class CloudService {
       {
         'salon_id': rows.first['user_id'],
         'managed_by_salon': meta['salon_managed'] == true,
+        // Момент вступления — салону видны только записи после него.
+        'salon_since': DateTime.now().toUtc().toIso8601String(),
       },
       (p) =>
           supabase.from('master_profiles').update(p).eq('user_id', uid!),
@@ -1725,7 +1744,7 @@ class CloudService {
   /// Салон: уволить мастера (он становится самозанятым).
   Future<void> detachMaster(String masterId) =>
       _runWithMissingColumnFallback(
-        {'salon_id': null, 'managed_by_salon': false},
+        {'salon_id': null, 'managed_by_salon': false, 'salon_since': null},
         (p) => supabase
             .from('master_profiles')
             .update(p)
@@ -1851,6 +1870,7 @@ class CloudService {
         'salon_key',
         'auto_assign',
         'managed_by_salon',
+        'salon_since',
       ],
       inColumn: 'user_id',
       inValues: ids,
@@ -1905,22 +1925,153 @@ class CloudService {
         .update({'status': accept ? 'accepted' : 'declined'})
         .eq('id', invite.id);
     if (!accept) return;
-    await supabase
-        .from('master_profiles')
-        .update({'salon_id': invite.salonId})
-        .eq('user_id', uid!);
+    await _runWithMissingColumnFallback(
+      {
+        'salon_id': invite.salonId,
+        // Момент вступления — личные записи мастера до него
+        // салону не показываются.
+        'salon_since': DateTime.now().toUtc().toIso8601String(),
+      },
+      (p) =>
+          supabase.from('master_profiles').update(p).eq('user_id', uid!),
+    );
   }
 
+  /// Бейдж на вкладке «Мастера» у салона: ответы мастеров
+  /// (принял/отклонил), которые салон ещё не видел.
+  Future<int> unseenTeamResponses() async {
+    final rows = await supabase
+        .from('team_invites')
+        .select('id')
+        .eq('salon_id', uid!)
+        .neq('status', 'pending')
+        .eq('salon_seen', false);
+    return rows.length;
+  }
+
+  /// Салон открыл «Мастера» — ответы считаем просмотренными,
+  /// бейдж гаснет до следующего ответа.
+  Future<void> markTeamResponsesSeen() => _runWithMissingColumnFallback(
+        {'salon_seen': true},
+        (p) => supabase
+            .from('team_invites')
+            .update(p)
+            .eq('salon_id', uid!)
+            .eq('salon_seen', false),
+      );
+
   /// Записи конкретного мастера — для салона («Информация о записях»).
-  /// Чтение разрешено политикой appt_select_salon_team.
-  Future<List<CloudBooking>> masterBookingsFor(String masterId) async {
+  /// Чтение разрешено политикой appt_select_salon_team; [since]
+  /// дополнительно отрезает записи, созданные до вступления
+  /// мастера в салон, — личная история мастера не показывается.
+  Future<List<CloudBooking>> masterBookingsFor(
+    String masterId, {
+    DateTime? since,
+  }) async {
     final rows = await supabase
         .from('appointments')
         .select(
             '*, client:profiles!appointments_client_id_fkey(name, phone)')
         .eq('master_id', masterId)
         .order('starts_at', ascending: false);
-    return [for (final r in rows) CloudBooking.fromMap(r)];
+    final bookings = [for (final r in rows) CloudBooking.fromMap(r)];
+    if (since == null) return bookings;
+    // created_at может отсутствовать у старых записей — без даты
+    // не показываем: надёжнее скрыть лишнее, чем открыть личное.
+    return [
+      for (final b in bookings)
+        if (b.createdAt != null && !b.createdAt!.isBefore(since)) b,
+    ];
+  }
+
+  // ---------- «Хони» — предложения салонов ----------
+
+  /// Создать предложение от своего салона/мастера.
+  Future<void> createOffer({
+    required String title,
+    String description = '',
+    String value = '',
+  }) =>
+      supabase.from('offers').insert({
+        'provider_id': uid,
+        'title': title,
+        'description': description,
+        'value': value,
+      });
+
+  /// Мои предложения (управление у салона/мастера).
+  Future<List<SalonOffer>> myOffers() async {
+    final rows = await supabase
+        .from('offers')
+        .select()
+        .eq('provider_id', uid!)
+        .order('created_at', ascending: false);
+    return [for (final r in rows) SalonOffer.fromMap(r)];
+  }
+
+  /// Витрина «Хони» для клиента — активные предложения всех
+  /// салонов и мастеров с именами провайдеров.
+  Future<List<SalonOffer>> activeOffers() async {
+    final rows = await supabase
+        .from('offers')
+        .select('*, provider:profiles!offers_provider_id_fkey(name)')
+        .eq('active', true)
+        .order('created_at', ascending: false);
+    return [for (final r in rows) SalonOffer.fromMap(r)];
+  }
+
+  /// Включить/выключить предложение.
+  Future<void> setOfferActive(int id, bool active) => supabase
+      .from('offers')
+      .update({'active': active}).eq('id', id).eq('provider_id', uid!);
+
+  /// Удалить предложение.
+  Future<void> deleteOffer(int id) => supabase
+      .from('offers')
+      .delete()
+      .eq('id', id)
+      .eq('provider_id', uid!);
+}
+
+/// Предложение в «Хони» — сертификат, скидка, бонус от салона.
+class SalonOffer {
+  const SalonOffer({
+    required this.id,
+    required this.providerId,
+    required this.providerName,
+    required this.title,
+    required this.description,
+    required this.value,
+    required this.active,
+    this.createdAt,
+  });
+
+  final int id;
+  final String providerId;
+
+  /// Имя салона/мастера — из join с profiles (может быть пустым).
+  final String providerName;
+  final String title;
+  final String description;
+
+  /// Размер выгоды в свободной форме: «−20%», «500 ₸», «Бонус».
+  final String value;
+  final bool active;
+  final DateTime? createdAt;
+
+  factory SalonOffer.fromMap(Map<String, dynamic> map) {
+    final provider = _pickProfileMap(map['provider']);
+    return SalonOffer(
+      id: _parseInt(map['id']),
+      providerId: _parseString(map['provider_id']),
+      providerName:
+          provider != null ? _parseString(provider['name']) : '',
+      title: _parseString(map['title']),
+      description: _parseString(map['description']),
+      value: _parseString(map['value']),
+      active: _parseBool(map['active'], fallback: true),
+      createdAt: _parseDateTime(map['created_at']),
+    );
   }
 }
 

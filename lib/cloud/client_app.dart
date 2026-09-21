@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app_theme.dart';
 import '../currency.dart';
 import '../notifications/push_service.dart';
 import 'cloud_service.dart';
@@ -11,6 +12,7 @@ import 'credentials_dialog.dart';
 import 'geo_service.dart';
 import 'map_screens.dart';
 import 'master_public_profile.dart';
+import 'offers_screens.dart';
 
 /// Главный экран клиента: каталог мастеров, мои записи, профиль.
 class ClientHome extends StatefulWidget {
@@ -39,6 +41,7 @@ class _ClientHomeState extends State<ClientHome> {
     final pages = [
       ClientCatalogTab(profile: widget.profile),
       const ClientFavoritesTab(),
+      const ClientHoneyTab(),
       const ClientBookingsTab(),
       _ClientProfileTab(
         profile: widget.profile,
@@ -48,32 +51,43 @@ class _ClientHomeState extends State<ClientHome> {
       ),
     ];
     return Scaffold(
+      // Стеклянная тема: контент заходит под полупрозрачную
+      // навигацию с блюром.
+      extendBody: bizzyGlassActive(context),
       body: pages[_tab],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.room_service_outlined),
-            selectedIcon: Icon(Icons.room_service),
-            label: 'Услуги',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.favorite_outline),
-            selectedIcon: Icon(Icons.favorite),
-            label: 'Избранное',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.event_note_outlined),
-            selectedIcon: Icon(Icons.event_note),
-            label: 'Записи',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Профиль',
-          ),
-        ],
+      bottomNavigationBar: bizzyNavBar(
+        context,
+        child: NavigationBar(
+          selectedIndex: _tab,
+          onDestinationSelected: (i) => setState(() => _tab = i),
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.room_service_outlined),
+              selectedIcon: Icon(Icons.room_service),
+              label: 'Услуги',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.favorite_outline),
+              selectedIcon: Icon(Icons.favorite),
+              label: 'Избранное',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.card_giftcard_outlined),
+              selectedIcon: Icon(Icons.card_giftcard),
+              label: 'Хони',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.event_note_outlined),
+              selectedIcon: Icon(Icons.event_note),
+              label: 'Записи',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline),
+              selectedIcon: Icon(Icons.person),
+              label: 'Профиль',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2018,6 +2032,14 @@ class _ClientProfileTab extends StatelessWidget {
             onPressed: () => showCredentialsEditor(context),
             icon: const Icon(Icons.key_outlined),
             label: const Text('Изменить логин и пароль'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => showAppearancePicker(context),
+            icon: const Icon(Icons.palette_outlined),
+            label: Text(
+              'Внешний вид · ${themeModeLabel(appThemeMode.value)}',
+            ),
           ),
           const SizedBox(height: 24),
           FilledButton.tonalIcon(

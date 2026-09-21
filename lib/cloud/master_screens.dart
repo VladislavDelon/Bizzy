@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_contacts/flutter_contacts.dart' as phone;
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -67,6 +68,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   final _prepayAmountController = TextEditingController();
   final _prepayLinkController = TextEditingController();
 
+  /// Входящие приглашения от салонов (только у мастера).
+  List<TeamInvite> _invites = [];
+
   @override
   void initState() {
     super.initState();
@@ -107,6 +111,12 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       } catch (e, st) {
         await SyncLog.write('portfolio', 'Загрузка портфолио: $e\n$st');
       }
+      List<TeamInvite> invites = [];
+      if (!profile.isSalon) {
+        try {
+          invites = await _cloud.myTeamInvites();
+        } catch (_) {}
+      }
       if (!mounted) return;
       setState(() {
         _categories = categories;
@@ -129,6 +139,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
             ? card.prepayAmount.toStringAsFixed(0)
             : '';
         _prepayLinkController.text = card?.prepayLink ?? '';
+        _invites = invites;
         _loading = false;
       });
     } catch (_) {
@@ -138,6 +149,95 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _error = 'Не удалось загрузить профиль';
       });
     }
+  }
+
+  /// Мастер отвечает на приглашение салона из профиля.
+  Future<void> _respondInvite(TeamInvite invite, bool accept) async {
+    try {
+      await _cloud.respondTeamInvite(invite, accept);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(accept
+              ? 'Вы в команде салона — заявки будут приходить сюда'
+              : 'Приглашение отклонено'),
+        ),
+      );
+      _load();
+    } catch (e) {
+      await SyncLog.write('team_invite', e.toString());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось ответить: $e')),
+      );
+    }
+  }
+
+  /// Раздел «Приглашения» — список входящих запросов от салонов.
+  Future<void> _openInvites() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Приглашения'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: _invites.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('Новых приглашений нет'),
+                )
+              : ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final inv in _invites)
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '«${inv.otherName.isEmpty ? 'Салон' : inv.otherName}» '
+                                'приглашает вас в команду',
+                                style:
+                                    Theme.of(context).textTheme.titleSmall,
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                children: [
+                                  FilledButton.tonalIcon(
+                                    onPressed: () {
+                                      Navigator.of(context).pop();
+                                      _respondInvite(inv, true);
+                                    },
+                                    icon: const Icon(Icons.check, size: 18),
+                                    label: const Text('Принять'),
+                                  ),
+                                  OutlinedButton(
+                                    onPressed: () {
+                                      Navigator.of(context).pop();
+                                      _respondInvite(inv, false);
+                                    },
+                                    child: const Text('Отклонить'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Закрыть'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _pickAvatar() async {
@@ -810,6 +910,26 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                   label: const Text('Сохранить'),
                 ),
                 if (!widget.isFirstSetup) ...[
+                  if (!_isSalon) ...[
+                    const SizedBox(height: 12),
+                    Card(
+                      margin: EdgeInsets.zero,
+                      child: ListTile(
+                        leading: Badge(
+                          isLabelVisible: _invites.isNotEmpty,
+                          label: Text('${_invites.length}'),
+                          child: const Icon(Icons.mail_outline),
+                        ),
+                        title: const Text('Приглашения'),
+                        subtitle: Text(
+                          _invites.isEmpty
+                              ? 'Запросы от салонов появятся здесь'
+                              : 'Есть новые приглашения',
+                        ),
+                        onTap: _openInvites,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   FilledButton.tonalIcon(
                     onPressed: _saving
@@ -2033,6 +2153,27 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
     }
   }
 
+  /// Выбор контакта из телефонной книги — возвращает (имя, телефон).
+  Future<(String, String)?> _pickPhoneContact() async {
+    final status = await phone.FlutterContacts.permissions.request(
+      phone.PermissionType.read,
+    );
+    if (status != phone.PermissionStatus.granted) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Нет доступа к контактам — разрешите в настройках'),
+        ),
+      );
+      return null;
+    }
+    if (!mounted) return null;
+    return showDialog<(String, String)>(
+      context: context,
+      builder: (context) => const _PhoneContactPickerDialog(),
+    );
+  }
+
   /// Создание аккаунта мастера — второй клиент, сессия салона не слетает.
   Future<void> _createMaster() async {
     final nameCtrl = TextEditingController();
@@ -2052,6 +2193,19 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  OutlinedButton.icon(
+                    onPressed: saving
+                        ? null
+                        : () async {
+                            final picked = await _pickPhoneContact();
+                            if (picked == null) return;
+                            nameCtrl.text = picked.$1;
+                            phoneCtrl.text = picked.$2;
+                          },
+                    icon: const Icon(Icons.contact_phone_outlined, size: 18),
+                    label: const Text('Импорт из телефона'),
+                  ),
+                  const SizedBox(height: 12),
                   TextFormField(
                     controller: nameCtrl,
                     textCapitalization: TextCapitalization.words,
@@ -2475,6 +2629,132 @@ class _MasterSearchDialogState extends State<_MasterSearchDialog> {
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Закрыть'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Выбор одного контакта из телефонной книги — возвращает
+/// (имя, телефон) для автозаполнения формы создания мастера.
+class _PhoneContactPickerDialog extends StatefulWidget {
+  const _PhoneContactPickerDialog();
+
+  @override
+  State<_PhoneContactPickerDialog> createState() =>
+      _PhoneContactPickerDialogState();
+}
+
+class _PhoneContactPickerDialogState
+    extends State<_PhoneContactPickerDialog> {
+  List<phone.Contact> _contacts = [];
+  final _searchController = TextEditingController();
+  bool _loading = true;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _init() async {
+    try {
+      final list = await phone.FlutterContacts.getAll(
+        properties: {phone.ContactProperty.phone},
+      );
+      list.sort(
+        (a, b) => (a.displayName ?? '').compareTo(b.displayName ?? ''),
+      );
+      if (mounted) {
+        setState(() {
+          _contacts = list;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _failed = true;
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  bool _matches(phone.Contact c) {
+    final query = _searchController.text.trim().toLowerCase();
+    if (query.isEmpty) return true;
+    if ((c.displayName ?? '').toLowerCase().contains(query)) return true;
+    return c.phones.any((p) => p.number.toLowerCase().contains(query));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _contacts.where(_matches).toList();
+    return AlertDialog(
+      title: const Text('Импорт из телефона'),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 420,
+        child: Column(
+          children: [
+            TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                labelText: 'Поиск по имени или телефону',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            if (_loading)
+              const Expanded(
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_failed)
+              const Expanded(
+                child: Center(child: Text('Не удалось прочитать контакты')),
+              )
+            else if (filtered.isEmpty)
+              const Expanded(child: Center(child: Text('Ничего не найдено')))
+            else
+              Expanded(
+                child: ListView.builder(
+                  itemCount: filtered.length,
+                  itemBuilder: (context, i) {
+                    final c = filtered[i];
+                    final number = c.phones.isNotEmpty
+                        ? c.phones.first.number
+                        : '';
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.person_outline),
+                      title: Text(c.displayName ?? 'Без имени'),
+                      subtitle:
+                          number.isEmpty ? null : Text(number),
+                      onTap: () => Navigator.of(context).pop(
+                        ((c.displayName ?? '').trim(), number),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Отмена'),
         ),
       ],
     );

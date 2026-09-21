@@ -157,6 +157,10 @@ create table if not exists public.appointments (
   service_price numeric not null default 0,
   -- По какому Honey записался клиент (если через акцию).
   offer_id bigint,
+  -- Заявка пришла через салон (клиент записался в салон или
+  -- салон назначил её мастеру) — салон видит только такие
+  -- заявки своих мастеров; личные заявки мастера скрыты.
+  salon_id uuid references public.profiles(id),
   notes text not null default '',
   created_at timestamptz not null default now()
 );
@@ -446,32 +450,22 @@ create policy "client_reviews_delete" on public.client_reviews
   for delete using (auth.uid() = master_id);
 
 -- ========== САЛОННАЯ КОМАНДА ==========
--- Салон читает заявки своих мастеров.
+-- Салон читает только «салонные» заявки: помеченные salon_id = я
+-- (клиент записался в салон или салон назначил её мастеру).
+-- Личные заявки мастеров команды салону недоступны.
 drop policy if exists "appt_select_salon_team" on public.appointments;
 create policy "appt_select_salon_team" on public.appointments
-  for select using (
-    exists (
-      select 1 from public.master_profiles mp
-      where mp.user_id = appointments.master_id
-        and mp.salon_id = auth.uid()
-        and appointments.created_at >= coalesce(
-              mp.salon_since, '-infinity'::timestamptz)
-    )
-  );
+  for select using (salon_id = auth.uid());
 
--- Салон меняет заявки команды (назначить/переназначить мастера).
+-- Салон меняет свои и салонные заявки (назначить/переназначить
+-- мастера команды, подтвердить, отменить).
 drop policy if exists "appt_update_salon_team" on public.appointments;
 create policy "appt_update_salon_team" on public.appointments
   for update using (
-    exists (
-      select 1 from public.master_profiles mp
-      where mp.user_id = appointments.master_id
-        and mp.salon_id = auth.uid()
-        and appointments.created_at >= coalesce(
-              mp.salon_since, '-infinity'::timestamptz)
-    )
+    auth.uid() = master_id or salon_id = auth.uid()
   ) with check (
     auth.uid() = master_id
+    or salon_id = auth.uid()
     or exists (
       select 1 from public.master_profiles mp
       where mp.user_id = appointments.master_id

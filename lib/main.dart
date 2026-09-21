@@ -39,11 +39,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-Widget _priceText(
-  double price, {
-  String prefix = '',
-  TextStyle? style,
-}) {
+Widget _priceText(double price, {String prefix = '', TextStyle? style}) {
   return ValueListenableBuilder<Currency>(
     valueListenable: appCurrency,
     builder: (context, currency, _) => Text(
@@ -121,7 +117,8 @@ class BizzyApp extends StatelessWidget {
   }
 }
 
-DateTime _startOfDay(DateTime date) => DateTime(date.year, date.month, date.day);
+DateTime _startOfDay(DateTime date) =>
+    DateTime(date.year, date.month, date.day);
 
 String _formatTime(DateTime dateTime) {
   final hour = dateTime.hour.toString().padLeft(2, '0');
@@ -176,8 +173,7 @@ class UpdateLog {
     try {
       final file = File(await _path());
       final now = DateTime.now().toLocal();
-      final line =
-          '[${now.toIso8601String()}] $message\n';
+      final line = '[${now.toIso8601String()}] $message\n';
       await file.writeAsString(line, mode: FileMode.append, flush: true);
     } catch (_) {
       // Не блокируем обновление из-за ошибки лога.
@@ -263,24 +259,25 @@ class UpdateService {
       for (var attempt = 1; attempt <= 3; attempt++) {
         await UpdateLog.write('Попытка загрузки $attempt/3');
         try {
-          response = await Dio(
-            BaseOptions(
-              connectTimeout: const Duration(seconds: 30),
-              receiveTimeout: const Duration(minutes: 5),
-              sendTimeout: const Duration(seconds: 30),
-            ),
-          ).download(
-            url.toString(),
-            path,
-            onReceiveProgress: (received, total) {
-              if (total > 0) onProgress(received / total);
-            },
-            options: Options(
-              followRedirects: true,
-              maxRedirects: 5,
-              validateStatus: (s) => s != null && s >= 200 && s < 300,
-            ),
-          );
+          response =
+              await Dio(
+                BaseOptions(
+                  connectTimeout: const Duration(seconds: 30),
+                  receiveTimeout: const Duration(minutes: 5),
+                  sendTimeout: const Duration(seconds: 30),
+                ),
+              ).download(
+                url.toString(),
+                path,
+                onReceiveProgress: (received, total) {
+                  if (total > 0) onProgress(received / total);
+                },
+                options: Options(
+                  followRedirects: true,
+                  maxRedirects: 5,
+                  validateStatus: (s) => s != null && s >= 200 && s < 300,
+                ),
+              );
           if (response.statusCode == 200) {
             await UpdateLog.write('Загрузка успешна (200)');
             break;
@@ -301,23 +298,33 @@ class UpdateService {
       }
       if (response?.statusCode != 200) {
         if (lastError != null) throw lastError;
-        throw Exception('Сервер вернул ${response?.statusCode} при загрузке APK');
+        throw Exception(
+          'Сервер вернул ${response?.statusCode} при загрузке APK',
+        );
       }
       final file = File(path);
       if (!file.existsSync()) {
         throw Exception('APK не загрузился');
       }
       final length = await file.length();
-      await UpdateLog.write('APK сохранён по пути: $path, размер: $length байт');
+      await UpdateLog.write(
+        'APK сохранён по пути: $path, размер: $length байт',
+      );
       if (length < 1024) {
-        throw Exception('APK загружен, но файл слишком мал — возможно, ссылка ведёт не на APK');
+        throw Exception(
+          'APK загружен, но файл слишком мал — возможно, ссылка ведёт не на APK',
+        );
       }
       final header = await file.openRead(0, 4).first;
       final isApk =
           header.isNotEmpty && String.fromCharCodes(header).startsWith('PK');
-      await UpdateLog.write('Заголовок APK: ${header.isEmpty ? 'пусто' : String.fromCharCodes(header)}');
+      await UpdateLog.write(
+        'Заголовок APK: ${header.isEmpty ? 'пусто' : String.fromCharCodes(header)}',
+      );
       if (!isApk) {
-        throw Exception('Загруженный файл не похож на APK (плохая ссылка или redirect)');
+        throw Exception(
+          'Загруженный файл не похож на APK (плохая ссылка или redirect)',
+        );
       }
 
       await UpdateLog.write('Чтение информации из APK...');
@@ -331,9 +338,12 @@ class UpdateService {
             'а текущее приложение — $currentPackage.',
           );
         }
-        final installedSignature =
-            await InstallService.getInstalledSignature(currentPackage);
-        await UpdateLog.write('Подпись установленного приложения: $installedSignature');
+        final installedSignature = await InstallService.getInstalledSignature(
+          currentPackage,
+        );
+        await UpdateLog.write(
+          'Подпись установленного приложения: $installedSignature',
+        );
         await UpdateLog.write('Подпись нового APK: ${apkInfo.signatureSha256}');
         if (installedSignature != null &&
             installedSignature.isNotEmpty &&
@@ -509,10 +519,8 @@ Future<void> _showUpdateFlow(
   final result = await showDialog<UpdateResult>(
     context: context,
     barrierDismissible: false,
-    builder: (context) => DownloadUpdateDialog(
-      service: service,
-      downloadUrl: update.downloadUrl,
-    ),
+    builder: (context) =>
+        DownloadUpdateDialog(service: service, downloadUrl: update.downloadUrl),
   );
 
   if (!context.mounted || result == null) return;
@@ -551,11 +559,13 @@ Future<void> _showUpdateFlow(
   await UpdateLog.write('Ошибка установки: ${result.error}');
   if (!context.mounted) return;
   final error = result.error?.toLowerCase() ?? '';
-  final isPermissionError = error.contains('permission') ||
+  final isPermissionError =
+      error.contains('permission') ||
       error.contains('разрешение') ||
       error.contains('unknown source') ||
       error.contains('неизвестных');
-  final isSignature = error.contains('подписан') ||
+  final isSignature =
+      error.contains('подписан') ||
       error.contains('другим ключом') ||
       error.contains('install failed') ||
       error.contains('not installed') ||
@@ -567,8 +577,8 @@ Future<void> _showUpdateFlow(
   final content = isPermissionError
       ? 'Не удалось получить разрешение на установку. Включите «Установка из неизвестных источников» для Bizzy.'
       : isSignature
-          ? 'Установка невозможна: APK подписан другим ключом, чем установленная версия. Скорее всего, вы ставили старую версию вручную или с другого компьютера. Удалите приложение и установите новый APK из релиза.'
-          : 'Не удалось обновить. ${result.error ?? 'Проверьте подключение, свободное место и разрешения.'}';
+      ? 'Установка невозможна: APK подписан другим ключом, чем установленная версия. Скорее всего, вы ставили старую версию вручную или с другого компьютера. Удалите приложение и установите новый APK из релиза.'
+      : 'Не удалось обновить. ${result.error ?? 'Проверьте подключение, свободное место и разрешения.'}';
 
   await showDialog<void>(
     context: context,
@@ -606,10 +616,7 @@ Future<void> _showUpdateFlow(
         FilledButton(
           onPressed: () {
             Navigator.of(context).pop();
-            launchUrl(
-              update.releaseUrl,
-              mode: LaunchMode.externalApplication,
-            );
+            launchUrl(update.releaseUrl, mode: LaunchMode.externalApplication);
           },
           child: const Text('Скачать вручную'),
         ),
@@ -655,9 +662,8 @@ class _DownloadUpdateDialogState extends State<DownloadUpdateDialog> {
         setState(() => _status = 'Установлено');
         await Future.delayed(const Duration(milliseconds: 500));
         if (mounted) {
-          Navigator.of(context).pop(
-            const UpdateResult(success: true, needsRestart: true),
-          );
+          Navigator.of(context)
+              .pop(const UpdateResult(success: true, needsRestart: true));
         }
       }
     } catch (e) {
@@ -665,9 +671,7 @@ class _DownloadUpdateDialogState extends State<DownloadUpdateDialog> {
       setState(() => _status = 'Ошибка: $e');
       await Future.delayed(const Duration(seconds: 1));
       if (mounted) {
-        Navigator.of(context).pop(
-          UpdateResult(error: e.toString()),
-        );
+        Navigator.of(context).pop(UpdateResult(error: e.toString()));
       }
     }
   }
@@ -791,18 +795,17 @@ class Service {
     bool? published,
     String? externalId,
     String? cloudUpdatedAt,
-  }) =>
-      Service(
-        id: id ?? this.id,
-        companyId: companyId ?? this.companyId,
-        name: name ?? this.name,
-        price: price ?? this.price,
-        durationMinutes: durationMinutes ?? this.durationMinutes,
-        notes: notes ?? this.notes,
-        published: published ?? this.published,
-        externalId: externalId ?? this.externalId,
-        cloudUpdatedAt: cloudUpdatedAt ?? this.cloudUpdatedAt,
-      );
+  }) => Service(
+    id: id ?? this.id,
+    companyId: companyId ?? this.companyId,
+    name: name ?? this.name,
+    price: price ?? this.price,
+    durationMinutes: durationMinutes ?? this.durationMinutes,
+    notes: notes ?? this.notes,
+    published: published ?? this.published,
+    externalId: externalId ?? this.externalId,
+    cloudUpdatedAt: cloudUpdatedAt ?? this.cloudUpdatedAt,
+  );
 }
 
 class Appointment {
@@ -872,23 +875,22 @@ class Appointment {
     String? cloudUpdatedAt,
     String? clientId,
     double? servicePrice,
-  }) =>
-      Appointment(
-        id: id ?? this.id,
-        companyId: companyId ?? this.companyId,
-        clientName: clientName ?? this.clientName,
-        phone: phone ?? this.phone,
-        service: service ?? this.service,
-        master: master ?? this.master,
-        dateTime: dateTime ?? this.dateTime,
-        durationMinutes: durationMinutes ?? this.durationMinutes,
-        reminderMinutes: reminderMinutes ?? this.reminderMinutes,
-        notes: notes ?? this.notes,
-        externalId: externalId ?? this.externalId,
-        cloudUpdatedAt: cloudUpdatedAt ?? this.cloudUpdatedAt,
-        clientId: clientId ?? this.clientId,
-        servicePrice: servicePrice ?? this.servicePrice,
-      );
+  }) => Appointment(
+    id: id ?? this.id,
+    companyId: companyId ?? this.companyId,
+    clientName: clientName ?? this.clientName,
+    phone: phone ?? this.phone,
+    service: service ?? this.service,
+    master: master ?? this.master,
+    dateTime: dateTime ?? this.dateTime,
+    durationMinutes: durationMinutes ?? this.durationMinutes,
+    reminderMinutes: reminderMinutes ?? this.reminderMinutes,
+    notes: notes ?? this.notes,
+    externalId: externalId ?? this.externalId,
+    cloudUpdatedAt: cloudUpdatedAt ?? this.cloudUpdatedAt,
+    clientId: clientId ?? this.clientId,
+    servicePrice: servicePrice ?? this.servicePrice,
+  );
 
   factory Appointment.fromMap(Map<String, Object?> map) {
     return Appointment(
@@ -971,19 +973,18 @@ class Contact {
     double? lastPrice,
     String? lastDate,
     String? clientId,
-  }) =>
-      Contact(
-        id: id ?? this.id,
-        name: name ?? this.name,
-        phone: phone ?? this.phone,
-        externalId: externalId ?? this.externalId,
-        cloudUpdatedAt: cloudUpdatedAt ?? this.cloudUpdatedAt,
-        avatarUrl: avatarUrl ?? this.avatarUrl,
-        lastService: lastService ?? this.lastService,
-        lastPrice: lastPrice ?? this.lastPrice,
-        lastDate: lastDate ?? this.lastDate,
-        clientId: clientId ?? this.clientId,
-      );
+  }) => Contact(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    phone: phone ?? this.phone,
+    externalId: externalId ?? this.externalId,
+    cloudUpdatedAt: cloudUpdatedAt ?? this.cloudUpdatedAt,
+    avatarUrl: avatarUrl ?? this.avatarUrl,
+    lastService: lastService ?? this.lastService,
+    lastPrice: lastPrice ?? this.lastPrice,
+    lastDate: lastDate ?? this.lastDate,
+    clientId: clientId ?? this.clientId,
+  );
 }
 
 class AppointmentsDatabase {
@@ -1195,8 +1196,7 @@ class AppointmentsDatabase {
         createdAt TEXT NOT NULL
       )
     ''');
-    await db.execute(
-        'CREATE INDEX idx_tasks_user_due ON tasks(userId, dueAt)');
+    await db.execute('CREATE INDEX idx_tasks_user_due ON tasks(userId, dueAt)');
   }
 
   Future<void> _migrateToCompanies(Database db) async {
@@ -1211,11 +1211,7 @@ class AppointmentsDatabase {
       'type': '',
     });
     for (final table in ['appointments', 'clients', 'masters']) {
-      await db.update(
-        table,
-        {'companyId': id},
-        where: 'companyId = 0',
-      );
+      await db.update(table, {'companyId': id}, where: 'companyId = 0');
     }
   }
 
@@ -1314,11 +1310,7 @@ class AppointmentsDatabase {
     final db = await database;
     final orphans = await db.query('companies', where: 'userId = 0');
     if (orphans.isEmpty) return [];
-    await db.update(
-      'companies',
-      {'userId': userId},
-      where: 'userId = 0',
-    );
+    await db.update('companies', {'userId': userId}, where: 'userId = 0');
     return orphans.map(Company.fromMap).toList();
   }
 
@@ -1382,12 +1374,7 @@ class AppointmentsDatabase {
       final oldDate = existing.first['lastDate'] as String? ?? '';
       final oldDateTime = DateTime.tryParse(oldDate) ?? DateTime(1970);
       if (a.dateTime.isAfter(oldDateTime)) {
-        await db.update(
-          'clients',
-          values,
-          where: 'id = ?',
-          whereArgs: [id],
-        );
+        await db.update('clients', values, where: 'id = ?', whereArgs: [id]);
       }
     }
   }
@@ -1438,8 +1425,10 @@ class AppointmentsDatabase {
 
   Future<int> insert(Appointment appointment) async {
     final db = await database;
-    final price =
-        await _servicePriceForName(appointment.companyId, appointment.service);
+    final price = await _servicePriceForName(
+      appointment.companyId,
+      appointment.service,
+    );
     final withPrice = appointment.copyWith(servicePrice: price);
     final id = await db.insert('appointments', withPrice.toMap());
     await _upsertClientFromAppointment(withPrice.copyWith(id: id));
@@ -1448,8 +1437,10 @@ class AppointmentsDatabase {
 
   Future<int> update(Appointment appointment) async {
     final db = await database;
-    final price =
-        await _servicePriceForName(appointment.companyId, appointment.service);
+    final price = await _servicePriceForName(
+      appointment.companyId,
+      appointment.service,
+    );
     final withPrice = appointment.copyWith(servicePrice: price);
     final result = await db.update(
       'appointments',
@@ -1645,8 +1636,8 @@ class AppointmentsDatabase {
           final id = existing.first['id'] as int;
           final localUpdatedAtStr =
               existing.first['cloudUpdatedAt'] as String? ?? '';
-          final localUpdatedAt = DateTime.tryParse(localUpdatedAtStr) ??
-              DateTime(1970);
+          final localUpdatedAt =
+              DateTime.tryParse(localUpdatedAtStr) ?? DateTime(1970);
           if (cloudUpdatedAt.isAfter(localUpdatedAt)) {
             await db.update(
               'services',
@@ -1694,8 +1685,8 @@ class AppointmentsDatabase {
           'services',
           {
             'externalId': 'cloud:service:${cloud.id}',
-            'cloudUpdatedAt':
-                (cloud.updatedAt ?? DateTime.now()).toIso8601String(),
+            'cloudUpdatedAt': (cloud.updatedAt ?? DateTime.now())
+                .toIso8601String(),
           },
           where: 'id = ?',
           whereArgs: [s.id],
@@ -1709,8 +1700,8 @@ class AppointmentsDatabase {
         final cloud = cloudByExternal[s.externalId];
         if (cloud == null) continue;
         final cloudUpdatedAt = cloud.updatedAt ?? DateTime(1970);
-        final localUpdatedAt = DateTime.tryParse(s.cloudUpdatedAt) ??
-            DateTime(1970);
+        final localUpdatedAt =
+            DateTime.tryParse(s.cloudUpdatedAt) ?? DateTime(1970);
         if (localUpdatedAt.isAfter(cloudUpdatedAt)) {
           final cloudId =
               int.tryParse(s.externalId.split(':').last) ?? cloud.id;
@@ -1727,8 +1718,8 @@ class AppointmentsDatabase {
           await db.update(
             'services',
             {
-              'cloudUpdatedAt':
-                  (updated.updatedAt ?? DateTime.now()).toIso8601String(),
+              'cloudUpdatedAt': (updated.updatedAt ?? DateTime.now())
+                  .toIso8601String(),
             },
             where: 'id = ?',
             whereArgs: [s.id],
@@ -1744,10 +1735,7 @@ class AppointmentsDatabase {
 
   /// Двусторонняя синхронизация клиентов/мастеров с облаком.
   /// Возвращает актуальный локальный список.
-  Future<List<Contact>> syncContacts(
-    ContactType type,
-    int companyId,
-  ) async {
+  Future<List<Contact>> syncContacts(ContactType type, int companyId) async {
     if (type != ContactType.client || !cloudSignedIn) {
       return getContacts(type, companyId);
     }
@@ -1774,7 +1762,8 @@ class AppointmentsDatabase {
         if (existing.isEmpty) {
           existing = await db.query(
             type.table,
-            where: 'companyId = ? AND name = ? AND phone = ? AND externalId = ?',
+            where:
+                'companyId = ? AND name = ? AND phone = ? AND externalId = ?',
             whereArgs: [companyId, cloud.name, cloud.phone, ''],
           );
         }
@@ -1795,8 +1784,8 @@ class AppointmentsDatabase {
           final id = existing.first['id'] as int;
           final localUpdatedAtStr =
               existing.first['cloudUpdatedAt'] as String? ?? '';
-          final localUpdatedAt = DateTime.tryParse(localUpdatedAtStr) ??
-              DateTime(1970);
+          final localUpdatedAt =
+              DateTime.tryParse(localUpdatedAtStr) ?? DateTime(1970);
           if (cloudUpdatedAt.isAfter(localUpdatedAt)) {
             await db.update(
               type.table,
@@ -1840,8 +1829,8 @@ class AppointmentsDatabase {
             type.table,
             {
               'externalId': 'cloud:client:${existingCloud.id}',
-              'cloudUpdatedAt':
-                  (existingCloud.updatedAt ?? DateTime.now()).toIso8601String(),
+              'cloudUpdatedAt': (existingCloud.updatedAt ?? DateTime.now())
+                  .toIso8601String(),
             },
             where: 'id = ?',
             whereArgs: [c.id],
@@ -1856,8 +1845,8 @@ class AppointmentsDatabase {
           type.table,
           {
             'externalId': 'cloud:client:${cloud.id}',
-            'cloudUpdatedAt':
-                (cloud.updatedAt ?? DateTime.now()).toIso8601String(),
+            'cloudUpdatedAt': (cloud.updatedAt ?? DateTime.now())
+                .toIso8601String(),
           },
           where: 'id = ?',
           whereArgs: [c.id],
@@ -1869,10 +1858,11 @@ class AppointmentsDatabase {
         final cloud = cloudByExternal[c.externalId];
         if (cloud == null) continue;
         final cloudUpdatedAt = cloud.updatedAt ?? DateTime(1970);
-        final localUpdatedAt = DateTime.tryParse(c.cloudUpdatedAt) ??
-            DateTime(1970);
+        final localUpdatedAt =
+            DateTime.tryParse(c.cloudUpdatedAt) ?? DateTime(1970);
         if (localUpdatedAt.isAfter(cloudUpdatedAt)) {
-          final cloudId = int.tryParse(c.externalId.split(':').last) ?? cloud.id;
+          final cloudId =
+              int.tryParse(c.externalId.split(':').last) ?? cloud.id;
           final updated = await CloudService().updateClient(
             CloudClient(
               id: cloudId,
@@ -1884,8 +1874,8 @@ class AppointmentsDatabase {
           await db.update(
             type.table,
             {
-              'cloudUpdatedAt':
-                  (updated.updatedAt ?? DateTime.now()).toIso8601String(),
+              'cloudUpdatedAt': (updated.updatedAt ?? DateTime.now())
+                  .toIso8601String(),
             },
             where: 'id = ?',
             whereArgs: [c.id],
@@ -1893,7 +1883,10 @@ class AppointmentsDatabase {
         }
       }
     } on Exception catch (e, st) {
-      await SyncLog.write('contacts', 'Ошибка синхронизации контактов: $e\n$st');
+      await SyncLog.write(
+        'contacts',
+        'Ошибка синхронизации контактов: $e\n$st',
+      );
       // Нет сети/ошибка Supabase — работаем локально.
     }
     return getContacts(type, companyId);
@@ -1970,8 +1963,8 @@ class AppointmentsDatabase {
           final id = existing.first['id'] as int;
           final localUpdatedAtStr =
               existing.first['cloudUpdatedAt'] as String? ?? '';
-          final localUpdatedAt = DateTime.tryParse(localUpdatedAtStr) ??
-              DateTime(1970);
+          final localUpdatedAt =
+              DateTime.tryParse(localUpdatedAtStr) ?? DateTime(1970);
           if (cloudUpdatedAt.isAfter(localUpdatedAt)) {
             await db.update(
               'appointments',
@@ -2012,11 +2005,7 @@ class AppointmentsDatabase {
 
       // Отправляем в облако локальные записи без externalId (собственные мастера).
       final local = await getAll(companyId);
-      final unsynced = local
-          .where(
-            (a) => a.externalId.isEmpty,
-          )
-          .toList();
+      final unsynced = local.where((a) => a.externalId.isEmpty).toList();
       for (final a in unsynced) {
         final cloud = await CloudService().addMasterAppointment(
           clientName: a.clientName,
@@ -2032,8 +2021,8 @@ class AppointmentsDatabase {
           'appointments',
           {
             'externalId': 'master:${cloud.id}',
-            'cloudUpdatedAt':
-                (cloud.updatedAt ?? DateTime.now()).toIso8601String(),
+            'cloudUpdatedAt': (cloud.updatedAt ?? DateTime.now())
+                .toIso8601String(),
           },
           where: 'id = ?',
           whereArgs: [a.id],
@@ -2046,10 +2035,11 @@ class AppointmentsDatabase {
         final cloud = cloudByExternal[a.externalId];
         if (cloud == null) continue;
         final cloudUpdatedAt = cloud.updatedAt ?? DateTime(1970);
-        final localUpdatedAt = DateTime.tryParse(a.cloudUpdatedAt) ??
-            DateTime(1970);
+        final localUpdatedAt =
+            DateTime.tryParse(a.cloudUpdatedAt) ?? DateTime(1970);
         if (localUpdatedAt.isAfter(cloudUpdatedAt)) {
-          final cloudId = int.tryParse(a.externalId.split(':').last) ?? cloud.id;
+          final cloudId =
+              int.tryParse(a.externalId.split(':').last) ?? cloud.id;
           final updated = await CloudService().updateMasterAppointment(
             CloudMasterAppointment(
               id: cloudId,
@@ -2067,8 +2057,8 @@ class AppointmentsDatabase {
           await db.update(
             'appointments',
             {
-              'cloudUpdatedAt':
-                  (updated.updatedAt ?? DateTime.now()).toIso8601String(),
+              'cloudUpdatedAt': (updated.updatedAt ?? DateTime.now())
+                  .toIso8601String(),
             },
             where: 'id = ?',
             whereArgs: [a.id],
@@ -2076,7 +2066,10 @@ class AppointmentsDatabase {
         }
       }
     } on Exception catch (e, st) {
-      await SyncLog.write('appointments', 'Ошибка синхронизации записей: $e\n$st');
+      await SyncLog.write(
+        'appointments',
+        'Ошибка синхронизации записей: $e\n$st',
+      );
       // Нет сети/ошибка Supabase — работаем локально.
     }
     return getAll(companyId);
@@ -2145,9 +2138,7 @@ class AppointmentsDatabase {
         : await _servicePriceForName(companyId, booking.serviceName);
     final appointment = Appointment(
       companyId: companyId,
-      clientName: booking.clientName.isEmpty
-          ? 'Клиент'
-          : booking.clientName,
+      clientName: booking.clientName.isEmpty ? 'Клиент' : booking.clientName,
       phone: booking.clientPhone,
       service: booking.serviceName,
       master: booking.masterName.isEmpty ? 'Я' : booking.masterName,
@@ -2290,9 +2281,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final update = await const UpdateService().check();
     if (!context.mounted) return;
     if (update == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Это актуальная версия')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Это актуальная версия')));
       return;
     }
     final shouldInstall = await showDialog<bool>(
@@ -2347,10 +2337,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _save();
                     },
                     segments: _options.entries
-                        .map((e) => ButtonSegment<ThemeMode>(
-                              value: e.key,
-                              label: Text(e.value),
-                            ))
+                        .map(
+                          (e) => ButtonSegment<ThemeMode>(
+                            value: e.key,
+                            label: Text(e.value),
+                          ),
+                        )
                         .toList(),
                   ),
                   const SizedBox(height: 8),
@@ -2371,8 +2363,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       decoration: const InputDecoration(
                         labelText: 'Валюта',
                         border: OutlineInputBorder(),
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                       ),
                       isEmpty: false,
                       child: DropdownButtonHideUnderline(
@@ -2392,8 +2386,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             if (value == null) return;
                             appCurrency.value = value;
                             final prefs = await SharedPreferences.getInstance();
-                            await prefs.setString(
-                                'bizzy_currency', value.name);
+                            await prefs.setString('bizzy_currency', value.name);
                           },
                         ),
                       ),
@@ -2451,7 +2444,8 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
-  late final AppointmentsDatabase _db = widget.database ?? AppointmentsDatabase();
+  late final AppointmentsDatabase _db =
+      widget.database ?? AppointmentsDatabase();
   final SessionStore _session = SessionStore();
   User? _user;
   Company? _company;
@@ -2473,9 +2467,9 @@ class _AuthGateState extends State<AuthGate> {
     }
     final companies = await _db.getCompanies(userId);
     if (!mounted) return;
-    final company = companies
-        .where((c) => c.id == companyId)
-        .firstOrNull ?? companies.firstOrNull;
+    final company =
+        companies.where((c) => c.id == companyId).firstOrNull ??
+        companies.firstOrNull;
     setState(() {
       _user = User(id: userId, login: login);
       _company = company;
@@ -2527,7 +2521,8 @@ class _AuthGateState extends State<AuthGate> {
       );
     }
     final updateService =
-        widget.updateService ?? (widget.database == null ? const UpdateService() : null);
+        widget.updateService ??
+        (widget.database == null ? const UpdateService() : null);
     return MainShell(
       database: _db,
       company: _company!,
@@ -2651,7 +2646,8 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final versionText = 'Версия ${_info.version}${_info.buildNumber.isNotEmpty ? '+${_info.buildNumber}' : ''}';
+    final versionText =
+        'Версия ${_info.version}${_info.buildNumber.isNotEmpty ? '+${_info.buildNumber}' : ''}';
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -2691,8 +2687,8 @@ class _AuthScreenState extends State<AuthScreen> {
                   validator: (value) => value == null || value.isEmpty
                       ? 'Введите пароль'
                       : _registerMode && value.length < 4
-                          ? 'Пароль должен быть не короче 4 символов'
-                          : null,
+                      ? 'Пароль должен быть не короче 4 символов'
+                      : null,
                 ),
                 if (_registerMode) ...[
                   const SizedBox(height: 16),
@@ -2727,8 +2723,8 @@ class _AuthScreenState extends State<AuthScreen> {
                     _busy
                         ? 'Подождите…'
                         : _registerMode
-                            ? 'Зарегистрироваться'
-                            : 'Войти',
+                        ? 'Зарегистрироваться'
+                        : 'Войти',
                   ),
                 ),
                 TextButton(
@@ -2810,10 +2806,8 @@ class _CompanySelectScreenState extends State<CompanySelectScreen> {
   Future<void> _addCompany() async {
     final company = await showDialog<Company>(
       context: context,
-      builder: (context) => AddCompanyDialog(
-        database: widget.database,
-        userId: widget.userId,
-      ),
+      builder: (context) =>
+          AddCompanyDialog(database: widget.database, userId: widget.userId),
     );
     if (!mounted || company == null) return;
     widget.onChosen(company);
@@ -2826,40 +2820,39 @@ class _CompanySelectScreenState extends State<CompanySelectScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _companies.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          'У вас пока нет компании.\nСоздайте первую, чтобы начать.',
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 16),
-                        FilledButton.icon(
-                          onPressed: _addCompany,
-                          icon: const Icon(Icons.add_business),
-                          label: const Text('Создать компанию'),
-                        ),
-                      ],
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'У вас пока нет компании.\nСоздайте первую, чтобы начать.',
+                      textAlign: TextAlign.center,
                     ),
-                  ),
-                )
-              : ListView.builder(
-                  itemCount: _companies.length,
-                  itemBuilder: (context, index) {
-                    final company = _companies[index];
-                    return ListTile(
-                      leading: const Icon(Icons.business),
-                      title: Text(company.name),
-                      subtitle:
-                          company.type.isEmpty ? null : Text(company.type),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => widget.onChosen(company),
-                    );
-                  },
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: _addCompany,
+                      icon: const Icon(Icons.add_business),
+                      label: const Text('Создать компанию'),
+                    ),
+                  ],
                 ),
+              ),
+            )
+          : ListView.builder(
+              itemCount: _companies.length,
+              itemBuilder: (context, index) {
+                final company = _companies[index];
+                return ListTile(
+                  leading: const Icon(Icons.business),
+                  title: Text(company.name),
+                  subtitle: company.type.isEmpty ? null : Text(company.type),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => widget.onChosen(company),
+                );
+              },
+            ),
       floatingActionButton: _companies.isEmpty
           ? null
           : FloatingActionButton.extended(
@@ -3031,12 +3024,16 @@ class _MainShellState extends State<MainShell> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Доступна версия ${update.version}. Начинаю загрузку...'),
+            content: Text(
+              'Доступна версия ${update.version}. Начинаю загрузку...',
+            ),
             duration: const Duration(seconds: 3),
           ),
         );
       }
-      await UpdateLog.write('Найдено обновление ${update.version}, начинаем загрузку');
+      await UpdateLog.write(
+        'Найдено обновление ${update.version}, начинаем загрузку',
+      );
       if (!mounted) return;
       // Автоматическое обновление: сразу начинаем загрузку и установку.
       // Пользователь увидит только диалог прогресса и системный диалог установщика.
@@ -3052,7 +3049,9 @@ class _MainShellState extends State<MainShell> {
       await UpdateLog.write('Ошибка автообновления: $e\n$s');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Не удалось обновить Bizzy. Лог сохранён.')),
+          const SnackBar(
+            content: Text('Не удалось обновить Bizzy. Лог сохранён.'),
+          ),
         );
       }
     }
@@ -3225,9 +3224,7 @@ class _MainShellState extends State<MainShell> {
 
   void _showNotificationDialog() {
     Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (context) => const NotificationsScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => const NotificationsScreen()),
     );
   }
 
@@ -3257,10 +3254,7 @@ class _MainShellState extends State<MainShell> {
                 onAddOverride: onAddMaster,
               ),
             )
-          : TasksScreen(
-              database: _db,
-              user: widget.user,
-            ),
+          : TasksScreen(database: _db, user: widget.user),
       ClientsTab(
         database: _db,
         company: widget.company,
@@ -3270,10 +3264,7 @@ class _MainShellState extends State<MainShell> {
         appointmentsLoading: _loading,
         cloudRole: widget.cloudRole,
       ),
-      ServicesTab(
-        database: _db,
-        company: widget.company,
-      ),
+      ServicesTab(database: _db, company: widget.company),
       MoreTab(
         database: _db,
         company: widget.company,
@@ -3337,12 +3328,11 @@ class _MainShellState extends State<MainShell> {
       // В светлой «стеклянной» теме контент заходит под
       // полупрозрачную навигацию — без этого блюру нечего размывать.
       extendBody: bizzyGlassActive(context),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: tabs,
-      ),
+      body: IndexedStack(index: _currentIndex, children: tabs),
       bottomNavigationBar: bizzyNavBar(
         context,
+        // Шелл мастера/салона — «Вид Bizzy» только для клиентов.
+        bizzy: false,
         child: NavigationBar(
           selectedIndex: _currentIndex,
           onDestinationSelected: (index) {
@@ -3367,8 +3357,7 @@ class _MainShellState extends State<MainShell> {
             NavigationDestination(
               icon: Badge(
                 // У салона — кружок с числом ответов мастеров.
-                isLabelVisible:
-                    widget.cloudRole == 'salon' && _teamBadge > 0,
+                isLabelVisible: widget.cloudRole == 'salon' && _teamBadge > 0,
                 label: Text('$_teamBadge'),
                 child: Icon(
                   widget.cloudRole == 'salon'
@@ -3386,16 +3375,12 @@ class _MainShellState extends State<MainShell> {
               ),
               label: 'Клиенты',
             ),
-            const NavigationDestination(
-              icon: Icon(Icons.spa),
-              label: 'Услуги',
-            ),
+            const NavigationDestination(icon: Icon(Icons.spa), label: 'Услуги'),
             NavigationDestination(
               icon: Badge(
                 // У мастера — кружок с числом приглашений от салонов
                 // (они лежат в «Ещё» → «Мой профиль» → «Приглашения»).
-                isLabelVisible:
-                    widget.cloudRole == 'master' && _teamBadge > 0,
+                isLabelVisible: widget.cloudRole == 'master' && _teamBadge > 0,
                 label: Text('$_teamBadge'),
                 child: const Icon(Icons.menu),
               ),
@@ -3441,7 +3426,8 @@ class HomeTab extends StatefulWidget {
   final Future<void> Function({
     Appointment? appointment,
     required DateTime initialDate,
-  }) onEdit;
+  })
+  onEdit;
   final Future<void> Function(int) onDelete;
   final Future<void> Function() onTasksChanged;
 
@@ -3479,7 +3465,9 @@ class _HomeTabState extends State<HomeTab> {
 
   void _onDayChanged() {
     if (!mounted) return;
-    setState(() => _selectedDay = _startOfDay(widget.selectedDayNotifier.value));
+    setState(
+      () => _selectedDay = _startOfDay(widget.selectedDayNotifier.value),
+    );
   }
 
   void _selectDay(DateTime day) {
@@ -3489,10 +3477,8 @@ class _HomeTabState extends State<HomeTab> {
   Future<void> _openTasks() async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
-        builder: (context) => TasksScreen(
-          database: widget.database,
-          user: widget.user,
-        ),
+        builder: (context) =>
+            TasksScreen(database: widget.database, user: widget.user),
       ),
     );
     await widget.onTasksChanged();
@@ -3503,10 +3489,11 @@ class _HomeTabState extends State<HomeTab> {
 
   @override
   Widget build(BuildContext context) {
-    final dayAppointments = widget.appointments
-        .where((a) => isSameDay(a.dateTime, _selectedDay))
-        .toList()
-      ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
+    final dayAppointments =
+        widget.appointments
+            .where((a) => isSameDay(a.dateTime, _selectedDay))
+            .toList()
+          ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
     final dayTasks = widget.tasks
         .where((t) => isSameDay(t.dueAt, _selectedDay))
         .toList();
@@ -3558,9 +3545,8 @@ class _HomeTabState extends State<HomeTab> {
               Text(
                 'У вас $todayCount записей'
                 '${todayTasks > 0 ? ' и $todayTasks личных дел' : ''} сегодня',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Colors.grey[700],
-                    ),
+                style: Theme.of(context).textTheme.bodyLarge
+                    ?.copyWith(color: Colors.grey[700]),
               ),
             ],
           ),
@@ -3602,8 +3588,8 @@ class _HomeTabState extends State<HomeTab> {
                           ),
                           todayTextStyle: TextStyle(
                             fontWeight: FontWeight.w600,
-                            color: Theme.of(context).brightness ==
-                                    Brightness.light
+                            color:
+                                Theme.of(context).brightness == Brightness.light
                                 ? Colors.black
                                 : Colors.white,
                           ),
@@ -3636,10 +3622,10 @@ class _HomeTabState extends State<HomeTab> {
                           },
                         ),
                         eventLoader: (day) => <Object>[
-                          ...widget.appointments
-                              .where((a) => isSameDay(a.dateTime, day)),
-                          ...widget.tasks
-                              .where((t) => isSameDay(t.dueAt, day)),
+                          ...widget.appointments.where(
+                            (a) => isSameDay(a.dateTime, day),
+                          ),
+                          ...widget.tasks.where((t) => isSameDay(t.dueAt, day)),
                         ],
                         onDaySelected: (selectedDay, focusedDay) {
                           _selectDay(selectedDay);
@@ -3658,20 +3644,22 @@ class _HomeTabState extends State<HomeTab> {
                           scrollDirection: Axis.horizontal,
                           itemCount: 7,
                           itemBuilder: (context, index) {
-                            final day =
-                                _weekStart.add(Duration(days: index));
+                            final day = _weekStart.add(Duration(days: index));
                             final selected = isSameDay(day, _selectedDay);
-                            final hasAppointments = widget.appointments
-                                .any((a) => isSameDay(a.dateTime, day));
-                            final hasTasks = widget.tasks
-                                .any((t) => isSameDay(t.dueAt, day));
+                            final hasAppointments = widget.appointments.any(
+                              (a) => isSameDay(a.dateTime, day),
+                            );
+                            final hasTasks = widget.tasks.any(
+                              (t) => isSameDay(t.dueAt, day),
+                            );
                             return GestureDetector(
                               onTap: () => _selectDay(day),
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 200),
                                 curve: Curves.easeInOut,
-                                margin:
-                                    const EdgeInsets.symmetric(horizontal: 4),
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 12,
                                   vertical: 8,
@@ -3683,8 +3671,7 @@ class _HomeTabState extends State<HomeTab> {
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Column(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.center,
+                                  mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Text(
                                       DateFormat.E('ru_RU')
@@ -3715,8 +3702,7 @@ class _HomeTabState extends State<HomeTab> {
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          if (hasAppointments)
-                                            const _DayDot(),
+                                          if (hasAppointments) const _DayDot(),
                                           if (hasTasks)
                                             const _DayDot(
                                               color: Colors.white,
@@ -3735,9 +3721,7 @@ class _HomeTabState extends State<HomeTab> {
               ),
               IconButton(
                 tooltip: _monthView ? 'Неделя' : 'Месяц',
-                icon: Icon(
-                  _monthView ? Icons.view_week : Icons.calendar_month,
-                ),
+                icon: Icon(_monthView ? Icons.view_week : Icons.calendar_month),
                 onPressed: () => setState(() {
                   _monthView = !_monthView;
                   if (_monthView) _focusedDay = _selectedDay;
@@ -3750,82 +3734,77 @@ class _HomeTabState extends State<HomeTab> {
           child: widget.loading
               ? const Center(child: CircularProgressIndicator())
               : dayItems.isEmpty
-                  ? const Center(
-                      child: Text('На этот день записей нет.'),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.only(bottom: 80),
-                      itemCount: dayItems.length,
-                      itemBuilder: (context, index) {
-                        final entry = dayItems[index];
-                        final task = entry.task;
-                        if (task != null) {
-                          return _PersonalTaskTile(
-                            task: task,
-                            onTap: _openTasks,
-                          );
-                        }
-                        final a = entry.appointment!;
-                        final initial = a.clientName.trim().isEmpty
-                            ? ''
-                            : a.clientName.trim()[0].toUpperCase();
-                        return Card(
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 4,
-                          ),
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: const Color(0xFFFFD600),
-                              foregroundColor: Colors.black,
-                              child: initial.isEmpty
-                                  ? const Icon(Icons.person_outline)
-                                  : Text(initial),
+              ? const Center(child: Text('На этот день записей нет.'))
+              : ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 80),
+                  itemCount: dayItems.length,
+                  itemBuilder: (context, index) {
+                    final entry = dayItems[index];
+                    final task = entry.task;
+                    if (task != null) {
+                      return _PersonalTaskTile(task: task, onTap: _openTasks);
+                    }
+                    final a = entry.appointment!;
+                    final initial = a.clientName.trim().isEmpty
+                        ? ''
+                        : a.clientName.trim()[0].toUpperCase();
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: const Color(0xFFFFD600),
+                          foregroundColor: Colors.black,
+                          child: initial.isEmpty
+                              ? const Icon(Icons.person_outline)
+                              : Text(initial),
+                        ),
+                        title: Text(a.clientName),
+                        subtitle: Text(a.service),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _formatTime(a.dateTime),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                            title: Text(a.clientName),
-                            subtitle: Text(a.service),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  _formatTime(a.dateTime),
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                            PopupMenuButton<String>(
+                              onSelected: (value) {
+                                if (value == 'edit') {
+                                  widget.onEdit(
+                                    appointment: a,
+                                    initialDate: a.dateTime,
+                                  );
+                                } else if (value == 'delete') {
+                                  widget.onDelete(a.id!);
+                                }
+                              },
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('Редактировать'),
                                 ),
-                                PopupMenuButton<String>(
-                                  onSelected: (value) {
-                                    if (value == 'edit') {
-                                      widget.onEdit(
-                                        appointment: a,
-                                        initialDate: a.dateTime,
-                                      );
-                                    } else if (value == 'delete') {
-                                      widget.onDelete(a.id!);
-                                    }
-                                  },
-                                  itemBuilder: (context) => const [
-                                    PopupMenuItem(
-                                      value: 'edit',
-                                      child: Text('Редактировать'),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'delete',
-                                      child: Text('Удалить'),
-                                    ),
-                                  ],
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Удалить'),
                                 ),
                               ],
                             ),
-                            onTap: () => widget.onEdit(
-                              appointment: a,
-                              initialDate: a.dateTime,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                          ],
+                        ),
+                        onTap: () => widget.onEdit(
+                          appointment: a,
+                          initialDate: a.dateTime,
+                        ),
+                      ),
+                    );
+                  },
+                ),
         ),
       ],
     );
@@ -3834,10 +3813,7 @@ class _HomeTabState extends State<HomeTab> {
 
 /// Точка-маркер дня: жёлтая для записей клиентов, белая для личных дел.
 class _DayDot extends StatelessWidget {
-  const _DayDot({
-    this.color = const Color(0xFFFFD600),
-    this.bordered = false,
-  });
+  const _DayDot({this.color = const Color(0xFFFFD600), this.bordered = false});
 
   final Color color;
   final bool bordered;
@@ -3886,10 +3862,7 @@ class _PersonalTaskTile extends StatelessWidget {
         subtitle: const Text('Личное дело'),
         trailing: Text(
           _formatTime(task.dueAt),
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
-          ),
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
         ),
         onTap: onTap,
       ),
@@ -3900,14 +3873,11 @@ class _PersonalTaskTile extends StatelessWidget {
 /// Элемент дневного списка: запись клиента или личное дело.
 class _DayEntry {
   _DayEntry.appointment(Appointment a)
-      : appointment = a,
-        task = null,
-        time = a.dateTime;
+    : appointment = a,
+      task = null,
+      time = a.dateTime;
 
-  _DayEntry.task(TaskItem t)
-      : task = t,
-        appointment = null,
-        time = t.dueAt;
+  _DayEntry.task(TaskItem t) : task = t, appointment = null, time = t.dueAt;
 
   final Appointment? appointment;
   final TaskItem? task;
@@ -4116,8 +4086,7 @@ class _ClientsTabState extends State<ClientsTab> {
                         if (p?.createdAt != null)
                           Text(
                             bizzySince(p!.createdAt),
-                            style:
-                                Theme.of(context).textTheme.bodySmall,
+                            style: Theme.of(context).textTheme.bodySmall,
                           ),
                         if (phone.isNotEmpty)
                           ListTile(
@@ -4125,8 +4094,7 @@ class _ClientsTabState extends State<ClientsTab> {
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.phone_outlined),
                             title: Text(phone),
-                            onTap: () =>
-                                launchUrl(Uri.parse('tel:$phone')),
+                            onTap: () => launchUrl(Uri.parse('tel:$phone')),
                           ),
                         const SizedBox(height: 8),
                         Text(
@@ -4142,14 +4110,17 @@ class _ClientsTabState extends State<ClientsTab> {
                             leading: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.star,
-                                    size: 16, color: Colors.amber),
+                                const Icon(
+                                  Icons.star,
+                                  size: 16,
+                                  color: Colors.amber,
+                                ),
                                 Text('${r.rating}'),
                               ],
                             ),
-                            title: Text(r.comment.isEmpty
-                                ? 'Без комментария'
-                                : r.comment),
+                            title: Text(
+                              r.comment.isEmpty ? 'Без комментария' : r.comment,
+                            ),
                             subtitle: r.masterName.isNotEmpty
                                 ? Text(r.masterName)
                                 : null,
@@ -4182,8 +4153,7 @@ class _ClientsTabState extends State<ClientsTab> {
   }
 
   Future<bool> _isContactUsed(Contact contact) async {
-    final appointments =
-        await widget.database.getAll(widget.company.id);
+    final appointments = await widget.database.getAll(widget.company.id);
     return appointments.any(
       (a) => a.clientName == contact.name || a.master == contact.name,
     );
@@ -4247,8 +4217,7 @@ class _ClientsTabState extends State<ClientsTab> {
                 ),
               ],
               selected: {_showFinance},
-              onSelectionChanged: (s) =>
-                  setState(() => _showFinance = s.first),
+              onSelectionChanged: (s) => setState(() => _showFinance = s.first),
             ),
           ),
           if (_showFinance)
@@ -4261,193 +4230,193 @@ class _ClientsTabState extends State<ClientsTab> {
               ),
             )
           else ...[
-          if (cloudSignedIn) ...[
-            Card(
-              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: ListTile(
-                leading: const Icon(Icons.event_note_outlined),
-                title: const Text('Заявки клиентов'),
-                subtitle: const Text('Записи из каталога Bizzy'),
-                trailing: widget.pendingBookings > 0
-                    ? Badge(
-                        label: Text('${widget.pendingBookings}'),
-                        child: const SizedBox(width: 24, height: 24),
-                      )
-                    : null,
-                onTap: () {
-                  final mainShell =
-                      context.findAncestorStateOfType<_MainShellState>();
-                  Navigator.of(context).push<void>(
-                    MaterialPageRoute(
-                      builder: (_) => MasterBookingsScreen(
-                        onBookingChanged: (b) async {
-                          await widget.database
-                              .syncCloudBooking(b, widget.company.id);
-                          if (!mounted) return;
-                          if (mainShell != null && mainShell.mounted) {
-                            await mainShell.refreshAppointments();
-                          }
-                        },
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            // «Honey» — скидки/сертификаты/бонусы, которые салон
-            // показывает клиентам в их вкладке «Honey».
-            if (widget.cloudRole == 'salon')
+            if (cloudSignedIn) ...[
               Card(
                 margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                 child: ListTile(
-                  leading: const Icon(Icons.card_giftcard),
-                  title: const Text('Honey'),
-                  subtitle: const Text(
-                    'Скидки и сертификаты, которые видят клиенты',
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.of(context).push<void>(
-                    MaterialPageRoute(
-                      builder: (_) => const SalonOffersScreen(),
-                    ),
-                  ),
+                  leading: const Icon(Icons.event_note_outlined),
+                  title: const Text('Заявки клиентов'),
+                  subtitle: const Text('Записи из каталога Bizzy'),
+                  trailing: widget.pendingBookings > 0
+                      ? Badge(
+                          label: Text('${widget.pendingBookings}'),
+                          child: const SizedBox(width: 24, height: 24),
+                        )
+                      : null,
+                  onTap: () {
+                    final mainShell = context
+                        .findAncestorStateOfType<_MainShellState>();
+                    Navigator.of(context).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) => MasterBookingsScreen(
+                          onBookingChanged: (b) async {
+                            await widget.database.syncCloudBooking(
+                              b,
+                              widget.company.id,
+                            );
+                            if (!mounted) return;
+                            if (mainShell != null && mainShell.mounted) {
+                              await mainShell.refreshAppointments();
+                            }
+                          },
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
-          ],
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    decoration: const InputDecoration(
-                      labelText: 'Поиск по имени или телефону',
-                      prefixIcon: Icon(Icons.search),
-                      border: OutlineInputBorder(),
+              // «Honey» — скидки/сертификаты/бонусы, которые салон
+              // показывает клиентам в их вкладке «Honey».
+              if (widget.cloudRole == 'salon')
+                Card(
+                  margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: ListTile(
+                    leading: const Icon(Icons.card_giftcard),
+                    title: const Text('Honey'),
+                    subtitle: const Text(
+                      'Скидки и сертификаты, которые видят клиенты',
                     ),
-                    onChanged: (value) => setState(
-                      () => _query = value.trim().toLowerCase(),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) => const SalonOffersScreen(),
+                      ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton(
-                  onPressed: _importClients,
-                  icon: const Icon(Icons.contacts),
-                  tooltip: 'Импорт из телефона',
-                ),
-              ],
+            ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        labelText: 'Поиск по имени или телефону',
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (value) =>
+                          setState(() => _query = value.trim().toLowerCase()),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: _importClients,
+                    icon: const Icon(Icons.contacts),
+                    tooltip: 'Импорт из телефона',
+                  ),
+                ],
+              ),
             ),
-          ),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _failed
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('Не удалось загрузить список'),
-                            TextButton(
-                              onPressed: _load,
-                              child: const Text('Повторить'),
-                            ),
-                          ],
-                        ),
-                      )
-                    : contacts.isEmpty
-                        ? Center(
-                            child: Text(
-                              _query.isEmpty
-                                  ? 'Клиентов пока нет'
-                                  : 'Ничего не найдено',
-                            ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.only(bottom: 88),
-                            itemCount: contacts.length,
-                            itemBuilder: (context, index) {
-                              final contact = contacts[index];
-                              final cloud = _clientProfiles[contact.clientId];
-                              // Реальное имя из облака приоритетнее
-                              // имени из записи («Клиент» и т.п.).
-                              final displayName = (cloud != null &&
-                                      cloud.name.isNotEmpty)
-                                  ? cloud.name
-                                  : contact.name;
-                              return Card(
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
-                                ),
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundImage: contact.avatarUrl.isNotEmpty
-                                        ? NetworkImage(contact.avatarUrl)
-                                        : null,
-                                    child: contact.avatarUrl.isEmpty
-                                        ? const Icon(Icons.person_outline)
-                                        : null,
-                                  ),
-                                  title: Text(displayName),
-                                  subtitle: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      if (contact.phone.isNotEmpty)
-                                        Text(contact.phone),
-                                      if (cloud?.createdAt != null)
-                                        Text(
-                                          bizzySince(cloud!.createdAt),
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall,
-                                        ),
-                                      if (contact.lastService.isNotEmpty)
-                                        _priceText(
-                                          contact.lastPrice,
-                                          prefix:
-                                              'Последняя: ${contact.lastService} •',
-                                          style: TextStyle(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .primary,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                  trailing: PopupMenuButton<String>(
-                                    onSelected: (value) {
-                                      if (value == 'info') {
-                                        _showClientInfo(contact);
-                                      } else if (value == 'edit') {
-                                        _editClient(contact);
-                                      } else if (value == 'delete') {
-                                        _deleteClient(contact);
-                                      }
-                                    },
-                                    itemBuilder: (context) => const [
-                                      PopupMenuItem(
-                                        value: 'info',
-                                        child: Text('Информация'),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'edit',
-                                        child: Text('Редактировать'),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'delete',
-                                        child: Text('Удалить'),
-                                      ),
-                                    ],
-                                  ),
-                                  onTap: () => _openClientDetail(contact),
-                                ),
-                              );
-                            },
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _failed
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('Не удалось загрузить список'),
+                          TextButton(
+                            onPressed: _load,
+                            child: const Text('Повторить'),
                           ),
-          ),
+                        ],
+                      ),
+                    )
+                  : contacts.isEmpty
+                  ? Center(
+                      child: Text(
+                        _query.isEmpty
+                            ? 'Клиентов пока нет'
+                            : 'Ничего не найдено',
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 88),
+                      itemCount: contacts.length,
+                      itemBuilder: (context, index) {
+                        final contact = contacts[index];
+                        final cloud = _clientProfiles[contact.clientId];
+                        // Реальное имя из облака приоритетнее
+                        // имени из записи («Клиент» и т.п.).
+                        final displayName =
+                            (cloud != null && cloud.name.isNotEmpty)
+                            ? cloud.name
+                            : contact.name;
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundImage: contact.avatarUrl.isNotEmpty
+                                  ? NetworkImage(contact.avatarUrl)
+                                  : null,
+                              child: contact.avatarUrl.isEmpty
+                                  ? const Icon(Icons.person_outline)
+                                  : null,
+                            ),
+                            title: Text(displayName),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (contact.phone.isNotEmpty)
+                                  Text(contact.phone),
+                                if (cloud?.createdAt != null)
+                                  Text(
+                                    bizzySince(cloud!.createdAt),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall,
+                                  ),
+                                if (contact.lastService.isNotEmpty)
+                                  _priceText(
+                                    contact.lastPrice,
+                                    prefix:
+                                        'Последняя: ${contact.lastService} •',
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            trailing: PopupMenuButton<String>(
+                              onSelected: (value) {
+                                if (value == 'info') {
+                                  _showClientInfo(contact);
+                                } else if (value == 'edit') {
+                                  _editClient(contact);
+                                } else if (value == 'delete') {
+                                  _deleteClient(contact);
+                                }
+                              },
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(
+                                  value: 'info',
+                                  child: Text('Информация'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('Редактировать'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Удалить'),
+                                ),
+                              ],
+                            ),
+                            onTap: () => _openClientDetail(contact),
+                          ),
+                        );
+                      },
+                    ),
+            ),
           ],
         ],
       ),
@@ -4548,16 +4517,15 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                 contact.name,
                                 style: Theme.of(context).textTheme.titleLarge,
                               ),
-                              if (contact.phone.isNotEmpty)
-                                Text(contact.phone),
+                              if (contact.phone.isNotEmpty) Text(contact.phone),
                               if (contact.lastService.isNotEmpty)
                                 _priceText(
                                   contact.lastPrice,
-                                  prefix:
-                                      'Последняя: ${contact.lastService} •',
+                                  prefix: 'Последняя: ${contact.lastService} •',
                                   style: TextStyle(
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -4586,7 +4554,8 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                           Text(_fmt(a.dateTime)),
                           if (a.servicePrice > 0)
                             _priceText(a.servicePrice, prefix: 'Цена:'),
-                          if (a.notes.isNotEmpty) Text('Примечание: ${a.notes}'),
+                          if (a.notes.isNotEmpty)
+                            Text('Примечание: ${a.notes}'),
                         ],
                       ),
                     ),
@@ -4669,8 +4638,7 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
       // Сразу заливаем в облако, чтобы клиенты видели без ожидания синхронизации.
       if (cloudSignedIn) {
         try {
-          final cloudId =
-              int.tryParse(saved.externalId.split(':').last);
+          final cloudId = int.tryParse(saved.externalId.split(':').last);
           final CloudServiceItem cloud;
           if (cloudId != null) {
             // Услуга уже в облаке — обновляем, а не создаём дубликат.
@@ -4696,21 +4664,26 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
             if (saved.published) {
               await notifyFavoriteClients(
                 title: 'Новая услуга',
-                body: 'Ваш избранный мастер/салон добавил услугу '
+                body:
+                    'Ваш избранный мастер/салон добавил услугу '
                     '«${saved.name}» — ${formatMoney(saved.price)}',
               );
             }
           }
           final synced = saved.copyWith(
             externalId: 'cloud:service:${cloud.id}',
-            cloudUpdatedAt: (cloud.updatedAt ?? DateTime.now()).toIso8601String(),
+            cloudUpdatedAt: (cloud.updatedAt ?? DateTime.now())
+                .toIso8601String(),
           );
           await widget.database.updateService(synced);
           if (!mounted) return;
           Navigator.of(context).pop(synced);
           return;
         } catch (e, st) {
-          await SyncLog.write('services', 'Пуш услуги в облако не удался: $e\n$st');
+          await SyncLog.write(
+            'services',
+            'Пуш услуги в облако не удался: $e\n$st',
+          );
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -4765,8 +4738,9 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
                   builder: (context, _) => TextFormField(
                     controller: _priceController,
                     enabled: !_saving,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     decoration: InputDecoration(
                       labelText: 'Цена, ${appCurrency.value.symbol}',
                       border: const OutlineInputBorder(),
@@ -4844,11 +4818,7 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
 }
 
 class ServicesTab extends StatefulWidget {
-  const ServicesTab({
-    super.key,
-    required this.database,
-    required this.company,
-  });
+  const ServicesTab({super.key, required this.database, required this.company});
 
   final AppointmentsDatabase database;
   final Company company;
@@ -4935,8 +4905,7 @@ class _ServicesTabState extends State<ServicesTab> {
       // реальную видимость услуги для клиентов.
       if (cloudSignedIn) {
         try {
-          final cloudId =
-              int.tryParse(updated.externalId.split(':').last);
+          final cloudId = int.tryParse(updated.externalId.split(':').last);
           if (cloudId != null) {
             await CloudService().updateService(
               CloudServiceItem(
@@ -4958,13 +4927,16 @@ class _ServicesTabState extends State<ServicesTab> {
             await widget.database.updateService(
               updated.copyWith(
                 externalId: 'cloud:service:${cloud.id}',
-                cloudUpdatedAt:
-                    (cloud.updatedAt ?? DateTime.now()).toIso8601String(),
+                cloudUpdatedAt: (cloud.updatedAt ?? DateTime.now())
+                    .toIso8601String(),
               ),
             );
           }
         } catch (e, st) {
-          await SyncLog.write('services', 'Тоггл публикации не ушёл в облако: $e\n$st');
+          await SyncLog.write(
+            'services',
+            'Тоггл публикации не ушёл в облако: $e\n$st',
+          );
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -5026,9 +4998,7 @@ class _ServicesTabState extends State<ServicesTab> {
   @override
   Widget build(BuildContext context) {
     final displayed = _services
-        .where(
-          (s) => s.name.toLowerCase().contains(_query),
-        )
+        .where((s) => s.name.toLowerCase().contains(_query))
         .toList();
     return Scaffold(
       body: Column(
@@ -5073,93 +5043,97 @@ class _ServicesTabState extends State<ServicesTab> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _failed
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('Не удалось загрузить список'),
-                            TextButton(
-                              onPressed: _load,
-                              child: const Text('Повторить'),
-                            ),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Не удалось загрузить список'),
+                        TextButton(
+                          onPressed: _load,
+                          child: const Text('Повторить'),
                         ),
-                      )
-                    : displayed.isEmpty
-                        ? Center(
-                            child: Text(
-                              _query.isEmpty
-                                  ? 'Услуг пока нет'
-                                  : 'Ничего не найдено',
+                      ],
+                    ),
+                  )
+                : displayed.isEmpty
+                ? Center(
+                    child: Text(
+                      _query.isEmpty ? 'Услуг пока нет' : 'Ничего не найдено',
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 88),
+                    itemCount: displayed.length,
+                    itemBuilder: (context, index) {
+                      final service = displayed[index];
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        child: ListTile(
+                          leading: const Icon(Icons.spa),
+                          title: Text(service.name),
+                          subtitle: ValueListenableBuilder<Currency>(
+                            valueListenable: appCurrency,
+                            builder: (context, currency, _) => Text(
+                              '${service.price.toStringAsFixed(2)} ${currency.symbol} • ${service.durationMinutes} мин',
                             ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.only(bottom: 88),
-                            itemCount: displayed.length,
-                            itemBuilder: (context, index) {
-                              final service = displayed[index];
-                              return Card(
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (service.published)
+                                const Tooltip(
+                                  message: 'Опубликована',
+                                  child: Icon(
+                                    Icons.visibility,
+                                    color: Colors.green,
+                                  ),
+                                )
+                              else
+                                const Tooltip(
+                                  message: 'Не опубликована',
+                                  child: Icon(
+                                    Icons.visibility_off,
+                                    color: Colors.grey,
+                                  ),
                                 ),
-                                child: ListTile(
-                                  leading: const Icon(Icons.spa),
-                                  title: Text(service.name),
-                                  subtitle: ValueListenableBuilder<Currency>(
-                                    valueListenable: appCurrency,
-                                    builder: (context, currency, _) => Text(
-                                      '${service.price.toStringAsFixed(2)} ${currency.symbol} • ${service.durationMinutes} мин',
+                              PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'edit') {
+                                    _editService(service);
+                                  } else if (value == 'delete') {
+                                    _deleteService(service);
+                                  } else if (value == 'toggle') {
+                                    _togglePublished(service);
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Редактировать'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'toggle',
+                                    child: Text(
+                                      service.published
+                                          ? 'Снять с публикации'
+                                          : 'Опубликовать',
                                     ),
                                   ),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (service.published)
-                                        const Tooltip(
-                                          message: 'Опубликована',
-                                          child: Icon(Icons.visibility,
-                                              color: Colors.green),
-                                        )
-                                      else
-                                        const Tooltip(
-                                          message: 'Не опубликована',
-                                          child: Icon(Icons.visibility_off,
-                                              color: Colors.grey),
-                                        ),
-                                      PopupMenuButton<String>(
-                                        onSelected: (value) {
-                                          if (value == 'edit') {
-                                            _editService(service);
-                                          } else if (value == 'delete') {
-                                            _deleteService(service);
-                                          } else if (value == 'toggle') {
-                                            _togglePublished(service);
-                                          }
-                                        },
-                                        itemBuilder: (context) => [
-                                          const PopupMenuItem(
-                                            value: 'edit',
-                                            child: Text('Редактировать'),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'toggle',
-                                            child: Text(service.published
-                                                ? 'Снять с публикации'
-                                                : 'Опубликовать'),
-                                          ),
-                                          const PopupMenuItem(
-                                            value: 'delete',
-                                            child: Text('Удалить'),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Удалить'),
                                   ),
-                                ),
-                              );
-                            },
+                                ],
+                              ),
+                            ],
                           ),
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -5282,18 +5256,15 @@ class _FinanceTabState extends State<FinanceTab> {
             children: [
               for (final p in _FinancePeriod.values) ...[
                 ChoiceChip(
-                  label: Text(
-                    switch (p) {
-                      _FinancePeriod.week => 'Неделя',
-                      _FinancePeriod.month => 'Месяц',
-                      _FinancePeriod.all => 'Всё время',
-                    },
-                  ),
+                  label: Text(switch (p) {
+                    _FinancePeriod.week => 'Неделя',
+                    _FinancePeriod.month => 'Месяц',
+                    _FinancePeriod.all => 'Всё время',
+                  }),
                   selected: _period == p,
                   onSelected: (_) => setState(() => _period = p),
                 ),
-                if (p != _FinancePeriod.values.last)
-                  const SizedBox(width: 8),
+                if (p != _FinancePeriod.values.last) const SizedBox(width: 8),
               ],
             ],
           ),
@@ -5347,11 +5318,11 @@ class _FinanceTabState extends State<FinanceTab> {
                     valueListenable: appCurrency,
                     builder: (context, currency, _) => Text(
                       '${total.toStringAsFixed(0)} ${currency.symbol}',
-                      style:
-                          Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: scheme.onPrimaryContainer,
-                              ),
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: scheme.onPrimaryContainer,
+                          ),
                     ),
                   ),
                 ],
@@ -5363,47 +5334,43 @@ class _FinanceTabState extends State<FinanceTab> {
           child: widget.loading && widget.appointments.isEmpty
               ? const Center(child: CircularProgressIndicator())
               : items.isEmpty
-                  ? const Center(
-                      child: Text('За выбранный период записей нет'),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.only(bottom: 24),
-                      itemCount: items.length,
-                      itemBuilder: (context, index) {
-                        final a = items[index];
-                        final price = _priceOf(a);
-                        return Card(
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 4,
+              ? const Center(child: Text('За выбранный период записей нет'))
+              : ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  itemCount: items.length,
+                  itemBuilder: (context, index) {
+                    final a = items[index];
+                    final price = _priceOf(a);
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: scheme.secondaryContainer,
+                          child: Icon(
+                            Icons.check_circle_outline,
+                            color: scheme.onSecondaryContainer,
                           ),
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: scheme.secondaryContainer,
-                              child: Icon(
-                                Icons.check_circle_outline,
-                                color: scheme.onSecondaryContainer,
-                              ),
-                            ),
-                            title: Text(
-                              a.service.isEmpty ? 'Запись' : a.service,
-                            ),
-                            subtitle: Text(
-                              '${a.clientName.isEmpty ? 'Клиент' : a.clientName}'
-                              ' • ${_fmtDay(a.dateTime)}',
-                            ),
-                            trailing: price > 0
-                                ? _priceText(
-                                    price,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  )
-                                : const Text('—'),
-                          ),
-                        );
-                      },
-                    ),
+                        ),
+                        title: Text(a.service.isEmpty ? 'Запись' : a.service),
+                        subtitle: Text(
+                          '${a.clientName.isEmpty ? 'Клиент' : a.clientName}'
+                          ' • ${_fmtDay(a.dateTime)}',
+                        ),
+                        trailing: price > 0
+                            ? _priceText(
+                                price,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              )
+                            : const Text('—'),
+                      ),
+                    );
+                  },
+                ),
         ),
       ],
     );
@@ -5477,9 +5444,8 @@ class _MoreTabState extends State<MoreTab> {
       if (update == null) {
         await showDialog<void>(
           context: context,
-          builder: (context) => const AlertDialog(
-            content: Text('Это актуальная версия'),
-          ),
+          builder: (context) =>
+              const AlertDialog(content: Text('Это актуальная версия')),
         );
         return;
       }
@@ -5530,7 +5496,8 @@ class _MoreTabState extends State<MoreTab> {
 
   @override
   Widget build(BuildContext context) {
-    final version = '${_info.version}${_info.buildNumber.isNotEmpty ? '+${_info.buildNumber}' : ''}';
+    final version =
+        '${_info.version}${_info.buildNumber.isNotEmpty ? '+${_info.buildNumber}' : ''}';
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
@@ -5538,11 +5505,14 @@ class _MoreTabState extends State<MoreTab> {
           Card(
             margin: const EdgeInsets.fromLTRB(12, 8, 12, 8),
             child: ListTile(
-              leading: Icon(Icons.wifi_off,
-                  color: Theme.of(context).colorScheme.error),
+              leading: Icon(
+                Icons.wifi_off,
+                color: Theme.of(context).colorScheme.error,
+              ),
               title: const Text('Офлайн-режим'),
               subtitle: const Text(
-                  'Нет интернета. Доступны локальные записи и «Мои дела».'),
+                'Нет интернета. Доступны локальные записи и «Мои дела».',
+              ),
             ),
           ),
         // У частного мастера «Мои дела» уже на главной панели —
@@ -5553,8 +5523,8 @@ class _MoreTabState extends State<MoreTab> {
             title: const Text('Мои дела'),
             subtitle: const Text('Личные задачи и напоминания'),
             onTap: () {
-              final mainShell =
-                  context.findAncestorStateOfType<_MainShellState>();
+              final mainShell = context
+                  .findAncestorStateOfType<_MainShellState>();
               Navigator.of(context)
                   .push<void>(
                     MaterialPageRoute(
@@ -5580,7 +5550,9 @@ class _MoreTabState extends State<MoreTab> {
                   role: widget.cloudRole,
                   onSyncServices: () =>
                       widget.database.syncServices(widget.company.id),
-                  onDeleteAccount: () => CloudService().deleteMyAccount().then((_) => widget.onLogout()),
+                  onDeleteAccount: () => CloudService().deleteMyAccount().then(
+                    (_) => widget.onLogout(),
+                  ),
                 ),
               ),
             ),
@@ -5596,8 +5568,7 @@ class _MoreTabState extends State<MoreTab> {
                 // (нанятые мастера), а не локальный справочник.
                 builder: (context) => widget.cloudRole == 'salon'
                     ? SalonTeamScreen(
-                        localDirectoryBuilder: (onAddMaster) =>
-                            ContactsScreen(
+                        localDirectoryBuilder: (onAddMaster) => ContactsScreen(
                           database: widget.database,
                           type: ContactType.master,
                           companyId: widget.company.id,
@@ -5649,7 +5620,6 @@ class _MoreTabState extends State<MoreTab> {
     );
   }
 }
-
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({
@@ -5856,68 +5826,68 @@ class _ContactsScreenState extends State<ContactsScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _failed
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('Не удалось загрузить список'),
-                            TextButton(
-                              onPressed: _load,
-                              child: const Text('Повторить'),
-                            ),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Не удалось загрузить список'),
+                        TextButton(
+                          onPressed: _load,
+                          child: const Text('Повторить'),
                         ),
-                      )
-                    : contacts.isEmpty
-                        ? Center(
-                            child: Text(
-                              _query.isEmpty
-                                  ? widget.type.emptyText
-                                  : 'Ничего не найдено',
-                            ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.only(bottom: 88),
-                            itemCount: contacts.length,
-                            itemBuilder: (context, index) {
-                              final contact = contacts[index];
-                              return ListTile(
-                                leading: Icon(
-                                  widget.type == ContactType.client
-                                      ? Icons.person_outline
-                                      : Icons.badge_outlined,
-                                ),
-                                title: Text(contact.name),
-                                subtitle: contact.phone.isEmpty
-                                    ? null
-                                    : Text(contact.phone),
-                                trailing: widget.selectContact
-                                    ? const Icon(Icons.chevron_right)
-                                    : PopupMenuButton<String>(
-                                        onSelected: (value) {
-                                          if (value == 'edit') {
-                                            _editContact(contact);
-                                          } else if (value == 'delete') {
-                                            _deleteContact(contact);
-                                          }
-                                        },
-                                        itemBuilder: (context) => const [
-                                          PopupMenuItem(
-                                            value: 'edit',
-                                            child: Text('Редактировать'),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'delete',
-                                            child: Text('Удалить'),
-                                          ),
-                                        ],
-                                      ),
-                                onTap: widget.selectContact
-                                    ? () => Navigator.of(context).pop(contact)
-                                    : null,
-                              );
-                            },
-                          ),
+                      ],
+                    ),
+                  )
+                : contacts.isEmpty
+                ? Center(
+                    child: Text(
+                      _query.isEmpty
+                          ? widget.type.emptyText
+                          : 'Ничего не найдено',
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 88),
+                    itemCount: contacts.length,
+                    itemBuilder: (context, index) {
+                      final contact = contacts[index];
+                      return ListTile(
+                        leading: Icon(
+                          widget.type == ContactType.client
+                              ? Icons.person_outline
+                              : Icons.badge_outlined,
+                        ),
+                        title: Text(contact.name),
+                        subtitle: contact.phone.isEmpty
+                            ? null
+                            : Text(contact.phone),
+                        trailing: widget.selectContact
+                            ? const Icon(Icons.chevron_right)
+                            : PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'edit') {
+                                    _editContact(contact);
+                                  } else if (value == 'delete') {
+                                    _deleteContact(contact);
+                                  }
+                                },
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Редактировать'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Удалить'),
+                                  ),
+                                ],
+                              ),
+                        onTap: widget.selectContact
+                            ? () => Navigator.of(context).pop(contact)
+                            : null,
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -5993,20 +5963,20 @@ class _AddContactDialogState extends State<AddContactDialog> {
               phone,
             )
           : await widget.database
-              .updateContact(
-                widget.type,
-                widget.companyId,
-                widget.contact!,
-                name,
-                phone,
-              )
-              .then(
-                (_) => Contact(
-                  id: widget.contact!.id,
-                  name: name.trim(),
-                  phone: phone.trim(),
-                ),
-              );
+                .updateContact(
+                  widget.type,
+                  widget.companyId,
+                  widget.contact!,
+                  name,
+                  phone,
+                )
+                .then(
+                  (_) => Contact(
+                    id: widget.contact!.id,
+                    name: name.trim(),
+                    phone: phone.trim(),
+                  ),
+                );
       if (!mounted) return;
       Navigator.of(context).pop(contact);
     } catch (_) {
@@ -6041,8 +6011,8 @@ class _AddContactDialogState extends State<AddContactDialog> {
         title: Text(
           isEdit
               ? (widget.type == ContactType.client
-                  ? 'Редактировать клиента'
-                  : 'Редактировать мастера')
+                    ? 'Редактировать клиента'
+                    : 'Редактировать мастера')
               : widget.type.addTitle,
         ),
         content: SingleChildScrollView(
@@ -6071,9 +6041,9 @@ class _AddContactDialogState extends State<AddContactDialog> {
                   ),
                   validator: (value) =>
                       widget.type == ContactType.client &&
-                              (value == null || value.trim().isEmpty)
-                          ? 'Введите телефон'
-                          : null,
+                          (value == null || value.trim().isEmpty)
+                      ? 'Введите телефон'
+                      : null,
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
@@ -6233,10 +6203,9 @@ class _ImportContactsDialogState extends State<ImportContactsDialog> {
   @override
   Widget build(BuildContext context) {
     final filtered = _contacts.where(_matches).toList();
-    final allSelected = filtered.isNotEmpty &&
-        filtered.every(
-          (c) => c.id != null && _selectedIds.contains(c.id!),
-        );
+    final allSelected =
+        filtered.isNotEmpty &&
+        filtered.every((c) => c.id != null && _selectedIds.contains(c.id!));
 
     return AlertDialog(
       title: const Text('Импорт из телефона'),
@@ -6275,7 +6244,8 @@ class _ImportContactsDialogState extends State<ImportContactsDialog> {
                         itemCount: filtered.length,
                         itemBuilder: (context, index) {
                           final c = filtered[index];
-                          final disabled = c.id == null ||
+                          final disabled =
+                              c.id == null ||
                               (widget.type == ContactType.client &&
                                   c.phones.isEmpty);
                           return CheckboxListTile(
@@ -6317,8 +6287,7 @@ class _ImportContactsDialogState extends State<ImportContactsDialog> {
                 } else {
                   for (final c in filtered) {
                     if (c.id == null) continue;
-                    if (widget.type == ContactType.client &&
-                        c.phones.isEmpty) {
+                    if (widget.type == ContactType.client && c.phones.isEmpty) {
                       continue;
                     }
                     _selectedIds.add(c.id!);
@@ -6330,9 +6299,9 @@ class _ImportContactsDialogState extends State<ImportContactsDialog> {
           ),
         FilledButton(
           onPressed: _selectedIds.isEmpty || _saving ? null : _import,
-          child: Text(_saving
-              ? 'Сохранение…'
-              : 'Импортировать (${_selectedIds.length})'),
+          child: Text(
+            _saving ? 'Сохранение…' : 'Импортировать (${_selectedIds.length})',
+          ),
         ),
       ],
     );
@@ -6392,7 +6361,9 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
     _selectedTime = a != null
         ? TimeOfDay(hour: a.dateTime.hour, minute: a.dateTime.minute)
         : TimeOfDay.now();
-    _client = a != null ? Contact(id: 0, name: a.clientName, phone: a.phone) : null;
+    _client = a != null
+        ? Contact(id: 0, name: a.clientName, phone: a.phone)
+        : null;
     _master = a != null ? Contact(id: 0, name: a.master, phone: '') : null;
     _phoneController.text = a?.phone ?? '';
     _serviceController.text = a?.service ?? '';
@@ -6409,9 +6380,9 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
     final match = a == null
         ? null
         : services.cast<Service?>().firstWhere(
-              (s) => s!.name == a.service,
-              orElse: () => null,
-            );
+            (s) => s!.name == a.service,
+            orElse: () => null,
+          );
     setState(() {
       _services = services;
       _selectedService = match;
@@ -6467,8 +6438,10 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
           labelText: isClient ? 'Клиент' : 'Мастер',
           errorText: field.errorText,
           border: const OutlineInputBorder(),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 8,
+          ),
         ),
         isEmpty: false,
         child: TextButton.icon(
@@ -6500,8 +6473,10 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
   }
 
   Future<void> _pickTime() async {
-    final picked =
-        await showTimePicker(context: context, initialTime: _selectedTime);
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _selectedTime,
+    );
     if (mounted && picked != null) setState(() => _selectedTime = picked);
   }
 
@@ -6533,9 +6508,10 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
         return;
       }
       setState(() {
-        _services = [..._services, result]..sort(
-            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-          );
+        _services = [
+          ..._services,
+          result,
+        ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
         _selectedService = result;
       });
       _serviceController.text = result.name;
@@ -6556,9 +6532,7 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
         ),
         child: SizedBox(
           height: 24,
-          child: Center(
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
+          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
         ),
       );
     }
@@ -6591,10 +6565,7 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
               child: Text('— Своя услуга —'),
             ),
             ..._services.map(
-              (s) => DropdownMenuItem(
-                value: s,
-                child: Text(s.name),
-              ),
+              (s) => DropdownMenuItem(value: s, child: Text(s.name)),
             ),
             DropdownMenuItem(
               value: addNew,
@@ -6658,8 +6629,10 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Телефон',
                   border: OutlineInputBorder(),
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
                 ),
                 keyboardType: TextInputType.phone,
                 validator: (value) => value == null || value.trim().isEmpty
@@ -6675,15 +6648,17 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
                   labelText: 'Услуга',
                   hintText: 'Выберите из списка или введите свою',
                   border: OutlineInputBorder(),
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
                 ),
                 onChanged: (_) {
                   final text = _serviceController.text.trim();
                   final match = _services.cast<Service?>().firstWhere(
-                        (s) => s!.name == text,
-                        orElse: () => null,
-                      );
+                    (s) => s!.name == text,
+                    orElse: () => null,
+                  );
                   setState(() => _selectedService = match);
                 },
                 validator: (value) => value == null || value.trim().isEmpty
@@ -6719,8 +6694,10 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
                   labelText: 'Продолжительность (мин)',
                   hintText: '60',
                   border: OutlineInputBorder(),
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
                 ),
                 keyboardType: TextInputType.number,
                 validator: (value) {
@@ -6734,8 +6711,10 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Напомнить за',
                   border: OutlineInputBorder(),
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                 ),
                 isEmpty: false,
                 child: DropdownButtonHideUnderline(
@@ -6744,10 +6723,12 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
                     isExpanded: true,
                     isDense: true,
                     items: _reminderOptions.entries
-                        .map((e) => DropdownMenuItem(
-                              value: e.key,
-                              child: Text(e.value),
-                            ))
+                        .map(
+                          (e) => DropdownMenuItem(
+                            value: e.key,
+                            child: Text(e.value),
+                          ),
+                        )
                         .toList(),
                     onChanged: (value) {
                       if (value == null) return;
@@ -6762,8 +6743,10 @@ class _AppointmentDialogState extends State<AppointmentDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Примечания',
                   border: OutlineInputBorder(),
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
                 ),
               ),
             ],
@@ -7043,9 +7026,7 @@ class _CloudGateState extends State<CloudGate> {
       );
     }
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_session == null) {
       return const RoleSelectScreen(skipLogo: true);
@@ -7078,10 +7059,7 @@ class _CloudGateState extends State<CloudGate> {
                     child: const Text('Войти в офлайн-режим'),
                   ),
                 ],
-                TextButton(
-                  onPressed: _signOut,
-                  child: const Text('Выйти'),
-                ),
+                TextButton(onPressed: _signOut, child: const Text('Выйти')),
               ],
             ),
           ),
@@ -7090,9 +7068,7 @@ class _CloudGateState extends State<CloudGate> {
     }
     final profile = _profile;
     if (profile == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (profile.isMaster || profile.isSalon) {
       return _MasterBridge(
@@ -7162,8 +7138,7 @@ class _MasterBridgeState extends State<_MasterBridge> {
   Future<void> _prepare() async {
     try {
       final email = supabase.auth.currentUser?.email ?? widget.profile.id;
-      final user =
-          await widget.database.getOrCreateCloudUser('sb:$email');
+      final user = await widget.database.getOrCreateCloudUser('sb:$email');
       if (!mounted) return;
       setState(
         () => _user = User(
@@ -7257,9 +7232,7 @@ class _MasterBridgeState extends State<_MasterBridge> {
     }
     final user = _user;
     if (user == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     return LocalSessionGate(
       database: widget.database,
@@ -7318,7 +7291,7 @@ class _LocalSessionGateState extends State<LocalSessionGate> {
     if (!mounted) return;
     final company =
         companies.where((c) => c.id == savedId).firstOrNull ??
-            companies.firstOrNull;
+        companies.firstOrNull;
     setState(() {
       _company = company;
       _loading = false;
@@ -7334,9 +7307,7 @@ class _LocalSessionGateState extends State<LocalSessionGate> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_company == null) {
       return CompanySelectScreen(

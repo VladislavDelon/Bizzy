@@ -15,7 +15,7 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"/>
     <application
-        android:label="bizzy_app"
+        android:label="BIZZY"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         <activity

@@ -31,8 +31,7 @@ String loginToEmail(String input) {
   if (RegExp(r'^[a-z0-9._-]+$').hasMatch(login)) {
     return '$login@$kLoginEmailDomain';
   }
-  final encoded =
-      base64UrlEncode(utf8.encode(login)).replaceAll('=', '');
+  final encoded = base64UrlEncode(utf8.encode(login)).replaceAll('=', '');
   return 'u$encoded@$kLoginEmailDomain';
 }
 
@@ -65,8 +64,7 @@ String emailToLogin(String email) {
 ///
 /// Аккаунты, созданные до этого изменения, хранят «сырой» пароль —
 /// для них signIn делает запасную попытку с исходным вариантом.
-String hardPassword(String raw) =>
-    'Bz!9${sha256.convert(utf8.encode(raw))}';
+String hardPassword(String raw) => 'Bz!9${sha256.convert(utf8.encode(raw))}';
 
 // ---------- Безопасный парсинг ответов Supabase ----------
 String _parseString(dynamic value, {String fallback = ''}) {
@@ -287,30 +285,30 @@ class CloudProfile {
   bool get hasLocation => lat != null && lng != null;
 
   factory CloudProfile.fromMap(Map<String, dynamic> map) => CloudProfile(
-        id: _parseString(map['id']),
-        role: _parseString(map['role'], fallback: 'client'),
-        name: _parseString(map['name']),
-        phone: _parseString(map['phone']),
-        avatarUrl: _parseString(map['avatar_url']),
-        address: _parseString(map['address']),
-        lat: map['lat'] == null ? null : _parseDouble(map['lat']),
-        lng: map['lng'] == null ? null : _parseDouble(map['lng']),
-        createdAt: _parseDateTime(map['created_at']),
-        phonePublic: _parseBool(map['phone_public'], fallback: true),
-      );
+    id: _parseString(map['id']),
+    role: _parseString(map['role'], fallback: 'client'),
+    name: _parseString(map['name']),
+    phone: _parseString(map['phone']),
+    avatarUrl: _parseString(map['avatar_url']),
+    address: _parseString(map['address']),
+    lat: map['lat'] == null ? null : _parseDouble(map['lat']),
+    lng: map['lng'] == null ? null : _parseDouble(map['lng']),
+    createdAt: _parseDateTime(map['created_at']),
+    phonePublic: _parseBool(map['phone_public'], fallback: true),
+  );
 
   Map<String, dynamic> toMap() => {
-        'id': id,
-        'role': role,
-        'name': name,
-        'phone': phone,
-        'avatar_url': avatarUrl,
-        'address': address,
-        'lat': lat,
-        'lng': lng,
-        'created_at': createdAt?.toIso8601String(),
-        'phone_public': phonePublic,
-      };
+    'id': id,
+    'role': role,
+    'name': name,
+    'phone': phone,
+    'avatar_url': avatarUrl,
+    'address': address,
+    'lat': lat,
+    'lng': lng,
+    'created_at': createdAt?.toIso8601String(),
+    'phone_public': phonePublic,
+  };
 }
 
 /// Профиль мастера + имя/телефон из `profiles`.
@@ -429,13 +427,10 @@ class MasterCard {
       prepayAmount: _parseDouble(map['prepay_amount']),
       prepayLink: _parseString(map['prepay_link']),
       createdAt: _parseDateTime(profile?['created_at']),
-      salonId: map['salon_id'] == null
-          ? null
-          : _parseString(map['salon_id']),
+      salonId: map['salon_id'] == null ? null : _parseString(map['salon_id']),
       salonKey: _parseString(map['salon_key']),
       autoAssign: _parseBool(map['auto_assign'], fallback: false),
-      managedBySalon:
-          _parseBool(map['managed_by_salon'], fallback: false),
+      managedBySalon: _parseBool(map['managed_by_salon'], fallback: false),
       salonSince: _parseDateTime(map['salon_since']),
     );
   }
@@ -459,27 +454,26 @@ class MasterCard {
     double? prepayAmount,
     String? prepayLink,
     List<String>? categories,
-  }) =>
-      MasterCard(
-        userId: userId ?? this.userId,
-        name: name ?? this.name,
-        phone: phone ?? this.phone,
-        role: role ?? this.role,
-        category: category ?? this.category,
-        categories: categories ?? this.categories,
-        description: description ?? this.description,
-        address: address ?? this.address,
-        social: social ?? this.social,
-        phonePublic: phonePublic ?? this.phonePublic,
-        avatarUrl: avatarUrl ?? this.avatarUrl,
-        ratingAvg: ratingAvg ?? this.ratingAvg,
-        ratingCount: ratingCount ?? this.ratingCount,
-        lat: lat ?? this.lat,
-        lng: lng ?? this.lng,
-        prepayEnabled: prepayEnabled ?? this.prepayEnabled,
-        prepayAmount: prepayAmount ?? this.prepayAmount,
-        prepayLink: prepayLink ?? this.prepayLink,
-      );
+  }) => MasterCard(
+    userId: userId ?? this.userId,
+    name: name ?? this.name,
+    phone: phone ?? this.phone,
+    role: role ?? this.role,
+    category: category ?? this.category,
+    categories: categories ?? this.categories,
+    description: description ?? this.description,
+    address: address ?? this.address,
+    social: social ?? this.social,
+    phonePublic: phonePublic ?? this.phonePublic,
+    avatarUrl: avatarUrl ?? this.avatarUrl,
+    ratingAvg: ratingAvg ?? this.ratingAvg,
+    ratingCount: ratingCount ?? this.ratingCount,
+    lat: lat ?? this.lat,
+    lng: lng ?? this.lng,
+    prepayEnabled: prepayEnabled ?? this.prepayEnabled,
+    prepayAmount: prepayAmount ?? this.prepayAmount,
+    prepayLink: prepayLink ?? this.prepayLink,
+  );
 }
 
 /// Услуга мастера в облаке.
@@ -514,13 +508,13 @@ class CloudServiceItem {
       );
 
   CloudServiceItem copyWith({bool? published}) => CloudServiceItem(
-        id: id,
-        masterId: masterId,
-        name: name,
-        price: price,
-        durationMinutes: durationMinutes,
-        published: published ?? this.published,
-      );
+    id: id,
+    masterId: masterId,
+    name: name,
+    price: price,
+    durationMinutes: durationMinutes,
+    published: published ?? this.published,
+  );
 }
 
 /// Запись/бронь клиент→мастер.
@@ -588,24 +582,23 @@ class CloudBooking {
     String? masterAddress,
     double? servicePrice,
     String? prepaymentStatus,
-  }) =>
-      CloudBooking(
-        id: id ?? this.id,
-        clientId: clientId ?? this.clientId,
-        masterId: masterId ?? this.masterId,
-        serviceId: serviceId ?? this.serviceId,
-        serviceName: serviceName ?? this.serviceName,
-        startsAt: startsAt ?? this.startsAt,
-        durationMinutes: durationMinutes ?? this.durationMinutes,
-        status: status ?? this.status,
-        notes: notes ?? this.notes,
-        clientName: clientName ?? this.clientName,
-        clientPhone: clientPhone ?? this.clientPhone,
-        masterName: masterName ?? this.masterName,
-        masterAddress: masterAddress ?? this.masterAddress,
-        servicePrice: servicePrice ?? this.servicePrice,
-        prepaymentStatus: prepaymentStatus ?? this.prepaymentStatus,
-      );
+  }) => CloudBooking(
+    id: id ?? this.id,
+    clientId: clientId ?? this.clientId,
+    masterId: masterId ?? this.masterId,
+    serviceId: serviceId ?? this.serviceId,
+    serviceName: serviceName ?? this.serviceName,
+    startsAt: startsAt ?? this.startsAt,
+    durationMinutes: durationMinutes ?? this.durationMinutes,
+    status: status ?? this.status,
+    notes: notes ?? this.notes,
+    clientName: clientName ?? this.clientName,
+    clientPhone: clientPhone ?? this.clientPhone,
+    masterName: masterName ?? this.masterName,
+    masterAddress: masterAddress ?? this.masterAddress,
+    servicePrice: servicePrice ?? this.servicePrice,
+    prepaymentStatus: prepaymentStatus ?? this.prepaymentStatus,
+  );
 
   factory CloudBooking.fromMap(Map<String, dynamic> map) {
     final client = _pickProfileMap(map['client']);
@@ -614,7 +607,9 @@ class CloudBooking {
       id: _parseInt(map['id']),
       clientId: _parseString(map['client_id']),
       masterId: _parseString(map['master_id']),
-      serviceId: map['service_id'] == null ? null : _parseInt(map['service_id']),
+      serviceId: map['service_id'] == null
+          ? null
+          : _parseInt(map['service_id']),
       serviceName: _parseString(map['service_name']),
       startsAt: _parseDateTime(map['starts_at']) ?? DateTime.now(),
       durationMinutes: _parseInt(map['duration_minutes'], fallback: 60),
@@ -650,12 +645,12 @@ class PortfolioPhoto {
   final DateTime? createdAt;
 
   factory PortfolioPhoto.fromMap(Map<String, dynamic> map) => PortfolioPhoto(
-        id: _parseInt(map['id']),
-        masterId: _parseString(map['master_id']),
-        imageUrl: _parseString(map['image_url']),
-        sortOrder: _parseInt(map['sort_order']),
-        createdAt: _parseDateTime(map['created_at']),
-      );
+    id: _parseInt(map['id']),
+    masterId: _parseString(map['master_id']),
+    imageUrl: _parseString(map['image_url']),
+    sortOrder: _parseInt(map['sort_order']),
+    createdAt: _parseDateTime(map['created_at']),
+  );
 }
 
 /// Отзыв мастера о клиенте (виден другим мастерам).
@@ -724,14 +719,12 @@ class CloudService {
       );
     } on AuthException catch (e) {
       final msg = e.message.toLowerCase();
-      final wrongCreds = msg.contains('invalid') ||
+      final wrongCreds =
+          msg.contains('invalid') ||
           msg.contains('credential') ||
           msg.contains('wrong');
       if (!wrongCreds) rethrow;
-      await supabase.auth.signInWithPassword(
-        email: email,
-        password: password,
-      );
+      await supabase.auth.signInWithPassword(email: email, password: password);
     }
   }
 
@@ -742,19 +735,18 @@ class CloudService {
     String name = '',
     String phone = '',
     String salonKey = '',
-  }) =>
-      supabase.auth.signUp(
-        email: loginToEmail(login),
-        password: hardPassword(password),
-        data: {
-          'role': role,
-          // Без имени показываем логин — имя задаётся позже в профиле.
-          'name': name.isEmpty ? login.trim() : name,
-          'phone': phone,
-          'login': login.trim(),
-          if (salonKey.isNotEmpty) 'salon_key': salonKey,
-        },
-      );
+  }) => supabase.auth.signUp(
+    email: loginToEmail(login),
+    password: hardPassword(password),
+    data: {
+      'role': role,
+      // Без имени показываем логин — имя задаётся позже в профиле.
+      'name': name.isEmpty ? login.trim() : name,
+      'phone': phone,
+      'login': login.trim(),
+      if (salonKey.isNotEmpty) 'salon_key': salonKey,
+    },
+  );
 
   Future<void> signOut() => supabase.auth.signOut();
 
@@ -768,8 +760,11 @@ class CloudService {
   Future<CloudProfile?> myProfile() async {
     final id = uid;
     if (id == null) return null;
-    final row =
-        await supabase.from('profiles').select().eq('id', id).maybeSingle();
+    final row = await supabase
+        .from('profiles')
+        .select()
+        .eq('id', id)
+        .maybeSingle();
     return row == null ? null : CloudProfile.fromMap(row);
   }
 
@@ -798,17 +793,16 @@ class CloudService {
     double? lng,
     bool? phonePublic,
     bool clearLocation = false,
-  }) =>
-      _runWithMissingColumnFallback(<String, dynamic>{
-        'name': ?name,
-        'phone': ?phone,
-        'avatar_url': ?avatarUrl,
-        'address': ?address,
-        'lat': ?lat,
-        'lng': ?lng,
-        'phone_public': ?phonePublic,
-        if (clearLocation) ...{'lat': null, 'lng': null},
-      }, (p) => supabase.from('profiles').update(p).eq('id', uid!));
+  }) => _runWithMissingColumnFallback(<String, dynamic>{
+    'name': ?name,
+    'phone': ?phone,
+    'avatar_url': ?avatarUrl,
+    'address': ?address,
+    'lat': ?lat,
+    'lng': ?lng,
+    'phone_public': ?phonePublic,
+    if (clearLocation) ...{'lat': null, 'lng': null},
+  }, (p) => supabase.from('profiles').update(p).eq('id', uid!));
 
   /// Обновляет логин и/или пароль текущего пользователя в Supabase Auth.
   /// [login] — то, что вводит пользователь; внутри превращается в email.
@@ -820,8 +814,7 @@ class CloudService {
     final res = await supabase.auth.updateUser(
       UserAttributes(
         email: email,
-        password:
-            password?.isNotEmpty == true ? hardPassword(password!) : null,
+        password: password?.isNotEmpty == true ? hardPassword(password!) : null,
         // Дублируем логин в metadata — displayLogin читает его оттуда.
         data: login == null || login.isEmpty ? null : {'login': login.trim()},
       ),
@@ -834,8 +827,10 @@ class CloudService {
   // ---------- Categories ----------
   Future<List<String>> categories() async {
     try {
-      final rows =
-          await supabase.from('categories').select('name').order('name');
+      final rows = await supabase
+          .from('categories')
+          .select('name')
+          .order('name');
       final list = [for (final r in rows) r['name'] as String];
       if (list.isNotEmpty) return list;
     } catch (_) {}
@@ -927,7 +922,7 @@ class CloudService {
           MasterCard.fromMap(
             r,
             fallbackProfile: profileMap[_parseString(r['user_id'])],
-          )
+          ),
       ];
 
       // Провайдеры без карточки в master_profiles — показываем по профилю
@@ -1053,11 +1048,15 @@ class CloudService {
     };
     // Старая база без свежих миграций — сохраняем без отсутствующих полей.
     await _runWithMissingColumnFallback(
-        payload, (p) => supabase.from('master_profiles').upsert(p));
+      payload,
+      (p) => supabase.from('master_profiles').upsert(p),
+    );
   }
 
-  Future<void> updateAvatarUrl(String url) =>
-      supabase.from('master_profiles').update({'avatar_url': url}).eq('user_id', uid as Object);
+  Future<void> updateAvatarUrl(String url) => supabase
+      .from('master_profiles')
+      .update({'avatar_url': url})
+      .eq('user_id', uid as Object);
 
   /// Загружает файл в публичный bucket `avatars/<user_id>/avatar.jpg`.
   /// Возвращает публичный URL.
@@ -1065,7 +1064,9 @@ class CloudService {
     final userId = uid;
     if (userId == null) throw Exception('Не авторизован');
     final dest = '$userId/avatar.jpg';
-    await supabase.storage.from('avatars').upload(
+    await supabase.storage
+        .from('avatars')
+        .upload(
           dest,
           File(filePath),
           fileOptions: const FileOptions(upsert: true),
@@ -1185,12 +1186,9 @@ class CloudService {
   Future<PortfolioPhoto> uploadPortfolioPhoto(String filePath) async {
     final userId = uid;
     if (userId == null) throw Exception('Не авторизован');
-    final fileName =
-        '${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
     final dest = '$userId/portfolio/$fileName';
-    await supabase.storage
-        .from('avatars')
-        .upload(dest, File(filePath));
+    await supabase.storage.from('avatars').upload(dest, File(filePath));
     final url = supabase.storage.from('avatars').getPublicUrl(dest);
     final row = await supabase
         .from('master_portfolio')
@@ -1202,10 +1200,7 @@ class CloudService {
 
   /// Удаляет фото: запись в таблице + файл в storage (по URL).
   Future<void> deletePortfolioPhoto(PortfolioPhoto photo) async {
-    await supabase
-        .from('master_portfolio')
-        .delete()
-        .eq('id', photo.id);
+    await supabase.from('master_portfolio').delete().eq('id', photo.id);
     final marker = '/storage/v1/object/public/avatars/';
     final idx = photo.imageUrl.indexOf(marker);
     if (idx >= 0) {
@@ -1222,7 +1217,7 @@ class CloudService {
   /// (простой способ синхронизации локального справочника).
   Future<void> replaceMyServices(
     List<({String name, double price, int durationMinutes, bool published})>
-        items,
+    items,
   ) async {
     final id = uid;
     if (id == null) return;
@@ -1251,6 +1246,10 @@ class CloudService {
     String notes = '',
     String prepaymentStatus = 'none',
     int? offerId,
+    // Заявка записана «в салон» — помечается salon_id, чтобы
+    // салон видел её и после назначения мастеру. Для записи
+    // напрямую к мастеру — null (личная заявка, салон не видит).
+    String? salonId,
   }) async {
     final payload = <String, dynamic>{
       'client_id': uid,
@@ -1263,9 +1262,10 @@ class CloudService {
       'prepayment_status': prepaymentStatus,
       'notes': notes,
       'offer_id': offerId,
+      'salon_id': salonId,
     };
     // Повторяем вставку, убирая колонки, которых нет в старой базе.
-    for (var attempt = 0; attempt < 4; attempt++) {
+    for (var attempt = 0; attempt < 5; attempt++) {
       try {
         final row = await supabase
             .from('appointments')
@@ -1289,6 +1289,11 @@ class CloudService {
           payload.remove('prepayment_status');
           continue;
         }
+        if (_isMissingColumn(e, 'salon_id') &&
+            payload.containsKey('salon_id')) {
+          payload.remove('salon_id');
+          continue;
+        }
         rethrow;
       }
     }
@@ -1306,8 +1311,10 @@ class CloudService {
 
     // Подтягиваем адреса мастеров из master_profiles отдельным запросом —
     // appointments.master_id ссылается на profiles, а не на master_profiles.
-    final masterIds =
-        bookings.map((b) => b.masterId).where((id) => id.isNotEmpty).toSet();
+    final masterIds = bookings
+        .map((b) => b.masterId)
+        .where((id) => id.isNotEmpty)
+        .toSet();
     if (masterIds.isNotEmpty) {
       try {
         final mpRows = await supabase
@@ -1333,7 +1340,9 @@ class CloudService {
   Future<List<CloudBooking>> masterBookings() async {
     final rows = await supabase
         .from('appointments')
-        .select('*, client:profiles!appointments_client_id_fkey(name, phone), master:profiles!appointments_master_id_fkey(name)')
+        .select(
+          '*, client:profiles!appointments_client_id_fkey(name, phone), master:profiles!appointments_master_id_fkey(name)',
+        )
         .eq('master_id', uid!)
         .order('starts_at');
     return [for (final r in rows) CloudBooking.fromMap(r)];
@@ -1349,7 +1358,9 @@ class CloudService {
     final end = start.add(const Duration(days: 1));
     final rows = await supabase
         .from('appointments')
-        .select('*, client:profiles!appointments_client_id_fkey(name, phone), master:profiles!appointments_master_id_fkey(name)')
+        .select(
+          '*, client:profiles!appointments_client_id_fkey(name, phone), master:profiles!appointments_master_id_fkey(name)',
+        )
         .eq('master_id', masterId)
         .gte('starts_at', start.toUtc().toIso8601String())
         .lt('starts_at', end.toUtc().toIso8601String())
@@ -1364,7 +1375,8 @@ class CloudService {
   /// Мастер подтверждает получение предоплаты по записи.
   Future<void> setPrepaymentStatus(int id, String status) => supabase
       .from('appointments')
-      .update({'prepayment_status': status}).eq('id', id);
+      .update({'prepayment_status': status})
+      .eq('id', id);
 
   // ---------- Favorites (избранные мастера/салоны клиента) ----------
 
@@ -1457,9 +1469,10 @@ class CloudService {
       return false;
     }
     try {
-      await supabase
-          .from('favorites')
-          .insert({'client_id': uid, 'master_id': masterId});
+      await supabase.from('favorites').insert({
+        'client_id': uid,
+        'master_id': masterId,
+      });
     } on PostgrestException catch (e) {
       // 23505 — уже есть в избранном: считаем успехом.
       if (e.code == '23505') return true;
@@ -1472,9 +1485,10 @@ class CloudService {
         name: meta['name'] as String? ?? '',
         phone: meta['phone'] as String? ?? '',
       );
-      await supabase
-          .from('favorites')
-          .insert({'client_id': uid, 'master_id': masterId});
+      await supabase.from('favorites').insert({
+        'client_id': uid,
+        'master_id': masterId,
+      });
     }
     return true;
   }
@@ -1535,7 +1549,8 @@ class CloudService {
     final rows = await supabase
         .from('client_reviews')
         .select(
-            'id, client_id, master_id, booking_id, rating, comment, created_at, profiles!client_reviews_master_id_fkey(name)')
+          'id, client_id, master_id, booking_id, rating, comment, created_at, profiles!client_reviews_master_id_fkey(name)',
+        )
         .eq('client_id', clientId)
         .order('created_at', ascending: false);
     return [for (final r in rows) ClientReview.fromMap(r)];
@@ -1547,7 +1562,8 @@ class CloudService {
     final rows = await supabase
         .from('client_reviews')
         .select(
-            'id, client_id, master_id, booking_id, rating, comment, created_at')
+          'id, client_id, master_id, booking_id, rating, comment, created_at',
+        )
         .eq('master_id', id)
         .order('created_at', ascending: false);
     return [for (final r in rows) ClientReview.fromMap(r)];
@@ -1569,7 +1585,8 @@ class CloudService {
           'comment': comment,
         })
         .select(
-            'id, client_id, master_id, booking_id, rating, comment, created_at')
+          'id, client_id, master_id, booking_id, rating, comment, created_at',
+        )
         .single();
     return ClientReview.fromMap(row);
   }
@@ -1590,11 +1607,7 @@ class CloudService {
   }) async {
     final row = await supabase
         .from('master_clients')
-        .insert({
-          'master_id': uid,
-          'name': name,
-          'phone': phone,
-        })
+        .insert({'master_id': uid, 'name': name, 'phone': phone})
         .select()
         .single();
     return CloudClient.fromMap(row);
@@ -1716,7 +1729,7 @@ class CloudService {
         'role',
         'created_at',
         'phone_public',
-        'avatar_url'
+        'avatar_url',
       ],
       eqColumn: 'id',
       eqValue: id,
@@ -1780,11 +1793,11 @@ class CloudService {
     await ensureMasterCard();
     final card = await myMasterCard();
     if (card != null && card.salonKey.isNotEmpty) return card.salonKey;
-    final key =
-        'BZ-${uid!.replaceAll('-', '').substring(0, 6).toUpperCase()}';
+    final key = 'BZ-${uid!.replaceAll('-', '').substring(0, 6).toUpperCase()}';
     await supabase
         .from('master_profiles')
-        .update({'salon_key': key}).eq('user_id', uid!);
+        .update({'salon_key': key})
+        .eq('user_id', uid!);
     return key;
   }
 
@@ -1802,27 +1815,20 @@ class CloudService {
     if (rows.isEmpty) return;
     // Аккаунт, созданный салоном («salon_managed» в metadata),
     // помечается managed_by_salon — салону доступны его логин/пароль.
-    await _runWithMissingColumnFallback(
-      {
-        'salon_id': rows.first['user_id'],
-        'managed_by_salon': meta['salon_managed'] == true,
-        // Момент вступления — салону видны только записи после него.
-        'salon_since': DateTime.now().toUtc().toIso8601String(),
-      },
-      (p) =>
-          supabase.from('master_profiles').update(p).eq('user_id', uid!),
-    );
+    await _runWithMissingColumnFallback({
+      'salon_id': rows.first['user_id'],
+      'managed_by_salon': meta['salon_managed'] == true,
+      // Момент вступления — салону видны только записи после него.
+      'salon_since': DateTime.now().toUtc().toIso8601String(),
+    }, (p) => supabase.from('master_profiles').update(p).eq('user_id', uid!));
   }
 
   /// Салон: уволить мастера (он становится самозанятым).
-  Future<void> detachMaster(String masterId) =>
-      _runWithMissingColumnFallback(
-        {'salon_id': null, 'managed_by_salon': false, 'salon_since': null},
-        (p) => supabase
-            .from('master_profiles')
-            .update(p)
-            .eq('user_id', masterId),
-      );
+  Future<void> detachMaster(String masterId) => _runWithMissingColumnFallback({
+    'salon_id': null,
+    'managed_by_salon': false,
+    'salon_since': null,
+  }, (p) => supabase.from('master_profiles').update(p).eq('user_id', masterId));
 
   /// Салон: создать аккаунт мастера, не выходя из своей сессии —
   /// регистрация идёт через отдельный SupabaseClient.
@@ -1866,25 +1872,42 @@ class CloudService {
   /// Салон: переключатель автоназначения заявок на мастеров.
   Future<void> setAutoAssign(bool value) => supabase
       .from('master_profiles')
-      .update({'auto_assign': value}).eq('user_id', uid!);
+      .update({'auto_assign': value})
+      .eq('user_id', uid!);
 
-  /// Салон: назначить заявку конкретному мастеру.
-  Future<void> assignBooking(int bookingId, String masterId) => supabase
-      .from('appointments')
-      .update({'master_id': masterId}).eq('id', bookingId);
+  /// Салон: назначить заявку конкретному мастеру. Заявка помечается
+  /// salon_id — салон продолжает её видеть; на старой базе без
+  /// колонки назначение просто работает по-старому.
+  Future<void> assignBooking(int bookingId, String masterId) =>
+      _runWithMissingColumnFallback(
+        <String, dynamic>{'master_id': masterId, 'salon_id': uid},
+        (payload) =>
+            supabase.from('appointments').update(payload).eq('id', bookingId),
+      );
 
-  /// Заявки салона: свои + все записи своих мастеров.
+  /// Заявки салона: свои (master_id = я) + пришедшие через салон
+  /// (salon_id = я — назначенные мастерам и автоназначение).
+  /// Личные заявки мастеров салону недоступны.
   Future<List<CloudBooking>> salonBookings() async {
-    final team = <String>{uid!};
-    for (final m in await salonMasters()) {
-      if (m.userId.isNotEmpty) team.add(m.userId);
+    List<dynamic> rows;
+    try {
+      rows = await supabase
+          .from('appointments')
+          .select('*, client:profiles!appointments_client_id_fkey(name, phone)')
+          .or('master_id.eq.$uid,salon_id.eq.$uid')
+          .order('starts_at');
+    } on PostgrestException {
+      // Старая база без salon_id — команда целиком (старое поведение).
+      final team = <String>{uid!};
+      for (final m in await salonMasters()) {
+        if (m.userId.isNotEmpty) team.add(m.userId);
+      }
+      rows = await supabase
+          .from('appointments')
+          .select('*, client:profiles!appointments_client_id_fkey(name, phone)')
+          .inFilter('master_id', team.toList())
+          .order('starts_at');
     }
-    final rows = await supabase
-        .from('appointments')
-        .select(
-            '*, client:profiles!appointments_client_id_fkey(name, phone)')
-        .inFilter('master_id', team.toList())
-        .order('starts_at');
     return [for (final r in rows) CloudBooking.fromMap(r)];
   }
 
@@ -1963,12 +1986,12 @@ class CloudService {
 
   /// Салон → приглашение мастеру в команду.
   /// Повторное приглашение после отказа снова ставит «pending».
-  Future<void> sendTeamInvite(String masterId) => supabase
-      .from('team_invites')
-      .upsert(
-        {'salon_id': uid, 'master_id': masterId, 'status': 'pending'},
-        onConflict: 'salon_id, master_id',
-      );
+  Future<void> sendTeamInvite(String masterId) =>
+      supabase.from('team_invites').upsert({
+        'salon_id': uid,
+        'master_id': masterId,
+        'status': 'pending',
+      }, onConflict: 'salon_id, master_id');
 
   /// Приглашения, отправленные моим салоном (со статусами).
   Future<List<TeamInvite>> sentTeamInvites() async {
@@ -1999,16 +2022,12 @@ class CloudService {
         .update({'status': accept ? 'accepted' : 'declined'})
         .eq('id', invite.id);
     if (!accept) return;
-    await _runWithMissingColumnFallback(
-      {
-        'salon_id': invite.salonId,
-        // Момент вступления — личные записи мастера до него
-        // салону не показываются.
-        'salon_since': DateTime.now().toUtc().toIso8601String(),
-      },
-      (p) =>
-          supabase.from('master_profiles').update(p).eq('user_id', uid!),
-    );
+    await _runWithMissingColumnFallback({
+      'salon_id': invite.salonId,
+      // Момент вступления — личные записи мастера до него
+      // салону не показываются.
+      'salon_since': DateTime.now().toUtc().toIso8601String(),
+    }, (p) => supabase.from('master_profiles').update(p).eq('user_id', uid!));
   }
 
   /// Бейдж на вкладке «Мастера» у салона: ответы мастеров
@@ -2026,13 +2045,13 @@ class CloudService {
   /// Салон открыл «Мастера» — ответы считаем просмотренными,
   /// бейдж гаснет до следующего ответа.
   Future<void> markTeamResponsesSeen() => _runWithMissingColumnFallback(
-        {'salon_seen': true},
-        (p) => supabase
-            .from('team_invites')
-            .update(p)
-            .eq('salon_id', uid!)
-            .eq('salon_seen', false),
-      );
+    {'salon_seen': true},
+    (p) => supabase
+        .from('team_invites')
+        .update(p)
+        .eq('salon_id', uid!)
+        .eq('salon_seen', false),
+  );
 
   /// Записи конкретного мастера — для салона («Информация о записях»).
   /// Чтение разрешено политикой appt_select_salon_team; [since]
@@ -2041,11 +2060,29 @@ class CloudService {
   Future<List<CloudBooking>> masterBookingsFor(
     String masterId, {
     DateTime? since,
+    // salonId — салон смотрит статистику мастера ТОЛЬКО по
+    // салонным заявкам: личные записи мастера скрыты.
+    String? salonId,
   }) async {
-    final rows = await supabase
+    List<dynamic> rows;
+    if (salonId != null) {
+      try {
+        rows = await supabase
+            .from('appointments')
+            .select(
+              '*, client:profiles!appointments_client_id_fkey(name, phone)',
+            )
+            .eq('master_id', masterId)
+            .eq('salon_id', salonId)
+            .order('starts_at', ascending: false);
+        return [for (final r in rows) CloudBooking.fromMap(r)];
+      } on PostgrestException {
+        // Старая база без salon_id — ниже старое поведение (since).
+      }
+    }
+    rows = await supabase
         .from('appointments')
-        .select(
-            '*, client:profiles!appointments_client_id_fkey(name, phone)')
+        .select('*, client:profiles!appointments_client_id_fkey(name, phone)')
         .eq('master_id', masterId)
         .order('starts_at', ascending: false);
     final bookings = [for (final r in rows) CloudBooking.fromMap(r)];
@@ -2064,11 +2101,8 @@ class CloudService {
   Future<String> uploadOfferImage(String filePath) async {
     final userId = uid;
     if (userId == null) throw Exception('Не авторизован');
-    final dest =
-        '$userId/offers/${DateTime.now().millisecondsSinceEpoch}.jpg';
-    await supabase.storage
-        .from('avatars')
-        .upload(dest, File(filePath));
+    final dest = '$userId/offers/${DateTime.now().millisecondsSinceEpoch}.jpg';
+    await supabase.storage.from('avatars').upload(dest, File(filePath));
     return supabase.storage.from('avatars').getPublicUrl(dest);
   }
 
@@ -2085,7 +2119,10 @@ class CloudService {
     DateTime? validFrom,
     DateTime? validUntil,
   }) =>
-      supabase.from('offers').insert({
+      // Старая база без миграции honey_v2 не знает image_url/
+      // discount_percent/service_ids/valid_* — выкидываем их и
+      // повторяем, иначе создание Honey у мастера падает целиком.
+      _runWithMissingColumnFallback(<String, dynamic>{
         'provider_id': uid,
         'title': title,
         'description': description,
@@ -2097,7 +2134,7 @@ class CloudService {
         'service_ids': serviceIds,
         'valid_from': validFrom?.toUtc().toIso8601String(),
         'valid_until': validUntil?.toUtc().toIso8601String(),
-      });
+      }, (payload) => supabase.from('offers').insert(payload));
 
   /// Мои предложения (управление у салона/мастера).
   Future<List<SalonOffer>> myOffers() async {
@@ -2133,10 +2170,9 @@ class CloudService {
           .eq('active', true)
           .order('created_at', ascending: false);
     }
-    return [
-      for (final r in rows)
-        SalonOffer.fromMap(r as Map<String, dynamic>),
-    ].where((o) => o.isLive).toList();
+    return [for (final r in rows) SalonOffer.fromMap(r as Map<String, dynamic>)]
+        .where((o) => o.isLive)
+        .toList();
   }
 
   /// Honey, подаренные именно мне салонами/мастерами.
@@ -2144,27 +2180,24 @@ class CloudService {
     final rows = await supabase
         .from('offer_gifts')
         .select(
-            'offer:offers!offer_gifts_offer_id_fkey(*, provider:profiles!offers_provider_id_fkey(name))')
+          'offer:offers!offer_gifts_offer_id_fkey(*, provider:profiles!offers_provider_id_fkey(name))',
+        )
         .eq('client_id', uid!)
         .order('created_at', ascending: false);
     return [
       for (final r in rows)
         if (r['offer'] != null)
-          SalonOffer.fromMap(r['offer'] as Map<String, dynamic>)
-              .copyGifted(),
+          SalonOffer.fromMap(r['offer'] as Map<String, dynamic>).copyGifted(),
     ].where((o) => o.isLive).toList();
   }
 
   /// Подарить Honey конкретному клиенту.
   Future<void> giftOffer(int offerId, String clientId) =>
-      supabase.from('offer_gifts').upsert(
-        {
-          'offer_id': offerId,
-          'provider_id': uid,
-          'client_id': clientId,
-        },
-        onConflict: 'offer_id, client_id',
-      );
+      supabase.from('offer_gifts').upsert({
+        'offer_id': offerId,
+        'provider_id': uid,
+        'client_id': clientId,
+      }, onConflict: 'offer_id, client_id');
 
   /// Погасить подаренный Honey после записи — разовое использование.
   Future<void> consumeGift(int offerId) => supabase
@@ -2195,10 +2228,9 @@ class CloudService {
           .eq('active', true)
           .order('created_at', ascending: false);
     }
-    return [
-      for (final r in rows)
-        SalonOffer.fromMap(r as Map<String, dynamic>),
-    ].where((o) => o.isLive).toList();
+    return [for (final r in rows) SalonOffer.fromMap(r as Map<String, dynamic>)]
+        .where((o) => o.isLive)
+        .toList();
   }
 
   /// id предложений, которые я уже использовал при записи.
@@ -2229,14 +2261,11 @@ class CloudService {
   /// Погасить Honey после успешной записи. unique(offer_id, client_id)
   /// на сервере не даст использовать предложение дважды.
   Future<void> redeemOffer(int offerId, int appointmentId) =>
-      supabase.from('offer_redemptions').upsert(
-        {
-          'offer_id': offerId,
-          'client_id': uid,
-          'appointment_id': appointmentId,
-        },
-        onConflict: 'offer_id, client_id',
-      );
+      supabase.from('offer_redemptions').upsert({
+        'offer_id': offerId,
+        'client_id': uid,
+        'appointment_id': appointmentId,
+      }, onConflict: 'offer_id, client_id');
 
   /// Клиенты, добавившие меня в избранное — для push о новых
   /// услугах/фото/Honey (RLS разрешает читать свои fan-строки).
@@ -2266,7 +2295,8 @@ class CloudService {
   /// Провайдер: текущее правило предоплаты для клиента
   /// (для показа состояния в карточке клиента).
   Future<({bool required, double amount})?> clientPrepayRuleFor(
-      String clientId) async {
+    String clientId,
+  ) async {
     final rows = await supabase
         .from('client_prepay_rules')
         .select('amount, prepay_required')
@@ -2284,43 +2314,37 @@ class CloudService {
   /// и задать сумму. required=false или amount<=0 — запись
   /// остаётся, но предоплата считается выключенной.
   Future<void> setClientPrepay(
-      String clientId, bool required, double amount) async {
+    String clientId,
+    bool required,
+    double amount,
+  ) async {
     if (!required) {
-      await supabase
-          .from('client_prepay_rules')
-          .upsert(
-            {
-              'provider_id': uid,
-              'client_id': clientId,
-              'prepay_required': false,
-              'amount': 0,
-            },
-            onConflict: 'provider_id, client_id',
-          );
-      return;
-    }
-    await supabase.from('client_prepay_rules').upsert(
-      {
+      await supabase.from('client_prepay_rules').upsert({
         'provider_id': uid,
         'client_id': clientId,
-        'prepay_required': true,
-        'amount': amount,
-      },
-      onConflict: 'provider_id, client_id',
-    );
+        'prepay_required': false,
+        'amount': 0,
+      }, onConflict: 'provider_id, client_id');
+      return;
+    }
+    await supabase.from('client_prepay_rules').upsert({
+      'provider_id': uid,
+      'client_id': clientId,
+      'prepay_required': true,
+      'amount': amount,
+    }, onConflict: 'provider_id, client_id');
   }
 
   /// Включить/выключить предложение.
   Future<void> setOfferActive(int id, bool active) => supabase
       .from('offers')
-      .update({'active': active}).eq('id', id).eq('provider_id', uid!);
-
-  /// Удалить предложение.
-  Future<void> deleteOffer(int id) => supabase
-      .from('offers')
-      .delete()
+      .update({'active': active})
       .eq('id', id)
       .eq('provider_id', uid!);
+
+  /// Удалить предложение.
+  Future<void> deleteOffer(int id) =>
+      supabase.from('offers').delete().eq('id', id).eq('provider_id', uid!);
 }
 
 /// Предложение в «Honey» — сертификат, скидка, бонус от салона.
@@ -2400,52 +2424,51 @@ class SalonOffer {
       (price * (100 - discountPercent) / 100).roundToDouble();
 
   SalonOffer copyGifted() => SalonOffer(
-        id: id,
-        providerId: providerId,
-        providerName: providerName,
-        title: title,
-        description: description,
-        value: value,
-        active: active,
-        imageUrl: imageUrl,
-        linkUrl: linkUrl,
-        discountPercent: discountPercent,
-        allServices: allServices,
-        serviceIds: serviceIds,
-        validFrom: validFrom,
-        validUntil: validUntil,
-        isGift: true,
-        used: used,
-        createdAt: createdAt,
-      );
+    id: id,
+    providerId: providerId,
+    providerName: providerName,
+    title: title,
+    description: description,
+    value: value,
+    active: active,
+    imageUrl: imageUrl,
+    linkUrl: linkUrl,
+    discountPercent: discountPercent,
+    allServices: allServices,
+    serviceIds: serviceIds,
+    validFrom: validFrom,
+    validUntil: validUntil,
+    isGift: true,
+    used: used,
+    createdAt: createdAt,
+  );
 
   SalonOffer copyUsed() => SalonOffer(
-        id: id,
-        providerId: providerId,
-        providerName: providerName,
-        title: title,
-        description: description,
-        value: value,
-        active: active,
-        imageUrl: imageUrl,
-        linkUrl: linkUrl,
-        discountPercent: discountPercent,
-        allServices: allServices,
-        serviceIds: serviceIds,
-        validFrom: validFrom,
-        validUntil: validUntil,
-        isGift: isGift,
-        used: true,
-        createdAt: createdAt,
-      );
+    id: id,
+    providerId: providerId,
+    providerName: providerName,
+    title: title,
+    description: description,
+    value: value,
+    active: active,
+    imageUrl: imageUrl,
+    linkUrl: linkUrl,
+    discountPercent: discountPercent,
+    allServices: allServices,
+    serviceIds: serviceIds,
+    validFrom: validFrom,
+    validUntil: validUntil,
+    isGift: isGift,
+    used: true,
+    createdAt: createdAt,
+  );
 
   factory SalonOffer.fromMap(Map<String, dynamic> map) {
     final provider = _pickProfileMap(map['provider']);
     return SalonOffer(
       id: _parseInt(map['id']),
       providerId: _parseString(map['provider_id']),
-      providerName:
-          provider != null ? _parseString(provider['name']) : '',
+      providerName: provider != null ? _parseString(provider['name']) : '',
       title: _parseString(map['title']),
       description: _parseString(map['description']),
       value: _parseString(map['value']),
@@ -2455,8 +2478,7 @@ class SalonOffer {
       discountPercent: _parseDouble(map['discount_percent']),
       allServices: _parseBool(map['all_services'], fallback: true),
       serviceIds: [
-        for (final e in (map['service_ids'] as List? ?? const []))
-          _parseInt(e),
+        for (final e in (map['service_ids'] as List? ?? const [])) _parseInt(e),
       ],
       validFrom: _parseDateTime(map['valid_from']),
       validUntil: _parseDateTime(map['valid_until']),
@@ -2485,8 +2507,10 @@ class TeamInvite {
   /// Имя «второй стороны»: для мастера — салон, для салона — мастер.
   final String otherName;
 
-  factory TeamInvite.fromMap(Map<String, dynamic> map,
-      {bool isSalonSide = false}) {
+  factory TeamInvite.fromMap(
+    Map<String, dynamic> map, {
+    bool isSalonSide = false,
+  }) {
     final other = _pickProfileMap(isSalonSide ? map['master'] : map['salon']);
     return TeamInvite(
       id: _parseInt(map['id']),
@@ -2516,12 +2540,12 @@ class CloudClient {
   final DateTime? updatedAt;
 
   factory CloudClient.fromMap(Map<String, dynamic> map) => CloudClient(
-        id: _parseInt(map['id']),
-        masterId: _parseString(map['master_id']),
-        name: _parseString(map['name']),
-        phone: _parseString(map['phone']),
-        updatedAt: _parseDateTime(map['updated_at']),
-      );
+    id: _parseInt(map['id']),
+    masterId: _parseString(map['master_id']),
+    name: _parseString(map['name']),
+    phone: _parseString(map['phone']),
+    updatedAt: _parseDateTime(map['updated_at']),
+  );
 }
 
 /// Запись, созданная мастером самостоятельно (не клиентская заявка).

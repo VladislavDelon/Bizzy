@@ -15,15 +15,26 @@ const bizzySeedColor = Color(0xFFFFD600);
 final ValueNotifier<bool> appBizzyLook = ValueNotifier(false);
 
 /// Оранжево-жёлтый градиент «Вид Bizzy» — на кнопках и акцентах.
+/// По диагонали от жёлтого к глубокому оранжевому — объёмнее.
 const bizzyAccentGradient = LinearGradient(
-  begin: Alignment.centerLeft,
-  end: Alignment.centerRight,
-  colors: [Color(0xFFFF8F00), Color(0xFFFFD600)],
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+  colors: [Color(0xFFFFE633), Color(0xFFFFB300), Color(0xFFFF6D00)],
+  stops: [0.0, 0.55, 1.0],
 );
 
 /// Оранжевый заменитель жёлтого акцента там, где градиент
 /// недоступен (индикатор навигации, чипы, иконки).
 const bizzyAccentColor = Color(0xFFFF8F00);
+
+/// Тот же градиент, но мягче — для широких поверхностей
+/// (индикатор навигации, выбранные чипы), где глубокий
+/// оранжевый был бы слишком кричащим.
+const bizzySoftGradient = LinearGradient(
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+  colors: [Color(0xFFFFF176), Color(0xFFFFB74D)],
+);
 
 const _themePrefsKey = 'bizzy_theme_mode';
 const _bizzyLookKey = 'bizzy_look';
@@ -154,7 +165,14 @@ bool bizzyGlassActive(BuildContext context) =>
 /// в тёмной — обычная панель.
 /// Требует Scaffold(extendBody: true), иначе блюру нечего
 /// размывать.
-Widget bizzyNavBar(BuildContext context, {required Widget child}) {
+Widget bizzyNavBar(
+  BuildContext context, {
+  required Widget child,
+  // «Вид Bizzy» — фишка только клиента: в шелле мастера/салона
+  // передаём bizzy=false, чтобы мёдная плашка не «протекала»,
+  // если флаг остался включённым после смены аккаунта.
+  bool bizzy = true,
+}) {
   if (!bizzyGlassActive(context)) return child;
   const radius = 30.0;
   return Padding(
@@ -186,23 +204,33 @@ Widget bizzyNavBar(BuildContext context, {required Widget child}) {
         borderRadius: BorderRadius.circular(radius),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 32, sigmaY: 32),
-          child: Container(
-            // Градиент сверху-вниз — эффект iOS-материала:
-            // верх светлее, низ прозрачнее, блюр читается.
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.white.withValues(alpha: 0.72),
-                  Colors.white.withValues(alpha: 0.42),
-                ],
-              ),
-            ),
-            child: Theme(
-              data: Theme.of(context).copyWith(
-                navigationBarTheme:
-                    Theme.of(context).navigationBarTheme.copyWith(
+          child: ValueListenableBuilder<bool>(
+            valueListenable: appBizzyLook,
+            builder: (context, lookOn, _) {
+              final look = lookOn && bizzy;
+              return Container(
+                // Градиент сверху-вниз — эффект iOS-материала:
+                // верх светлее, низ прозрачнее, блюр читается.
+                // При «Вид Bizzy» плашка тёплая — мёдный градиент.
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: look
+                        ? [
+                            const Color(0xFFFFE0B2).withValues(alpha: 0.88),
+                            const Color(0xFFFFB74D).withValues(alpha: 0.55),
+                          ]
+                        : [
+                            Colors.white.withValues(alpha: 0.72),
+                            Colors.white.withValues(alpha: 0.42),
+                          ],
+                  ),
+                ),
+                child: Theme(
+                  data: Theme.of(context).copyWith(
+                    navigationBarTheme: Theme.of(context).navigationBarTheme
+                        .copyWith(
                           backgroundColor: Colors.transparent,
                           elevation: 0,
                           height: 64,
@@ -221,9 +249,11 @@ Widget bizzyNavBar(BuildContext context, {required Widget child}) {
                             ),
                           ),
                         ),
-              ),
-              child: child,
-            ),
+                  ),
+                  child: child,
+                ),
+              );
+            },
           ),
         ),
       ),
@@ -237,21 +267,13 @@ Widget bizzyNavBar(BuildContext context, {required Widget child}) {
 /// нет — небольшой подъём там просто визуальный и безвреден.
 Widget bizzyTabFab(BuildContext context, {required Widget child}) {
   if (!bizzyGlassActive(context)) return child;
-  return Padding(
-    padding: const EdgeInsets.only(bottom: 88),
-    child: child,
-  );
+  return Padding(padding: const EdgeInsets.only(bottom: 88), child: child);
 }
 
 /// «Стеклянная» карточка — полупрозрачная белая панель с тонкой
 /// светлой кромкой. Используйте на светлой теме поверх фона.
 class GlassCard extends StatelessWidget {
-  const GlassCard({
-    super.key,
-    required this.child,
-    this.margin,
-    this.padding,
-  });
+  const GlassCard({super.key, required this.child, this.margin, this.padding});
 
   final Widget child;
   final EdgeInsetsGeometry? margin;
@@ -260,10 +282,10 @@ class GlassCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!bizzyGlassActive(context)) {
-      return Card(margin: margin, child: Padding(
-        padding: padding ?? EdgeInsets.zero,
-        child: child,
-      ));
+      return Card(
+        margin: margin,
+        child: Padding(padding: padding ?? EdgeInsets.zero, child: child),
+      );
     }
     return Container(
       margin: margin,
@@ -279,10 +301,7 @@ class GlassCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Padding(
-        padding: padding ?? EdgeInsets.zero,
-        child: child,
-      ),
+      child: Padding(padding: padding ?? EdgeInsets.zero, child: child),
     );
   }
 }
@@ -301,8 +320,7 @@ ThemeData bizzyTheme(Brightness brightness) {
     useMaterial3: true,
     // Светлая тема — холодный полупрозрачный фон, чтобы карточки
     // и навигация читались как «стекло».
-    scaffoldBackgroundColor:
-        isLight ? const Color(0xFFF2F4FA) : Colors.black,
+    scaffoldBackgroundColor: isLight ? const Color(0xFFF2F4FA) : Colors.black,
     cardTheme: isLight
         ? CardThemeData(
             color: Colors.white.withValues(alpha: 0.62),
@@ -310,9 +328,7 @@ ThemeData bizzyTheme(Brightness brightness) {
             margin: const EdgeInsets.all(8),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(18),
-              side: BorderSide(
-                color: Colors.white.withValues(alpha: 0.9),
-              ),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.9)),
             ),
           )
         : null,
@@ -330,20 +346,18 @@ ThemeData bizzyTheme(Brightness brightness) {
             backgroundColor: Colors.white.withValues(alpha: 0.88),
             modalBackgroundColor: Colors.white.withValues(alpha: 0.88),
             shape: const RoundedRectangleBorder(
-              borderRadius:
-                  BorderRadius.vertical(top: Radius.circular(28)),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
             ),
           )
         : null,
     appBarTheme: AppBarTheme(
-      backgroundColor:
-          isLight ? Colors.white.withValues(alpha: 0.7) : Colors.black,
+      backgroundColor: isLight
+          ? Colors.white.withValues(alpha: 0.7)
+          : Colors.black,
       foregroundColor: isLight ? Colors.black : Colors.white,
       surfaceTintColor: Colors.transparent,
       scrolledUnderElevation: 0,
-      iconTheme: IconThemeData(
-        color: isLight ? Colors.black : Colors.white,
-      ),
+      iconTheme: IconThemeData(color: isLight ? Colors.black : Colors.white),
       titleTextStyle: TextStyle(
         color: isLight ? Colors.black : Colors.white,
         fontSize: 20,
@@ -357,8 +371,9 @@ ThemeData bizzyTheme(Brightness brightness) {
       extendedTextStyle: TextStyle(color: Colors.black),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor:
-          isLight ? Colors.white.withValues(alpha: 0.62) : Colors.black,
+      backgroundColor: isLight
+          ? Colors.white.withValues(alpha: 0.62)
+          : Colors.black,
       elevation: 0,
       indicatorColor: seedColor,
       iconTheme: WidgetStateProperty.resolveWith((states) {
@@ -375,26 +390,28 @@ ThemeData bizzyTheme(Brightness brightness) {
       }),
     ),
     pageTransitionsTheme: const PageTransitionsTheme(
-      builders: {
-        TargetPlatform.android: ZoomPageTransitionsBuilder(),
-      },
+      builders: {TargetPlatform.android: ZoomPageTransitionsBuilder()},
     ),
   );
 }
 
 /// Тема клиента при включённом «Вид Bizzy»: жёлтые акценты
-/// (primary, индикатор навигации, FAB) уходят в оранжевый.
-/// Сами кнопки делаются градиентными через [bizzyFilledButton]
-/// и [bizzyFab] — тема не умеет градиенты, только цвета.
+/// (primary, индикатор навигации, FAB, чипы) уходят в тёплый
+/// оранжевый. Сами кнопки делаются градиентными с аурой через
+/// [bizzyFilledButton] и [bizzyFab] — тема умеет только цвета.
 ThemeData bizzyClientTheme(ThemeData base) {
   final cs = base.colorScheme;
   return base.copyWith(
     colorScheme: cs.copyWith(
       primary: const Color(0xFFE65100),
+      // Тёплые «медовые» поверхности вместо жёлто-серых.
+      primaryContainer: const Color(0xFFFFE0B2),
+      secondaryContainer: const Color(0xFFFFF3D6),
+      tertiaryContainer: const Color(0xFFFFECB3),
       inversePrimary: bizzyAccentColor,
     ),
     navigationBarTheme: base.navigationBarTheme.copyWith(
-      indicatorColor: bizzyAccentColor.withValues(alpha: 0.85),
+      indicatorColor: bizzyAccentColor.withValues(alpha: 0.9),
     ),
     floatingActionButtonTheme: base.floatingActionButtonTheme.copyWith(
       backgroundColor: bizzyAccentColor,
@@ -403,15 +420,99 @@ ThemeData bizzyClientTheme(ThemeData base) {
     progressIndicatorTheme: base.progressIndicatorTheme.copyWith(
       color: bizzyAccentColor,
     ),
+    snackBarTheme: base.snackBarTheme.copyWith(
+      actionTextColor: bizzyAccentColor,
+    ),
   );
 }
 
-/// Основная кнопка: при «Вид Bizzy» — оранжево-жёлтый градиент,
-/// иначе обычный FilledButton. Использовать в клиентских экранах.
+/// Градиентная поверхность «Вид Bizzy» с аурой: в покое — мягкое
+/// оранжевое свечение, при нажатии аура разгорается и кнопка
+/// слегка ужимается — объёмный отклик как у iOS-кнопок.
+class _BizzyGlow extends StatefulWidget {
+  const _BizzyGlow({
+    required this.onPressed,
+    required this.child,
+    required this.radius,
+    required this.padding,
+  });
+
+  final VoidCallback? onPressed;
+  final Widget child;
+  final double radius;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  State<_BizzyGlow> createState() => _BizzyGlowState();
+}
+
+class _BizzyGlowState extends State<_BizzyGlow> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onPressed != null;
+    return Opacity(
+      opacity: enabled ? 1 : 0.5,
+      child: AnimatedScale(
+        scale: _pressed ? 0.965 : 1,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          decoration: BoxDecoration(
+            gradient: bizzyAccentGradient,
+            borderRadius: BorderRadius.circular(widget.radius),
+            boxShadow: [
+              // Аура — при нажатии оранжевое свечение разгорается.
+              BoxShadow(
+                color: bizzyAccentColor.withValues(
+                  alpha: _pressed ? 0.75 : 0.4,
+                ),
+                blurRadius: _pressed ? 30 : 16,
+                spreadRadius: _pressed ? 2 : 0,
+                offset: Offset(0, _pressed ? 3 : 7),
+              ),
+            ],
+          ),
+          // Верхний блик — кнопка выглядит выпуклой, как стекло.
+          foregroundDecoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(widget.radius),
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0.0, 0.55],
+              colors: [
+                Colors.white.withValues(alpha: _pressed ? 0.18 : 0.32),
+                Colors.white.withValues(alpha: 0),
+              ],
+            ),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: widget.onPressed,
+              onHighlightChanged: enabled
+                  ? (h) => setState(() => _pressed = h)
+                  : null,
+              borderRadius: BorderRadius.circular(widget.radius),
+              splashColor: Colors.white.withValues(alpha: 0.4),
+              highlightColor: Colors.white.withValues(alpha: 0.12),
+              child: Padding(padding: widget.padding, child: widget.child),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Основная кнопка: при «Вид Bizzy» — оранжево-жёлтый градиент
+/// с аурой при нажатии, иначе обычный FilledButton.
 Widget bizzyFilledButton({
   required VoidCallback? onPressed,
   required Widget child,
-  IconData? icon,
+  Widget? icon,
 }) {
   return ValueListenableBuilder<bool>(
     valueListenable: appBizzyLook,
@@ -419,56 +520,39 @@ Widget bizzyFilledButton({
       if (!on) {
         return icon == null
             ? FilledButton(onPressed: onPressed, child: child)
-            : FilledButton.icon(
-                onPressed: onPressed,
-                icon: Icon(icon),
-                label: child,
-              );
+            : FilledButton.icon(onPressed: onPressed, icon: icon, label: child);
       }
-      return Opacity(
-        opacity: onPressed == null ? 0.5 : 1,
-        child: Material(
-          color: Colors.transparent,
-          child: Ink(
-            decoration: BoxDecoration(
-              gradient: bizzyAccentGradient,
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: InkWell(
-              onTap: onPressed,
-              borderRadius: BorderRadius.circular(24),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (icon != null) ...[
-                      Icon(icon, size: 20, color: Colors.black),
-                      const SizedBox(width: 8),
-                    ],
-                    DefaultTextStyle(
-                      style: const TextStyle(
-                        color: Colors.black,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      child: child,
-                    ),
-                  ],
-                ),
+      return _BizzyGlow(
+        onPressed: onPressed,
+        radius: 24,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (icon != null) ...[
+              IconTheme(
+                data: const IconThemeData(color: Colors.black, size: 20),
+                child: icon,
               ),
+              const SizedBox(width: 8),
+            ],
+            DefaultTextStyle(
+              style: const TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.w600,
+              ),
+              child: child,
             ),
-          ),
+          ],
         ),
       );
     },
   );
 }
 
-/// FAB с градиентом при «Вид Bizzy», иначе обычный.
+/// FAB: при «Вид Bizzy» — градиентная «капля» с аурой,
+/// иначе обычный FloatingActionButton.extended.
 Widget bizzyFab({
   required VoidCallback? onPressed,
   required IconData icon,
@@ -485,44 +569,23 @@ Widget bizzyFab({
           label: Text(label),
         );
       }
-      return Material(
-        color: Colors.transparent,
-        child: Ink(
-          decoration: BoxDecoration(
-            gradient: bizzyAccentGradient,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: bizzyAccentColor.withValues(alpha: 0.4),
-                blurRadius: 14,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: InkWell(
-            onTap: onPressed,
-            borderRadius: BorderRadius.circular(20),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 14,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, color: Colors.black),
-                  const SizedBox(width: 8),
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
+      return _BizzyGlow(
+        onPressed: onPressed,
+        radius: 20,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.black),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.w700,
               ),
             ),
-          ),
+          ],
         ),
       );
     },

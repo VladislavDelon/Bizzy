@@ -185,18 +185,19 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(accept
-              ? 'Вы в команде салона — заявки будут приходить сюда'
-              : 'Приглашение отклонено'),
+          content: Text(
+            accept
+                ? 'Вы в команде салона — заявки будут приходить сюда'
+                : 'Приглашение отклонено',
+          ),
         ),
       );
       _load();
     } catch (e) {
       await SyncLog.write('team_invite', e.toString());
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось ответить: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось ответить: $e')));
     }
   }
 
@@ -226,8 +227,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                               Text(
                                 '«${inv.otherName.isEmpty ? 'Салон' : inv.otherName}» '
                                 'приглашает вас в команду',
-                                style:
-                                    Theme.of(context).textTheme.titleSmall,
+                                style: Theme.of(context).textTheme.titleSmall,
                               ),
                               const SizedBox(height: 8),
                               Wrap(
@@ -342,13 +342,14 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
     try {
       await _cloud.deletePortfolioPhoto(photo);
       setState(
-          () => _portfolio = _portfolio.where((p) => p.id != photo.id).toList());
+        () => _portfolio = _portfolio.where((p) => p.id != photo.id).toList(),
+      );
     } catch (e, st) {
       await SyncLog.write('portfolio', 'Удаление фото: $e\n$st');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось удалить фото')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Не удалось удалить фото')));
     }
   }
 
@@ -404,7 +405,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       prepayEnabled: _prepayEnabled,
       prepayAmount:
           double.tryParse(_prepayAmountController.text.replaceAll(',', '.')) ??
-              0,
+          0,
       prepayLink: _prepayLinkController.text.trim(),
       ratingAvg: _ratingAvg,
       ratingCount: _ratingCount,
@@ -455,9 +456,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -544,9 +543,8 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         avatarUrl: _avatarUrl,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Профиль сохранён')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Профиль сохранён')));
       Navigator.of(context).pop();
     } catch (e) {
       await SyncLog.write('master_profile_edit', e.toString());
@@ -562,9 +560,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_isSalon ? 'Профиль салона' : 'Мой профиль'),
-      ),
+      appBar: AppBar(title: Text(_isSalon ? 'Профиль салона' : 'Мой профиль')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -595,8 +591,11 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                                     ? NetworkImage(_avatarUrl)
                                     : null,
                                 child: _avatarUrl.isEmpty
-                                    ? Icon(Icons.person,
-                                        color: scheme.onPrimary, size: 36)
+                                    ? Icon(
+                                        Icons.person,
+                                        color: scheme.onPrimary,
+                                        size: 36,
+                                      )
                                     : null,
                               ),
                             ),
@@ -605,14 +604,18 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                                 width: 20,
                                 height: 20,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 2),
+                                  strokeWidth: 2,
+                                ),
                               )
                             else
                               CircleAvatar(
                                 radius: 14,
                                 backgroundColor: scheme.secondary,
-                                child: Icon(Icons.camera_alt,
-                                    size: 14, color: scheme.onSecondary),
+                                child: Icon(
+                                  Icons.camera_alt,
+                                  size: 14,
+                                  color: scheme.onSecondary,
+                                ),
                               ),
                           ],
                         ),
@@ -625,8 +628,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                                 _ratingAvg > 0
                                     ? _ratingAvg.toStringAsFixed(1)
                                     : '—',
-                                style:
-                                    Theme.of(context).textTheme.headlineSmall,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall,
                               ),
                               Text(
                                 _ratingCount == 0
@@ -679,7 +683,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                           onChanged: _saving
                               ? null
                               : (v) =>
-                                  setState(() => _phonePublic = v ?? false),
+                                    setState(() => _phonePublic = v ?? false),
                           materialTapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
                           visualDensity: VisualDensity.compact,
@@ -714,12 +718,12 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                         onSelected: _saving
                             ? null
                             : (sel) => setState(() {
-                                  if (sel) {
-                                    _pickedCategories.add(c);
-                                  } else {
-                                    _pickedCategories.remove(c);
-                                  }
-                                }),
+                                if (sel) {
+                                  _pickedCategories.add(c);
+                                } else {
+                                  _pickedCategories.remove(c);
+                                }
+                              }),
                       ),
                   ],
                 ),
@@ -807,8 +811,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                     controller: _prepayAmountController,
                     keyboardType: TextInputType.number,
                     inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                          RegExp(r'[0-9.,]')),
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                     ],
                     decoration: const InputDecoration(
                       labelText: 'Сумма предоплаты',
@@ -863,20 +866,22 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                               fit: BoxFit.cover,
                               loadingBuilder: (context, child, progress) =>
                                   progress == null
-                                      ? child
-                                      : Container(
-                                          color: scheme.surfaceContainerHighest,
-                                          child: const Center(
-                                            child:
-                                                CircularProgressIndicator(
-                                                    strokeWidth: 2),
-                                          ),
+                                  ? child
+                                  : Container(
+                                      color: scheme.surfaceContainerHighest,
+                                      child: const Center(
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
                                         ),
+                                      ),
+                                    ),
                               errorBuilder: (context, error, stackTrace) =>
                                   Container(
-                                color: scheme.surfaceContainerHighest,
-                                child: const Icon(Icons.broken_image_outlined),
-                              ),
+                                    color: scheme.surfaceContainerHighest,
+                                    child: const Icon(
+                                      Icons.broken_image_outlined,
+                                    ),
+                                  ),
                             ),
                           ),
                           Positioned(
@@ -903,8 +908,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                         ],
                       ),
                     InkWell(
-                      onTap:
-                          _uploadingPhoto || _saving ? null : _addPortfolioPhoto,
+                      onTap: _uploadingPhoto || _saving
+                          ? null
+                          : _addPortfolioPhoto,
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
                         decoration: BoxDecoration(
@@ -913,8 +919,9 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                             color: scheme.outline,
                             style: BorderStyle.solid,
                           ),
-                          color: scheme.surfaceContainerHighest
-                              .withValues(alpha: 0.4),
+                          color: scheme.surfaceContainerHighest.withValues(
+                            alpha: 0.4,
+                          ),
                         ),
                         child: Center(
                           child: _uploadingPhoto
@@ -930,10 +937,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
-                  Text(
-                    _error!,
-                    style: TextStyle(color: scheme.error),
-                  ),
+                  Text(_error!, style: TextStyle(color: scheme.error)),
                 ],
                 const SizedBox(height: 24),
                 FilledButton.tonalIcon(
@@ -1006,10 +1010,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
 /// Экран «Заявки клиентов» — записи, которые клиенты
 /// сделали к этому мастеру через облако.
 class MasterBookingsScreen extends StatefulWidget {
-  const MasterBookingsScreen({
-    super.key,
-    this.onBookingChanged,
-  });
+  const MasterBookingsScreen({super.key, this.onBookingChanged});
 
   /// Вызывается при изменении статуса заявки.
   /// Можно синхронизировать с локальным календарём.
@@ -1065,7 +1066,8 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
       // Команда, заявки, отзывы и приглашения — параллельно.
       final results = await Future.wait([
         if (isSalon)
-          _cloud.salonMasters()
+          _cloud
+              .salonMasters()
               .then<List<MasterCard>>((v) => v)
               .catchError((_) => <MasterCard>[])
         else
@@ -1117,7 +1119,8 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
     if (_team.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Сначала добавьте мастеров во вкладке «Мастера»')),
+          content: Text('Сначала добавьте мастеров во вкладке «Мастера»'),
+        ),
       );
       return;
     }
@@ -1133,11 +1136,8 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
                 children: [
                   const Icon(Icons.content_cut, size: 18),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(m.name.isEmpty ? 'Мастер' : m.name),
-                  ),
-                  if (b.masterId == m.userId)
-                    const Icon(Icons.check, size: 18),
+                  Expanded(child: Text(m.name.isEmpty ? 'Мастер' : m.name)),
+                  if (b.masterId == m.userId) const Icon(Icons.check, size: 18),
                 ],
               ),
             ),
@@ -1160,9 +1160,8 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
     } catch (e) {
       await SyncLog.write('assignBooking', e.toString());
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось назначить: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось назначить: $e')));
     }
   }
 
@@ -1185,9 +1184,8 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
     } catch (e) {
       await SyncLog.write('auto_assign', e.toString());
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось переключить: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось переключить: $e')));
     }
   }
 
@@ -1198,18 +1196,19 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(accept
-              ? 'Вы в команде салона — заявки будут приходить сюда'
-              : 'Приглашение отклонено'),
+          content: Text(
+            accept
+                ? 'Вы в команде салона — заявки будут приходить сюда'
+                : 'Приглашение отклонено',
+          ),
         ),
       );
       await _load();
     } catch (e) {
       await SyncLog.write('team_invite', e.toString());
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось ответить: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось ответить: $e')));
     }
   }
 
@@ -1221,17 +1220,17 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
       if (b.clientId.isNotEmpty) {
         final (title, body) = switch (status) {
           'confirmed' => (
-              'Запись подтверждена',
-              'Мастер принял заявку на ${b.serviceName}'
-            ),
+            'Запись подтверждена',
+            'Мастер принял заявку на ${b.serviceName}',
+          ),
           'cancelled' => (
-              'Запись отменена',
-              'Мастер отменил заявку на ${b.serviceName}'
-            ),
+            'Запись отменена',
+            'Мастер отменил заявку на ${b.serviceName}',
+          ),
           'completed' => (
-              'Запись завершена',
-              'Мастер завершил приём на ${b.serviceName}'
-            ),
+            'Запись завершена',
+            'Мастер завершил приём на ${b.serviceName}',
+          ),
           _ => (null, null),
         };
         if (title != null && body != null) {
@@ -1253,20 +1252,20 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
   }
 
   String _statusLabel(String status) => switch (status) {
-        'pending' => 'Новая заявка',
-        'confirmed' => 'Подтверждена',
-        'cancelled' => 'Отменена',
-        'completed' => 'Завершена',
-        _ => status,
-      };
+    'pending' => 'Новая заявка',
+    'confirmed' => 'Подтверждена',
+    'cancelled' => 'Отменена',
+    'completed' => 'Завершена',
+    _ => status,
+  };
 
   Color _statusColor(String status) => switch (status) {
-        'pending' => Colors.orange,
-        'confirmed' => Colors.green,
-        'cancelled' => Colors.red,
-        'completed' => Colors.blueGrey,
-        _ => Colors.grey,
-      };
+    'pending' => Colors.orange,
+    'confirmed' => Colors.green,
+    'cancelled' => Colors.red,
+    'completed' => Colors.blueGrey,
+    _ => Colors.grey,
+  };
 
   String _fmt(DateTime dt) =>
       '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} '
@@ -1332,8 +1331,7 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
                 CheckedPopupMenuItem(
                   value: 'auto',
                   checked: _autoAssign,
-                  child: const Text(
-                      'Автоназначение записей на мастеров'),
+                  child: const Text('Автоназначение записей на мастеров'),
                 ),
               ],
             ),
@@ -1342,276 +1340,274 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _failed
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('Не удалось загрузить заявки'),
-                      TextButton(onPressed: _load, child: const Text('Повторить')),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: _bookings.isEmpty && _invites.isEmpty
-                      ? ListView(
-                          children: const [
-                            SizedBox(height: 120),
-                            Center(
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Не удалось загрузить заявки'),
+                  TextButton(onPressed: _load, child: const Text('Повторить')),
+                ],
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: _bookings.isEmpty && _invites.isEmpty
+                  ? ListView(
+                      children: const [
+                        SizedBox(height: 120),
+                        Center(
+                          child: Text(
+                            'Заявок пока нет.\nКак только клиент запишется — '
+                            'она появится здесь.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 88),
+                      itemCount:
+                          _invites.length +
+                          _bookings.length +
+                          (_bookings.isEmpty ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        if (index < _invites.length) {
+                          final inv = _invites[index];
+                          return Card(
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
+                            ),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .primaryContainer,
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Приглашение в салон',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '«${inv.otherName.isEmpty ? 'Салон' : inv.otherName}» '
+                                    'приглашает вас в свою команду.',
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    children: [
+                                      FilledButton.tonalIcon(
+                                        onPressed: () =>
+                                            _respondInvite(inv, true),
+                                        icon: const Icon(Icons.check),
+                                        label: const Text('Принять'),
+                                      ),
+                                      OutlinedButton(
+                                        onPressed: () =>
+                                            _respondInvite(inv, false),
+                                        child: const Text('Отклонить'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+                        index -= _invites.length;
+                        if (_bookings.isEmpty) {
+                          return const Padding(
+                            padding: EdgeInsets.all(32),
+                            child: Center(
                               child: Text(
-                                'Заявок пока нет.\nКак только клиент запишется — '
-                                'она появится здесь.',
+                                'Заявок пока нет.',
                                 textAlign: TextAlign.center,
                               ),
                             ),
-                          ],
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.only(bottom: 88),
-                          itemCount: _invites.length + _bookings.length +
-                              (_bookings.isEmpty ? 1 : 0),
-                          itemBuilder: (context, index) {
-                            if (index < _invites.length) {
-                              final inv = _invites[index];
-                              return Card(
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
-                                ),
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .primaryContainer,
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Приглашение в салон',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleSmall,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '«${inv.otherName.isEmpty ? 'Салон' : inv.otherName}» '
-                                        'приглашает вас в свою команду.',
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Wrap(
-                                        spacing: 8,
-                                        children: [
-                                          FilledButton.tonalIcon(
-                                            onPressed: () =>
-                                                _respondInvite(inv, true),
-                                            icon: const Icon(Icons.check),
-                                            label: const Text('Принять'),
-                                          ),
-                                          OutlinedButton(
-                                            onPressed: () =>
-                                                _respondInvite(inv, false),
-                                            child: const Text('Отклонить'),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }
-                            index -= _invites.length;
-                            if (_bookings.isEmpty) {
-                              return const Padding(
-                                padding: EdgeInsets.all(32),
-                                child: Center(
-                                  child: Text(
-                                    'Заявок пока нет.',
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-                              );
-                            }
-                            final b = _bookings[index];
-                            return Card(
-                              margin: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 4,
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                          );
+                        }
+                        final b = _bookings[index];
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
                                   children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            b.serviceName,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .titleMedium,
-                                          ),
-                                        ),
-                                        Chip(
-                                          label: Text(_statusLabel(b.status)),
-                                          backgroundColor: _statusColor(b.status)
-                                              .withValues(alpha: 0.15),
-                                          side: BorderSide.none,
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${b.clientName.isEmpty ? 'Клиент' : b.clientName}'
-                                      '${b.clientPhone.isEmpty ? '' : ' • ${b.clientPhone}'}',
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${_fmt(b.startsAt)} • ${b.durationMinutes} мин',
-                                      style:
-                                          Theme.of(context).textTheme.bodySmall,
-                                    ),
-                                    if (_isSalon &&
-                                        _masterLabel(b.masterId)
-                                            .isNotEmpty) ...[
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            Icons.assignment_ind_outlined,
-                                            size: 16,
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .primary,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            'Мастер: ${_masterLabel(b.masterId)}',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall
-                                                ?.copyWith(
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .primary,
-                                                ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                    if (b.notes.isNotEmpty) ...[
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        b.notes,
+                                    Expanded(
+                                      child: Text(
+                                        b.serviceName,
                                         style: Theme.of(context)
                                             .textTheme
-                                            .bodySmall,
+                                            .titleMedium,
                                       ),
-                                    ],
-                                    if (b.prepaymentStatus != 'none') ...[
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            Icons.payments_outlined,
-                                            size: 16,
-                                            color: b.prepaymentStatus ==
-                                                    'confirmed'
-                                                ? Colors.green
-                                                : Colors.orange,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Expanded(
-                                            child: Text(
-                                              b.prepaymentStatus == 'confirmed'
-                                                  ? 'Предоплата получена'
-                                                  : 'Клиент отметил '
-                                                      'предоплату — проверьте '
-                                                      'поступление',
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                    const SizedBox(height: 8),
-                                    Wrap(
-                                      spacing: 8,
-                                      children: [
-                                        if (b.status == 'pending') ...[
-                                          FilledButton.tonalIcon(
-                                            onPressed: () =>
-                                                _setStatus(b, 'confirmed'),
-                                            icon: const Icon(Icons.check),
-                                            label: const Text('Подтвердить'),
-                                          ),
-                                          OutlinedButton.icon(
-                                            onPressed: () =>
-                                                _setStatus(b, 'cancelled'),
-                                            icon: const Icon(Icons.close),
-                                            label: const Text('Отклонить'),
-                                          ),
-                                        ],
-                                        if (b.status == 'confirmed') ...[
-                                          FilledButton.tonalIcon(
-                                            onPressed: () =>
-                                                _setStatus(b, 'completed'),
-                                            icon: const Icon(Icons.done_all),
-                                            label: const Text('Завершить'),
-                                          ),
-                                          OutlinedButton.icon(
-                                            onPressed: () =>
-                                                _setStatus(b, 'cancelled'),
-                                            icon: const Icon(Icons.close),
-                                            label: const Text('Отменить'),
-                                          ),
-                                        ],
-                                        if (b.clientPhone.isNotEmpty)
-                                          IconButton(
-                                            tooltip: 'Позвонить',
-                                            onPressed: () =>
-                                                _call(b.clientPhone),
-                                            icon: const Icon(Icons.call),
-                                          ),
-                                        if (b.clientId.isNotEmpty)
-                                          IconButton(
-                                            tooltip: 'Профиль клиента',
-                                            onPressed: () => _openClient(b),
-                                            icon: const Icon(Icons.person),
-                                          ),
-                                        if (_isSalon)
-                                          IconButton(
-                                            tooltip: 'Назначить мастера',
-                                            onPressed: () => _assignTo(b),
-                                            icon: const Icon(Icons
-                                                .assignment_ind_outlined),
-                                          ),
-                                        if (b.prepaymentStatus == 'claimed')
-                                          FilledButton.tonalIcon(
-                                            onPressed: () => _confirmPrepay(b),
-                                            icon: const Icon(
-                                                Icons.payments_outlined),
-                                            label: const Text(
-                                                'Оплата получена'),
-                                          ),
-                                        if (_canReviewClient(b))
-                                          FilledButton.tonalIcon(
-                                            onPressed: () => _rateClient(b),
-                                            icon: const Icon(Icons.star),
-                                            label: const Text('Оценить клиента'),
-                                          ),
-                                      ],
+                                    ),
+                                    Chip(
+                                      label: Text(_statusLabel(b.status)),
+                                      backgroundColor: _statusColor(b.status)
+                                          .withValues(alpha: 0.15),
+                                      side: BorderSide.none,
                                     ),
                                   ],
                                 ),
-                              ),
-                            );
-                          },
-                        ),
-                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${b.clientName.isEmpty ? 'Клиент' : b.clientName}'
+                                  '${b.clientPhone.isEmpty ? '' : ' • ${b.clientPhone}'}',
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${_fmt(b.startsAt)} • ${b.durationMinutes} мин',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                                if (_isSalon &&
+                                    _masterLabel(b.masterId).isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.assignment_ind_outlined,
+                                        size: 16,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Мастер: ${_masterLabel(b.masterId)}',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary,
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                                if (b.notes.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    b.notes,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall,
+                                  ),
+                                ],
+                                if (b.prepaymentStatus != 'none') ...[
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.payments_outlined,
+                                        size: 16,
+                                        color: b.prepaymentStatus == 'confirmed'
+                                            ? Colors.green
+                                            : Colors.orange,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          b.prepaymentStatus == 'confirmed'
+                                              ? 'Предоплата получена'
+                                              : 'Клиент отметил '
+                                                    'предоплату — проверьте '
+                                                    'поступление',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  children: [
+                                    if (b.status == 'pending') ...[
+                                      FilledButton.tonalIcon(
+                                        onPressed: () =>
+                                            _setStatus(b, 'confirmed'),
+                                        icon: const Icon(Icons.check),
+                                        label: const Text('Подтвердить'),
+                                      ),
+                                      OutlinedButton.icon(
+                                        onPressed: () =>
+                                            _setStatus(b, 'cancelled'),
+                                        icon: const Icon(Icons.close),
+                                        label: const Text('Отклонить'),
+                                      ),
+                                    ],
+                                    if (b.status == 'confirmed') ...[
+                                      FilledButton.tonalIcon(
+                                        onPressed: () =>
+                                            _setStatus(b, 'completed'),
+                                        icon: const Icon(Icons.done_all),
+                                        label: const Text('Завершить'),
+                                      ),
+                                      OutlinedButton.icon(
+                                        onPressed: () =>
+                                            _setStatus(b, 'cancelled'),
+                                        icon: const Icon(Icons.close),
+                                        label: const Text('Отменить'),
+                                      ),
+                                    ],
+                                    if (b.clientPhone.isNotEmpty)
+                                      IconButton(
+                                        tooltip: 'Позвонить',
+                                        onPressed: () => _call(b.clientPhone),
+                                        icon: const Icon(Icons.call),
+                                      ),
+                                    if (b.clientId.isNotEmpty)
+                                      IconButton(
+                                        tooltip: 'Профиль клиента',
+                                        onPressed: () => _openClient(b),
+                                        icon: const Icon(Icons.person),
+                                      ),
+                                    if (_isSalon)
+                                      IconButton(
+                                        tooltip: 'Назначить мастера',
+                                        onPressed: () => _assignTo(b),
+                                        icon: const Icon(
+                                          Icons.assignment_ind_outlined,
+                                        ),
+                                      ),
+                                    if (b.prepaymentStatus == 'claimed')
+                                      FilledButton.tonalIcon(
+                                        onPressed: () => _confirmPrepay(b),
+                                        icon: const Icon(
+                                          Icons.payments_outlined,
+                                        ),
+                                        label: const Text('Оплата получена'),
+                                      ),
+                                    if (_canReviewClient(b))
+                                      FilledButton.tonalIcon(
+                                        onPressed: () => _rateClient(b),
+                                        icon: const Icon(Icons.star),
+                                        label: const Text('Оценить клиента'),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
     );
   }
 }
@@ -1687,9 +1683,8 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось сохранить: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось сохранить: $e')));
     } finally {
       if (mounted) setState(() => _prepayBusy = false);
     }
@@ -1702,17 +1697,19 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
       offers = (await _cloud.myOffers()).where((o) => o.isLive).toList();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось загрузить Honey: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Не удалось загрузить Honey: $e')));
       return;
     }
     if (!mounted) return;
     if (offers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('У вас пока нет активных Honey — создайте '
-              'их в разделе Honey'),
+          content: Text(
+            'У вас пока нет активных Honey — создайте '
+            'их в разделе Honey',
+          ),
         ),
       );
       return;
@@ -1751,9 +1748,8 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
       } catch (_) {}
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось подарить: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось подарить: $e')));
     }
   }
 
@@ -1793,7 +1789,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     final average = _reviews.isEmpty
         ? 0.0
         : _reviews.map((r) => r.rating).reduce((a, b) => a + b) /
-            _reviews.length;
+              _reviews.length;
     return Scaffold(
       appBar: AppBar(
         title: Text(name),
@@ -1809,162 +1805,159 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _failed
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('Не удалось загрузить отзывы'),
-                      TextButton(
-                        onPressed: _load,
-                        child: const Text('Повторить'),
-                      ),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Не удалось загрузить отзывы'),
+                  TextButton(onPressed: _load, child: const Text('Повторить')),
+                ],
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.person_outline),
+                      title: Text(name),
+                      subtitle: widget.clientPhone.isEmpty
+                          ? null
+                          : Text(widget.clientPhone),
+                    ),
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      Card(
-                        child: ListTile(
-                          leading: const Icon(Icons.person_outline),
-                          title: Text(name),
-                          subtitle: widget.clientPhone.isEmpty
-                              ? null
-                              : Text(widget.clientPhone),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      // Персональная предоплата для этого клиента.
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SwitchListTile(
-                                contentPadding: EdgeInsets.zero,
-                                title: const Text('Принимать по предоплате'),
-                                subtitle: const Text(
-                                  'Клиент увидит сумму предоплаты при записи',
-                                ),
-                                value: _prepayRequired,
-                                onChanged: (v) =>
-                                    setState(() => _prepayRequired = v),
-                              ),
-                              if (_prepayRequired)
-                                TextField(
-                                  controller: _prepayAmount,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Сумма предоплаты',
-                                    hintText: '5000',
-                                  ),
-                                ),
-                              const SizedBox(height: 4),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton(
-                                  onPressed: _prepayBusy ? null : _savePrepay,
-                                  child: _prepayBusy
-                                      ? const SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : const Text('Сохранить'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Card(
-                        child: ListTile(
-                          leading: Icon(
-                            Icons.card_giftcard,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          title: const Text('Подарить Honey'),
-                          subtitle: const Text(
-                            'Скидка или бонус лично этому клиенту',
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: _giftHoney,
-                        ),
-                      ),
-                      if (_reviews.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            const Icon(Icons.star, color: Colors.amber),
-                            const SizedBox(width: 8),
-                            Text(
-                              '${average.toStringAsFixed(1)} • ${_reviews.length} оценок',
-                              style: Theme.of(context).textTheme.titleMedium,
+                  const SizedBox(height: 8),
+                  // Персональная предоплата для этого клиента.
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Принимать по предоплате'),
+                            subtitle: const Text(
+                              'Клиент увидит сумму предоплаты при записи',
                             ),
-                          ],
+                            value: _prepayRequired,
+                            onChanged: (v) =>
+                                setState(() => _prepayRequired = v),
+                          ),
+                          if (_prepayRequired)
+                            TextField(
+                              controller: _prepayAmount,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Сумма предоплаты',
+                                hintText: '5000',
+                              ),
+                            ),
+                          const SizedBox(height: 4),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: _prepayBusy ? null : _savePrepay,
+                              child: _prepayBusy
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Сохранить'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Card(
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.card_giftcard,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      title: const Text('Подарить Honey'),
+                      subtitle: const Text(
+                        'Скидка или бонус лично этому клиенту',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _giftHoney,
+                    ),
+                  ),
+                  if (_reviews.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        const Icon(Icons.star, color: Colors.amber),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${average.toStringAsFixed(1)} • ${_reviews.length} оценок',
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
                       ],
-                      const SizedBox(height: 16),
-                      if (_reviews.isEmpty)
-                        const Text(
-                          'Отзывов пока нет.\nКогда мастера оставят оценки — '
-                          'они появятся здесь.',
-                          textAlign: TextAlign.center,
-                        ),
-                      for (final r in _reviews)
-                        Card(
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  if (_reviews.isEmpty)
+                    const Text(
+                      'Отзывов пока нет.\nКогда мастера оставят оценки — '
+                      'они появятся здесь.',
+                      textAlign: TextAlign.center,
+                    ),
+                  for (final r in _reviews)
+                    Card(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
                               children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        r.masterName.isEmpty
-                                            ? 'Мастер'
-                                            : r.masterName,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleSmall,
-                                      ),
-                                    ),
-                                    Text(_fmt(r.createdAt ?? DateTime.now())),
-                                  ],
+                                Expanded(
+                                  child: Text(
+                                    r.masterName.isEmpty
+                                        ? 'Мастер'
+                                        : r.masterName,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall,
+                                  ),
                                 ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    for (var i = 1; i <= 5; i++)
-                                      Icon(
-                                        i <= r.rating
-                                            ? Icons.star
-                                            : Icons.star_border,
-                                        size: 16,
-                                        color: Colors.amber,
-                                      ),
-                                  ],
-                                ),
-                                if (r.comment.isNotEmpty) ...[
-                                  const SizedBox(height: 8),
-                                  Text(r.comment),
-                                ],
+                                Text(_fmt(r.createdAt ?? DateTime.now())),
                               ],
                             ),
-                          ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                for (var i = 1; i <= 5; i++)
+                                  Icon(
+                                    i <= r.rating
+                                        ? Icons.star
+                                        : Icons.star_border,
+                                    size: 16,
+                                    color: Colors.amber,
+                                  ),
+                              ],
+                            ),
+                            if (r.comment.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              Text(r.comment),
+                            ],
+                          ],
                         ),
-                      const SizedBox(height: 80),
-                    ],
-                  ),
-                ),
+                      ),
+                    ),
+                  const SizedBox(height: 80),
+                ],
+              ),
+            ),
     );
   }
 }
@@ -2023,9 +2016,11 @@ class _RateClientDialogState extends State<RateClientDialog> {
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(widget.booking.clientName.isEmpty
-              ? 'Клиент'
-              : widget.booking.clientName),
+          Text(
+            widget.booking.clientName.isEmpty
+                ? 'Клиент'
+                : widget.booking.clientName,
+          ),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -2074,10 +2069,7 @@ class _RateClientDialogState extends State<RateClientDialog> {
 /// Вкладка «Мастера» у салона: ключ регистрации, команда из облака,
 /// создание аккаунтов мастеров + локальный справочник ниже.
 class SalonTeamScreen extends StatefulWidget {
-  const SalonTeamScreen({
-    super.key,
-    required this.localDirectoryBuilder,
-  });
+  const SalonTeamScreen({super.key, required this.localDirectoryBuilder});
 
   /// Локальный справочник мастеров — встраивается под облачным
   /// блоком. [onAddMaster] пробрасывается в FAB «Новый мастер»,
@@ -2113,7 +2105,8 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
       final results = await Future.wait([
         _cloud.ensureSalonKey(),
         _cloud.salonMasters(),
-        _cloud.sentTeamInvites()
+        _cloud
+            .sentTeamInvites()
             .then<List<TeamInvite>>((v) => v)
             .catchError((_) => <TeamInvite>[]),
       ]);
@@ -2145,9 +2138,8 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
   Future<void> _copyKey() async {
     await Clipboard.setData(ClipboardData(text: _key));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ключ скопирован')),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Ключ скопирован')));
   }
 
   /// Открепить мастера от салона — он станет самозанятым.
@@ -2178,19 +2170,18 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
     } catch (e) {
       await SyncLog.write('detach_master', e.toString());
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось открепить: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось открепить: $e')));
     }
   }
 
   String _statusLabel(String status) => switch (status) {
-        'pending' => 'Новая заявка',
-        'confirmed' => 'Подтверждена',
-        'cancelled' => 'Отменена',
-        'completed' => 'Завершена',
-        _ => status,
-      };
+    'pending' => 'Новая заявка',
+    'confirmed' => 'Подтверждена',
+    'cancelled' => 'Отменена',
+    'completed' => 'Завершена',
+    _ => status,
+  };
 
   String _fmt(DateTime dt) =>
       '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} '
@@ -2203,9 +2194,8 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось: $e')));
     }
   }
 
@@ -2237,8 +2227,12 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
   Future<void> _showBookings(MasterCard m) async {
     List<CloudBooking> bookings;
     try {
-      bookings =
-          await _cloud.masterBookingsFor(m.userId, since: m.salonSince);
+      bookings = await _cloud.masterBookingsFor(
+        m.userId,
+        since: m.salonSince,
+        // Только салонные заявки — личные записи мастера скрыты.
+        salonId: _cloud.uid,
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2247,14 +2241,11 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
       return;
     }
     if (!mounted) return;
-    final completed =
-        bookings.where((b) => b.status == 'completed').toList();
-    final cancelled =
-        bookings.where((b) => b.status == 'cancelled').length;
+    final completed = bookings.where((b) => b.status == 'completed').toList();
+    final cancelled = bookings.where((b) => b.status == 'cancelled').length;
     final sum = completed.fold<double>(0, (s, b) => s + b.servicePrice);
-    String money(double v) => v == v.roundToDouble()
-        ? v.toStringAsFixed(0)
-        : v.toStringAsFixed(2);
+    String money(double v) =>
+        v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -2383,9 +2374,9 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
       final err = res.data is Map ? res.data['error'] : null;
       if (err != null) throw Exception('$err');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Данные мастера обновлены')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Данные мастера обновлены')));
     } catch (e) {
       await SyncLog.write('master_credentials', e.toString());
       if (!mounted) return;
@@ -2535,9 +2526,9 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
                         Navigator.of(context).pop(true);
                       } else {
                         setDialogState(() => saving = false);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Ошибка: $err')),
-                        );
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(SnackBar(content: Text('Ошибка: $err')));
                       }
                     },
               child: const Text('Создать'),
@@ -2587,23 +2578,16 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
                       children: [
                         Expanded(
                           child: Text(
-                            _key.isEmpty
-                                ? '—'
-                                : (_showKey ? _key : '••••••••'),
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
+                            _key.isEmpty ? '—' : (_showKey ? _key : '••••••••'),
+                            style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(letterSpacing: 2),
                           ),
                         ),
                         IconButton(
                           tooltip: _showKey ? 'Скрыть' : 'Показать',
-                          onPressed: () =>
-                              setState(() => _showKey = !_showKey),
+                          onPressed: () => setState(() => _showKey = !_showKey),
                           icon: Icon(
-                            _showKey
-                                ? Icons.visibility_off
-                                : Icons.visibility,
+                            _showKey ? Icons.visibility_off : Icons.visibility,
                           ),
                         ),
                         IconButton(
@@ -2674,8 +2658,7 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
                   ),
                   title: Text(m.name.isEmpty ? 'Мастер' : m.name),
                   subtitle: Text(
-                    m.category +
-                        (m.managedBySalon ? ' • аккаунт салона' : ''),
+                    m.category + (m.managedBySalon ? ' • аккаунт салона' : ''),
                   ),
                   trailing: PopupMenuButton<String>(
                     onSelected: (v) {
@@ -2784,14 +2767,13 @@ class _MasterSearchDialogState extends State<_MasterSearchDialog> {
       if (!mounted) return;
       setState(() => _invited.add(m.userId));
       widget.onChanged();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Приглашение отправлено')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Приглашение отправлено')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось пригласить: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось пригласить: $e')));
     }
   }
 
@@ -2819,15 +2801,11 @@ class _MasterSearchDialogState extends State<_MasterSearchDialog> {
             ),
             const SizedBox(height: 8),
             if (_searching)
-              const Expanded(
-                child: Center(child: CircularProgressIndicator()),
-              )
+              const Expanded(child: Center(child: CircularProgressIndicator()))
             else if (_error != null)
               Expanded(child: Center(child: Text('Ошибка: $_error')))
             else if (_searched && _results.isEmpty)
-              const Expanded(
-                child: Center(child: Text('Никого не найдено')),
-              )
+              const Expanded(child: Center(child: Text('Никого не найдено')))
             else
               Expanded(
                 child: ListView.builder(
@@ -2858,13 +2836,13 @@ class _MasterSearchDialogState extends State<_MasterSearchDialog> {
                       trailing: inTeam
                           ? const Text('В команде')
                           : busy
-                              ? const Text('В другом салоне')
-                              : _invited.contains(m.userId)
-                                  ? const Text('Отправлено')
-                                  : TextButton(
-                                      onPressed: () => _invite(m),
-                                      child: const Text('Пригласить'),
-                                    ),
+                          ? const Text('В другом салоне')
+                          : _invited.contains(m.userId)
+                          ? const Text('Отправлено')
+                          : TextButton(
+                              onPressed: () => _invite(m),
+                              child: const Text('Пригласить'),
+                            ),
                     );
                   },
                 ),
@@ -2892,8 +2870,7 @@ class _PhoneContactPickerDialog extends StatefulWidget {
       _PhoneContactPickerDialogState();
 }
 
-class _PhoneContactPickerDialogState
-    extends State<_PhoneContactPickerDialog> {
+class _PhoneContactPickerDialogState extends State<_PhoneContactPickerDialog> {
   List<phone.Contact> _contacts = [];
   final _searchController = TextEditingController();
   bool _loading = true;
@@ -2916,9 +2893,7 @@ class _PhoneContactPickerDialogState
       final list = await phone.FlutterContacts.getAll(
         properties: {phone.ContactProperty.phone},
       );
-      list.sort(
-        (a, b) => (a.displayName ?? '').compareTo(b.displayName ?? ''),
-      );
+      list.sort((a, b) => (a.displayName ?? '').compareTo(b.displayName ?? ''));
       if (mounted) {
         setState(() {
           _contacts = list;
@@ -2963,9 +2938,7 @@ class _PhoneContactPickerDialogState
             ),
             const SizedBox(height: 8),
             if (_loading)
-              const Expanded(
-                child: Center(child: CircularProgressIndicator()),
-              )
+              const Expanded(child: Center(child: CircularProgressIndicator()))
             else if (_failed)
               const Expanded(
                 child: Center(child: Text('Не удалось прочитать контакты')),
@@ -2986,11 +2959,10 @@ class _PhoneContactPickerDialogState
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.person_outline),
                       title: Text(c.displayName ?? 'Без имени'),
-                      subtitle:
-                          number.isEmpty ? null : Text(number),
-                      onTap: () => Navigator.of(context).pop(
-                        ((c.displayName ?? '').trim(), number),
-                      ),
+                      subtitle: number.isEmpty ? null : Text(number),
+                      onTap: () =>
+                          Navigator.of(context)
+                              .pop(((c.displayName ?? '').trim(), number)),
                     );
                   },
                 ),

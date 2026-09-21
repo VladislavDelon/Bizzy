@@ -58,7 +58,8 @@ class _SalonOffersScreenState extends State<SalonOffersScreen> {
       // Фанам (клиенты, добавившие нас в избранное) — push о новом Honey.
       await notifyFavoriteClients(
         title: 'Новое Honey',
-        body: 'Ваш избранный мастер/салон опубликовал Honey — '
+        body:
+            'Ваш избранный мастер/салон опубликовал Honey — '
             'загляните во вкладку Honey',
       );
     }
@@ -70,9 +71,8 @@ class _SalonOffersScreenState extends State<SalonOffersScreen> {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось обновить: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось обновить: $e')));
     }
   }
 
@@ -100,9 +100,8 @@ class _SalonOffersScreenState extends State<SalonOffersScreen> {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось удалить: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось удалить: $e')));
     }
   }
 
@@ -119,98 +118,95 @@ class _SalonOffersScreenState extends State<SalonOffersScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.cloud_off, size: 40),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Не удалось загрузить предложения.\n$_error',
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton(
-                          onPressed: () {
-                            setState(() => _loading = true);
-                            _load();
-                          },
-                          child: const Text('Повторить'),
-                        ),
-                      ],
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.cloud_off, size: 40),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Не удалось загрузить предложения.\n$_error',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: () {
+                        setState(() => _loading = true);
+                        _load();
+                      },
+                      child: const Text('Повторить'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
+                    child: Text(
+                      'Скидки, сертификаты и бонусы, которые клиенты '
+                      'видят во вкладке «Honey».',
                     ),
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
-                    children: [
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
+                  if (_offers.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 48),
+                      child: Center(
                         child: Text(
-                          'Скидки, сертификаты и бонусы, которые клиенты '
-                          'видят во вкладке «Honey».',
+                          'Предложений пока нет.\n'
+                          'Нажмите «Создать Honey», чтобы добавить первое —\n'
+                          'например, «Скидка на первое посещение».',
+                          textAlign: TextAlign.center,
                         ),
                       ),
-                      if (_offers.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 48),
-                          child: Center(
-                            child: Text(
-                              'Предложений пока нет.\n'
-                              'Нажмите «Создать Honey», чтобы добавить первое —\n'
-                              'например, «Скидка на первое посещение».',
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
+                    ),
+                  for (final o in _offers)
+                    Card(
+                      child: ListTile(
+                        leading: o.imageUrl.isNotEmpty
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  o.imageUrl,
+                                  width: 44,
+                                  height: 44,
+                                  fit: BoxFit.cover,
+                                ),
+                              )
+                            : Icon(
+                                Icons.card_giftcard,
+                                color: o.isLive
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Theme.of(context).disabledColor,
+                              ),
+                        title: Text(o.title),
+                        subtitle: Text(
+                          [
+                            if (o.value.isNotEmpty) o.value,
+                            if (o.discountPercent > 0)
+                              '−${_fmtNum(o.discountPercent)}%',
+                            if (!o.allServices) 'выбранные услуги',
+                            _fmtValidity(o),
+                            if (!o.active) 'выключено',
+                            if (o.active && !o.isLive) 'срок истёк',
+                          ].where((e) => e.isNotEmpty).join(' · '),
                         ),
-                      for (final o in _offers)
-                        Card(
-                          child: ListTile(
-                            leading: o.imageUrl.isNotEmpty
-                                ? ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.network(
-                                      o.imageUrl,
-                                      width: 44,
-                                      height: 44,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  )
-                                : Icon(
-                                    Icons.card_giftcard,
-                                    color: o.isLive
-                                        ? Theme.of(context).colorScheme.primary
-                                        : Theme.of(context).disabledColor,
-                                  ),
-                            title: Text(o.title),
-                            subtitle: Text(
-                              [
-                                if (o.value.isNotEmpty) o.value,
-                                if (o.discountPercent > 0)
-                                  '−${_fmtNum(o.discountPercent)}%',
-                                if (!o.allServices)
-                                  'выбранные услуги',
-                                _fmtValidity(o),
-                                if (!o.active) 'выключено',
-                                if (o.active && !o.isLive) 'срок истёк',
-                              ]
-                                  .where((e) => e.isNotEmpty)
-                                  .join(' · '),
-                            ),
-                            trailing: Switch(
-                              value: o.active,
-                              onChanged: (_) => _toggle(o),
-                            ),
-                            onLongPress: () => _delete(o),
-                          ),
+                        trailing: Switch(
+                          value: o.active,
+                          onChanged: (_) => _toggle(o),
                         ),
-                    ],
-                  ),
-                ),
+                        onLongPress: () => _delete(o),
+                      ),
+                    ),
+                ],
+              ),
+            ),
     );
   }
 }
@@ -333,9 +329,8 @@ class _OfferEditDialogState extends State<_OfferEditDialog> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось создать: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Не удалось создать: $e')));
     }
   }
 
@@ -408,7 +403,9 @@ class _OfferEditDialogState extends State<_OfferEditDialog> {
               onPressed: _pickImage,
               icon: const Icon(Icons.image_outlined),
               label: Text(
-                _imagePath == null ? 'Фото-фон (необязательно)' : 'Заменить фото',
+                _imagePath == null
+                    ? 'Фото-фон (необязательно)'
+                    : 'Заменить фото',
               ),
             ),
             if (_imagePath != null) ...[
@@ -548,10 +545,12 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
       // вкладка открывается за один раунд-трип, а не за три.
       final results = await Future.wait([
         _cloud.activeOffers(),
-        _cloud.giftedOffers()
+        _cloud
+            .giftedOffers()
             .then<List<SalonOffer>>((v) => v)
             .catchError((_) => <SalonOffer>[]),
-        _cloud.myRedeemedOfferIds()
+        _cloud
+            .myRedeemedOfferIds()
             .then<Set<int>>((v) => v)
             .catchError((_) => <int>{}),
       ]);
@@ -562,9 +561,8 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
       final giftIds = gifts.map((g) => g.id).toSet();
       offers = offers.where((o) => !giftIds.contains(o.id)).toList();
       List<SalonOffer> mark(List<SalonOffer> list) => [
-            for (final o in list)
-              usedIds.contains(o.id) ? o.copyUsed() : o,
-          ];
+        for (final o in list) usedIds.contains(o.id) ? o.copyUsed() : o,
+      ];
       if (!mounted) return;
       setState(() {
         _offers = mark(offers);
@@ -629,9 +627,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                       Row(
                         children: [
                           Icon(
-                            offer.isGift
-                                ? Icons.redeem
-                                : Icons.card_giftcard,
+                            offer.isGift ? Icons.redeem : Icons.card_giftcard,
                             color: theme.colorScheme.primary,
                           ),
                           const SizedBox(width: 8),
@@ -673,10 +669,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                           ),
                         ),
                       const SizedBox(height: 12),
-                      Text(
-                        offer.title,
-                        style: theme.textTheme.headlineSmall,
-                      ),
+                      Text(offer.title, style: theme.textTheme.headlineSmall),
                       if (offer.description.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Text(
@@ -702,15 +695,14 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                         ),
                       ],
                       // Услуги со скидкой: зачёркнутая цена → итог.
-                      if (offer.discountPercent > 0 &&
-                          covered.isNotEmpty) ...[
+                      if (offer.discountPercent > 0 && covered.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         Text(
                           offer.allServices
                               ? 'Скидка −${_fmtNum(offer.discountPercent)}% '
-                                  'на все услуги:'
+                                    'на все услуги:'
                               : 'Скидка −${_fmtNum(offer.discountPercent)}% '
-                                  'на услуги:',
+                                    'на услуги:',
                           style: theme.textTheme.labelLarge,
                         ),
                         const SizedBox(height: 6),
@@ -727,19 +719,14 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                                 ),
                                 Text(
                                   '${formatMoney(s.price)}  ',
-                                  style: theme.textTheme.bodyMedium
-                                      ?.copyWith(
-                                    decoration:
-                                        TextDecoration.lineThrough,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    decoration: TextDecoration.lineThrough,
                                     color: theme.colorScheme.outline,
                                   ),
                                 ),
                                 Text(
-                                  formatMoney(
-                                    offer.discountedPrice(s.price),
-                                  ),
-                                  style: theme.textTheme.bodyMedium
-                                      ?.copyWith(
+                                  formatMoney(offer.discountedPrice(s.price)),
+                                  style: theme.textTheme.bodyMedium?.copyWith(
                                     fontWeight: FontWeight.w700,
                                     color: theme.colorScheme.primary,
                                   ),
@@ -747,8 +734,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                               ],
                             ),
                           ),
-                      ] else if (!offer.allServices &&
-                          covered.isNotEmpty) ...[
+                      ] else if (!offer.allServices && covered.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         Text(
                           'Действует на: '
@@ -780,11 +766,9 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                       if (offer.used)
                         Container(
                           width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 12),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
                           decoration: BoxDecoration(
-                            color: theme.colorScheme
-                                .surfaceContainerHighest,
+                            color: theme.colorScheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(24),
                           ),
                           child: const Text(
@@ -803,7 +787,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                                     Navigator.of(sheetContext).pop();
                                     widget.onBookOffer!(offer);
                                   },
-                            icon: Icons.event_available,
+                            icon: const Icon(Icons.event_available),
                             child: const Text('Записаться'),
                           ),
                         ),
@@ -849,9 +833,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          o.providerName.isNotEmpty
-                              ? o.providerName
-                              : 'Салон',
+                          o.providerName.isNotEmpty ? o.providerName : 'Салон',
                           style: theme.textTheme.labelLarge,
                         ),
                       ),
@@ -862,8 +844,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: theme
-                                .colorScheme.surfaceContainerHighest,
+                            color: theme.colorScheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
@@ -883,9 +864,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                           ),
                           child: Text(
                             o.value,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                            ),
+                            style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
                         ),
                     ],
@@ -894,8 +873,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                   Text(
                     o.title,
                     style: theme.textTheme.titleMedium?.copyWith(
-                      decoration:
-                          o.used ? TextDecoration.lineThrough : null,
+                      decoration: o.used ? TextDecoration.lineThrough : null,
                       color: o.used ? theme.colorScheme.outline : null,
                     ),
                   ),
@@ -907,8 +885,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
-                  if (_fmtValidity(o).isNotEmpty ||
-                      o.discountPercent > 0) ...[
+                  if (_fmtValidity(o).isNotEmpty || o.discountPercent > 0) ...[
                     const SizedBox(height: 6),
                     Text(
                       [
@@ -917,8 +894,9 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                         if (!o.allServices) 'на выбранные услуги',
                         _fmtValidity(o),
                       ].where((e) => e.isNotEmpty).join(' · '),
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.colorScheme.outline),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.outline,
+                      ),
                     ),
                   ],
                 ],
@@ -938,76 +916,70 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.cloud_off, size: 40),
-                        const SizedBox(height: 8),
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.cloud_off, size: 40),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Не удалось загрузить предложения.\n$_error',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: () {
+                        setState(() => _loading = true);
+                        _load();
+                      },
+                      child: const Text('Повторить'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: empty
+                  ? ListView(
+                      padding: const EdgeInsets.all(32),
+                      children: const [
+                        SizedBox(height: 80),
+                        Icon(Icons.card_giftcard_outlined, size: 56),
+                        SizedBox(height: 16),
                         Text(
-                          'Не удалось загрузить предложения.\n$_error',
+                          'Здесь будут плюшки от салонов:\n'
+                          'скидки на первое посещение, сертификаты, '
+                          'бонусы.',
                           textAlign: TextAlign.center,
                         ),
-                        const SizedBox(height: 12),
-                        FilledButton(
-                          onPressed: () {
-                            setState(() => _loading = true);
-                            _load();
-                          },
-                          child: const Text('Повторить'),
-                        ),
+                      ],
+                    )
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
+                      children: [
+                        if (_gifts.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+                            child: Text(
+                              'Подарено вам',
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary,
+                                  ),
+                            ),
+                          ),
+                          for (final o in _gifts) _offerCard(o),
+                          const Divider(height: 24),
+                        ],
+                        for (final o in _offers) _offerCard(o),
                       ],
                     ),
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: empty
-                      ? ListView(
-                          padding: const EdgeInsets.all(32),
-                          children: const [
-                            SizedBox(height: 80),
-                            Icon(
-                              Icons.card_giftcard_outlined,
-                              size: 56,
-                            ),
-                            SizedBox(height: 16),
-                            Text(
-                              'Здесь будут плюшки от салонов:\n'
-                              'скидки на первое посещение, сертификаты, '
-                              'бонусы.',
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        )
-                      : ListView(
-                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
-                          children: [
-                            if (_gifts.isNotEmpty) ...[
-                              Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(4, 4, 4, 8),
-                                child: Text(
-                                  'Подарено вам',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleSmall
-                                      ?.copyWith(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                      ),
-                                ),
-                              ),
-                              for (final o in _gifts) _offerCard(o),
-                              const Divider(height: 24),
-                            ],
-                            for (final o in _offers) _offerCard(o),
-                          ],
-                        ),
-                ),
+            ),
     );
   }
 }

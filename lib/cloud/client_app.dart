@@ -139,8 +139,9 @@ Widget _masterAvatar(BuildContext context, MasterCard master, double radius) {
   return CircleAvatar(
     radius: radius,
     backgroundColor: scheme.primary,
-    backgroundImage:
-        master.avatarUrl.isNotEmpty ? NetworkImage(master.avatarUrl) : null,
+    backgroundImage: master.avatarUrl.isNotEmpty
+        ? NetworkImage(master.avatarUrl)
+        : null,
     child: master.avatarUrl.isEmpty
         ? Icon(Icons.person, color: scheme.onPrimary, size: radius)
         : null,
@@ -245,7 +246,8 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
       final results = await Future.wait([
         _cloud.categories(),
         _cloud.masters(category: _category),
-        _cloud.myFavoriteIds()
+        _cloud
+            .myFavoriteIds()
             .then<Set<String>>((v) => v)
             .catchError((_) => <String>{}),
       ]);
@@ -282,15 +284,13 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
         _masters = _sortedByDistance(_masters);
       });
       if (!quiet && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Геопозиция определена')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Геопозиция определена')));
       }
     } catch (e) {
       if (!mounted || quiet) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -361,237 +361,233 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _failed
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Не удалось загрузить каталог'),
+                    if (_lastError.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          _lastError,
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    TextButton(
+                      onPressed: _load,
+                      child: const Text('Повторить'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                padding: const EdgeInsets.only(bottom: 24),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: TextField(
+                      controller: _searchController,
+                      textInputAction: TextInputAction.search,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'Город, район, улица или имя…',
+                        prefixIcon: const Icon(Icons.search),
+                        isDense: true,
+                        border: const OutlineInputBorder(),
+                        suffixIcon: _searchController.text.isEmpty
+                            ? null
+                            : IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: () =>
+                                    setState(() => _searchController.clear()),
+                              ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    height: 52,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                       children: [
-                        const Text('Не удалось загрузить каталог'),
-                        if (_lastError.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              _lastError,
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: ChoiceChip(
+                            label: const Text('Все'),
+                            selected: _kindFilter == 'all',
+                            onSelected: (_) =>
+                                setState(() => _kindFilter = 'all'),
                           ),
-                        TextButton(
-                            onPressed: _load, child: const Text('Повторить')),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: ChoiceChip(
+                            avatar: const Icon(Icons.storefront, size: 16),
+                            label: const Text('Салоны'),
+                            selected: _kindFilter == 'salon',
+                            onSelected: (_) =>
+                                setState(() => _kindFilter = 'salon'),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: ChoiceChip(
+                            avatar: const Icon(Icons.person, size: 16),
+                            label: const Text('Частные мастера'),
+                            selected: _kindFilter == 'master',
+                            onSelected: (_) =>
+                                setState(() => _kindFilter = 'master'),
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView(
-                    padding: const EdgeInsets.only(bottom: 24),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                        child: TextField(
-                          controller: _searchController,
-                          textInputAction: TextInputAction.search,
-                          onChanged: (_) => setState(() {}),
-                          decoration: InputDecoration(
-                            hintText: 'Город, район, улица или имя…',
-                            prefixIcon: const Icon(Icons.search),
-                            isDense: true,
-                            border: const OutlineInputBorder(),
-                            suffixIcon: _searchController.text.isEmpty
-                                ? null
-                                : IconButton(
-                                    icon: const Icon(Icons.clear, size: 18),
-                                    onPressed: () => setState(
-                                        () => _searchController.clear()),
-                                  ),
-                          ),
-                        ),
-                      ),
-                      SizedBox(
-                        height: 52,
-                        child: ListView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          children: [
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              child: ChoiceChip(
-                                label: const Text('Все'),
-                                selected: _kindFilter == 'all',
-                                onSelected: (_) =>
-                                    setState(() => _kindFilter = 'all'),
-                              ),
-                            ),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              child: ChoiceChip(
-                                avatar: const Icon(Icons.storefront, size: 16),
-                                label: const Text('Салоны'),
-                                selected: _kindFilter == 'salon',
-                                onSelected: (_) =>
-                                    setState(() => _kindFilter = 'salon'),
-                              ),
-                            ),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              child: ChoiceChip(
-                                avatar: const Icon(Icons.person, size: 16),
-                                label: const Text('Частные мастера'),
-                                selected: _kindFilter == 'master',
-                                onSelected: (_) =>
-                                    setState(() => _kindFilter = 'master'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(
-                        height: 52,
-                        child: ListView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          children: [
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              child: ChoiceChip(
-                                label: const Text('Все категории'),
-                                selected: _category == null,
-                                onSelected: (_) {
-                                  setState(() => _category = null);
-                                  _load();
-                                },
-                              ),
-                            ),
-                            for (final c in _categories)
-                              Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 4),
-                                child: ChoiceChip(
-                                  label: Text(c),
-                                  selected: _category == c,
-                                  onSelected: (_) {
-                                    setState(() => _category = c);
-                                    _load();
-                                  },
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      if (_visibleMasters.isEmpty)
+                  SizedBox(
+                    height: 52,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      children: [
                         Padding(
-                          padding: const EdgeInsets.all(32),
-                          child: Center(
-                            child: Text(
-                              _masters.isEmpty
-                                  ? 'Пока нет ни одного мастера или салона.\n'
-                                      'Они появятся в каталоге после регистрации.'
-                                  : 'По вашему запросу никого не нашлось',
-                              textAlign: TextAlign.center,
-                            ),
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: ChoiceChip(
+                            label: const Text('Все категории'),
+                            selected: _category == null,
+                            onSelected: (_) {
+                              setState(() => _category = null);
+                              _load();
+                            },
                           ),
                         ),
-                      for (final m in _visibleMasters)
-                        Card(
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 4,
+                        for (final c in _categories)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: ChoiceChip(
+                              label: Text(c),
+                              selected: _category == c,
+                              onSelected: (_) {
+                                setState(() => _category = c);
+                                _load();
+                              },
+                            ),
                           ),
-                          child: ListTile(
-                            leading: _masterAvatar(context, m, 24),
-                            title: Row(
+                      ],
+                    ),
+                  ),
+                  if (_visibleMasters.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Center(
+                        child: Text(
+                          _masters.isEmpty
+                              ? 'Пока нет ни одного мастера или салона.\n'
+                                    'Они появятся в каталоге после регистрации.'
+                              : 'По вашему запросу никого не нашлось',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                  for (final m in _visibleMasters)
+                    Card(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
+                      child: ListTile(
+                        leading: _masterAvatar(context, m, 24),
+                        title: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                m.name.isEmpty
+                                    ? (m.isSalon ? 'Салон' : 'Мастер')
+                                    : m.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (m.isSalon) ...[
+                              const SizedBox(width: 6),
+                              Icon(
+                                Icons.storefront,
+                                size: 16,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                            ],
+                          ],
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(m.category),
+                            Row(
                               children: [
-                                Flexible(
-                                  child: Text(
-                                    m.name.isEmpty
-                                        ? (m.isSalon ? 'Салон' : 'Мастер')
-                                        : m.name,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
+                                const Icon(
+                                  Icons.star,
+                                  size: 16,
+                                  color: Colors.amber,
                                 ),
-                                if (m.isSalon) ...[
-                                  const SizedBox(width: 6),
+                                const SizedBox(width: 4),
+                                Text(
+                                  m.ratingCount == 0
+                                      ? 'Новый'
+                                      : '${m.ratingAvg.toStringAsFixed(1)} (${m.ratingCount})',
+                                ),
+                              ],
+                            ),
+                            if (_distanceTo(m) != null)
+                              Row(
+                                children: [
                                   Icon(
-                                    Icons.storefront,
-                                    size: 16,
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
+                                    Icons.place_outlined,
+                                    size: 14,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '${GeoService.formatDistance(_distanceTo(m)!)} от вас',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                        ),
                                   ),
                                 ],
-                              ],
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(m.category),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.star,
-                                        size: 16, color: Colors.amber),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      m.ratingCount == 0
-                                          ? 'Новый'
-                                          : '${m.ratingAvg.toStringAsFixed(1)} (${m.ratingCount})',
-                                    ),
-                                  ],
-                                ),
-                                if (_distanceTo(m) != null)
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        Icons.place_outlined,
-                                        size: 14,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '${GeoService.formatDistance(_distanceTo(m)!)} от вас',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .primary,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
-                                if (bizzySince(m.createdAt).isNotEmpty)
-                                  Text(
-                                    bizzySince(m.createdAt),
-                                    style:
-                                        Theme.of(context).textTheme.bodySmall,
-                                  ),
-                              ],
-                            ),
-                            isThreeLine: true,
-                            trailing: IconButton(
-                              icon: Icon(
-                                _favorites.contains(m.userId)
-                                    ? Icons.favorite
-                                    : Icons.favorite_border,
-                                color: _favorites.contains(m.userId)
-                                    ? Colors.redAccent
-                                    : null,
                               ),
-                              onPressed: () => _toggleFavorite(m),
-                            ),
-                            onTap: () => _openMaster(m),
-                          ),
+                            if (bizzySince(m.createdAt).isNotEmpty)
+                              Text(
+                                bizzySince(m.createdAt),
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                          ],
                         ),
-                    ],
-                  ),
-                ),
+                        isThreeLine: true,
+                        trailing: IconButton(
+                          icon: Icon(
+                            _favorites.contains(m.userId)
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                            color: _favorites.contains(m.userId)
+                                ? Colors.redAccent
+                                : null,
+                          ),
+                          onPressed: () => _toggleFavorite(m),
+                        ),
+                        onTap: () => _openMaster(m),
+                      ),
+                    ),
+                ],
+              ),
+            ),
     );
   }
 }
@@ -646,8 +642,7 @@ class _ClientFavoritesTabState extends State<ClientFavoritesTab> {
     try {
       await _cloud.toggleFavorite(m.userId);
       if (!mounted) return;
-      setState(
-          () => _masters.removeWhere((x) => x.userId == m.userId));
+      setState(() => _masters.removeWhere((x) => x.userId == m.userId));
     } catch (e) {
       await SyncLog.write('favorite_remove', e.toString());
       if (!mounted) return;
@@ -677,116 +672,116 @@ class _ClientFavoritesTabState extends State<ClientFavoritesTab> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _failed
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('Не удалось загрузить избранное'),
-                      if (_error != null)
-                        Padding(
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 24),
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Не удалось загрузить избранное'),
+                  if (_error != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        _error!,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  TextButton(onPressed: _load, child: const Text('Повторить')),
+                ],
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: _masters.isEmpty
+                  ? ListView(
+                      children: const [
+                        SizedBox(height: 120),
+                        Center(
                           child: Text(
-                            _error!,
+                            'Пока пусто.\nОтметьте мастера сердечком '
+                            'во вкладке «Услуги».',
                             textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ),
-                      TextButton(
-                          onPressed: _load, child: const Text('Повторить')),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: _masters.isEmpty
-                      ? ListView(
-                          children: const [
-                            SizedBox(height: 120),
-                            Center(
-                              child: Text(
-                                'Пока пусто.\nОтметьте мастера сердечком '
-                                'во вкладке «Услуги».',
-                                textAlign: TextAlign.center,
-                              ),
+                      ],
+                    )
+                  : ListView(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      children: [
+                        for (final m in _masters)
+                          Card(
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
                             ),
-                          ],
-                        )
-                      : ListView(
-                          padding: const EdgeInsets.only(bottom: 24),
-                          children: [
-                            for (final m in _masters)
-                              Card(
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
-                                ),
-                                child: ListTile(
-                                  leading: _masterAvatar(context, m, 24),
-                                  title: Row(
-                                    children: [
-                                      Flexible(
-                                        child: Text(
-                                          m.name.isEmpty
-                                              ? (m.isSalon
-                                                  ? 'Салон'
-                                                  : 'Мастер')
-                                              : m.name,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      if (m.isSalon) ...[
-                                        const SizedBox(width: 6),
-                                        Icon(
-                                          Icons.storefront,
-                                          size: 16,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary,
-                                        ),
-                                      ],
-                                    ],
+                            child: ListTile(
+                              leading: _masterAvatar(context, m, 24),
+                              title: Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      m.name.isEmpty
+                                          ? (m.isSalon ? 'Салон' : 'Мастер')
+                                          : m.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
-                                  subtitle: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(m.category),
-                                      Row(
-                                        children: [
-                                          const Icon(Icons.star,
-                                              size: 16, color: Colors.amber),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            m.ratingCount == 0
-                                                ? 'Новый'
-                                                : '${m.ratingAvg.toStringAsFixed(1)} (${m.ratingCount})',
-                                          ),
-                                        ],
-                                      ),
-                                      if (m.address.isNotEmpty)
-                                        Text(
-                                          m.address,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall,
-                                        ),
-                                    ],
-                                  ),
-                                  isThreeLine: true,
-                                  trailing: IconButton(
-                                    icon: const Icon(Icons.favorite,
-                                        color: Colors.redAccent),
-                                    onPressed: () => _remove(m),
-                                  ),
-                                  onTap: () => _openMaster(m),
-                                ),
+                                  if (m.isSalon) ...[
+                                    const SizedBox(width: 6),
+                                    Icon(
+                                      Icons.storefront,
+                                      size: 16,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary,
+                                    ),
+                                  ],
+                                ],
                               ),
-                          ],
-                        ),
-                ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(m.category),
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.star,
+                                        size: 16,
+                                        color: Colors.amber,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        m.ratingCount == 0
+                                            ? 'Новый'
+                                            : '${m.ratingAvg.toStringAsFixed(1)} (${m.ratingCount})',
+                                      ),
+                                    ],
+                                  ),
+                                  if (m.address.isNotEmpty)
+                                    Text(
+                                      m.address,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall,
+                                    ),
+                                ],
+                              ),
+                              isThreeLine: true,
+                              trailing: IconButton(
+                                icon: const Icon(
+                                  Icons.favorite,
+                                  color: Colors.redAccent,
+                                ),
+                                onPressed: () => _remove(m),
+                              ),
+                              onTap: () => _openMaster(m),
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
     );
   }
 }
@@ -848,16 +843,20 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
       final results = await Future.wait([
         _cloud.masterCard(pid),
         _cloud.servicesOf(pid),
-        _cloud.portfolioOf(pid)
+        _cloud
+            .portfolioOf(pid)
             .then<List<PortfolioPhoto>>((v) => v)
             .catchError((_) => <PortfolioPhoto>[]),
-        _cloud.myFavoriteIds()
+        _cloud
+            .myFavoriteIds()
             .then<Set<String>>((v) => v)
             .catchError((_) => <String>{}),
-        _cloud.offersOf(pid)
+        _cloud
+            .offersOf(pid)
             .then<List<SalonOffer>>((v) => v)
             .catchError((_) => <SalonOffer>[]),
-        _cloud.myRedeemedOfferIds()
+        _cloud
+            .myRedeemedOfferIds()
             .then<Set<int>>((v) => v)
             .catchError((_) => <int>{}),
       ]);
@@ -904,9 +903,7 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_error != null) {
       return Scaffold(
@@ -982,14 +979,12 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
   /// (сильнее общего prepayEnabled — задаётся конкретному клиенту).
   ({double amount})? _clientPrepay;
 
-  bool get _needsPrepay =>
-      _clientPrepay != null || widget.master.prepayEnabled;
+  bool get _needsPrepay => _clientPrepay != null || widget.master.prepayEnabled;
 
   /// Сумма предоплаты: персональная по клиенту, иначе общая у мастера.
-  double get _prepayAmount =>
-      _clientPrepay != null && _clientPrepay!.amount > 0
-          ? _clientPrepay!.amount
-          : widget.master.prepayAmount;
+  double get _prepayAmount => _clientPrepay != null && _clientPrepay!.amount > 0
+      ? _clientPrepay!.amount
+      : widget.master.prepayAmount;
 
   /// Действует ли скидка Honey на выбранную услугу прямо сейчас.
   /// Использованный Honey скидку не даёт — только инфо-баннер.
@@ -1049,8 +1044,10 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
     if (widget.master.userId.isEmpty) return;
     setState(() => _loadingSlots = true);
     try {
-      final bookings =
-          await _cloud.masterBookingsForDay(widget.master.userId, day);
+      final bookings = await _cloud.masterBookingsForDay(
+        widget.master.userId,
+        day,
+      );
       final duration = _service?.durationMinutes ?? 60;
       final slots = <DateTime>[];
       var current = DateTime(
@@ -1135,16 +1132,16 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
     final social = widget.master.social.trim();
     if (social.isNotEmpty) {
       final uri = Uri.tryParse(
-          social.startsWith('http') ? social : 'https://$social');
+        social.startsWith('http') ? social : 'https://$social',
+      );
       if (uri != null) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
         return;
       }
     }
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Контакты не указаны')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Контакты не указаны')));
     }
   }
 
@@ -1172,8 +1169,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
       // загруженный на дату мастер. При ошибке — как раньше, салону.
       if (widget.master.isSalon && widget.master.autoAssign) {
         try {
-          final picked =
-              await _cloud.pickSalonMaster(masterId, startsAt);
+          final picked = await _cloud.pickSalonMaster(masterId, startsAt);
           if (picked != null) masterId = picked;
         } catch (_) {}
       }
@@ -1205,6 +1201,9 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
         masterId: masterId,
         serviceId: _service?.id,
         serviceName: _service?.name ?? custom,
+        // Запись «в салон» — салон видит её и после назначения
+        // мастеру. У частного мастера заявка личная.
+        salonId: widget.master.isSalon ? widget.master.userId : null,
         startsAt: startsAt,
         durationMinutes: _service?.durationMinutes ?? 60,
         // Цена УЖЕ со скидкой Honey — это и есть сумма записи.
@@ -1262,9 +1261,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .tertiaryContainer
+                  color: Theme.of(context).colorScheme.tertiaryContainer
                       .withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -1281,10 +1278,10 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                         widget.offer!.used
                             ? 'Honey «${widget.offer!.title}» уже использован'
                             : widget.offer!.isLive
-                                ? 'Honey «${widget.offer!.title}»'
-                                    '${widget.offer!.discountPercent > 0 ? ' · −${widget.offer!.discountPercent.toStringAsFixed(0)}%' : ''}'
-                                : 'Срок Honey «${widget.offer!.title}» истёк — '
-                                    'скидка не применяется',
+                            ? 'Honey «${widget.offer!.title}»'
+                                  '${widget.offer!.discountPercent > 0 ? ' · −${widget.offer!.discountPercent.toStringAsFixed(0)}%' : ''}'
+                            : 'Срок Honey «${widget.offer!.title}» истёк — '
+                                  'скидка не применяется',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -1298,8 +1295,10 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Услуга',
                   border: OutlineInputBorder(),
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                 ),
                 isEmpty: _service == null,
                 child: DropdownButtonHideUnderline(
@@ -1349,9 +1348,9 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                     Text(
                       formatMoney(_service!.price),
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            decoration: TextDecoration.lineThrough,
-                            color: Theme.of(context).colorScheme.outline,
-                          ),
+                        decoration: TextDecoration.lineThrough,
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     const Icon(Icons.arrow_forward, size: 16),
@@ -1359,16 +1358,16 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                     Text(
                       formatMoney(_finalPrice),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Text(
                       '−${widget.offer!.discountPercent.toStringAsFixed(0)}%',
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                     ),
                   ],
                 )
@@ -1402,8 +1401,10 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                     child: InputDecorator(
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                       ),
                       child: Text(timeText),
                     ),
@@ -1455,9 +1456,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .primaryContainer
+                  color: Theme.of(context).colorScheme.primaryContainer
                       .withValues(alpha: 0.4),
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -1495,9 +1494,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                         child: Text(
                           'Стоимость посещения после предоплаты: '
                           '${formatMoney(_remainingAfterPrepay)}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
+                          style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                       ),
@@ -1506,8 +1503,8 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                       child: Text(
                         'Если вы не придёте, предоплата сгорает.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
+                          color: Theme.of(context).colorScheme.error,
+                        ),
                       ),
                     ),
                     Padding(
@@ -1523,7 +1520,8 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                       onPressed: _contactMaster,
                       icon: const Icon(Icons.phone_outlined, size: 18),
                       label: Text(
-                          'Связаться с ${widget.master.isSalon ? 'салоном' : 'мастером'}'),
+                        'Связаться с ${widget.master.isSalon ? 'салоном' : 'мастером'}',
+                      ),
                     ),
                     if (widget.master.prepayLink.trim().isNotEmpty) ...[
                       const SizedBox(height: 6),
@@ -1536,8 +1534,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                     InkWell(
                       onTap: _saving
                           ? null
-                          : () =>
-                              setState(() => _prepayDone = !_prepayDone),
+                          : () => setState(() => _prepayDone = !_prepayDone),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Row(
@@ -1547,13 +1544,12 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                               onChanged: _saving
                                   ? null
                                   : (v) => setState(
-                                      () => _prepayDone = v ?? false),
+                                      () => _prepayDone = v ?? false,
+                                    ),
                               materialTapTargetSize:
                                   MaterialTapTargetSize.shrinkWrap,
                             ),
-                            const Expanded(
-                              child: Text('Я внёс предоплату'),
-                            ),
+                            const Expanded(child: Text('Я внёс предоплату')),
                           ],
                         ),
                       ),
@@ -1578,8 +1574,9 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
           child: const Text('Отмена'),
         ),
         bizzyFilledButton(
-          onPressed:
-              (_saving || (_needsPrepay && !_prepayDone)) ? null : _submit,
+          onPressed: (_saving || (_needsPrepay && !_prepayDone))
+              ? null
+              : _submit,
           child: Text(
             _needsPrepay && !_prepayDone
                 ? 'Сначала внесите предоплату'
@@ -1623,7 +1620,8 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
       // серии ratingFor по каждой записи.
       final results = await Future.wait([
         _cloud.clientBookings(),
-        _cloud.myRatings()
+        _cloud
+            .myRatings()
             .then<Map<int, int>>((v) => v)
             .catchError((_) => <int, int>{}),
       ]);
@@ -1686,20 +1684,20 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
   }
 
   String _statusLabel(String status) => switch (status) {
-        'pending' => 'Ожидает мастера',
-        'confirmed' => 'Подтверждена',
-        'cancelled' => 'Отменена',
-        'completed' => 'Завершена',
-        _ => status,
-      };
+    'pending' => 'Ожидает мастера',
+    'confirmed' => 'Подтверждена',
+    'cancelled' => 'Отменена',
+    'completed' => 'Завершена',
+    _ => status,
+  };
 
   Color _statusColor(String status) => switch (status) {
-        'pending' => Colors.orange,
-        'confirmed' => Colors.green,
-        'cancelled' => Colors.red,
-        'completed' => Colors.blueGrey,
-        _ => Colors.grey,
-      };
+    'pending' => Colors.orange,
+    'confirmed' => Colors.green,
+    'cancelled' => Colors.red,
+    'completed' => Colors.blueGrey,
+    _ => Colors.grey,
+  };
 
   String _fmt(DateTime dt) =>
       '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} '
@@ -1711,8 +1709,18 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
       !_myRatings.containsKey(b.id);
 
   static const _months = [
-    'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+    'Январь',
+    'Февраль',
+    'Март',
+    'Апрель',
+    'Май',
+    'Июнь',
+    'Июль',
+    'Август',
+    'Сентябрь',
+    'Октябрь',
+    'Ноябрь',
+    'Декабрь',
   ];
 
   String _monthLabel(DateTime d) => '${_months[d.month - 1]} ${d.year}';
@@ -1725,9 +1733,7 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
       if (!mounted) return;
       if (master == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Профиль мастера сейчас недоступен'),
-          ),
+          const SnackBar(content: Text('Профиль мастера сейчас недоступен')),
         );
         return;
       }
@@ -1774,8 +1780,8 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                   ),
                   Chip(
                     label: Text(_statusLabel(b.status)),
-                    backgroundColor:
-                        _statusColor(b.status).withValues(alpha: 0.15),
+                    backgroundColor: _statusColor(b.status)
+                        .withValues(alpha: 0.15),
                     side: BorderSide.none,
                   ),
                 ],
@@ -1793,8 +1799,10 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.schedule, color: scheme.primary),
                 title: Text(_fmt(b.startsAt)),
-                subtitle: Text('${b.durationMinutes} мин'
-                    '${b.servicePrice > 0 ? ' • ${formatMoney(b.servicePrice)}' : ''}'),
+                subtitle: Text(
+                  '${b.durationMinutes} мин'
+                  '${b.servicePrice > 0 ? ' • ${formatMoney(b.servicePrice)}' : ''}',
+                ),
               ),
               if (b.prepaymentStatus != 'none')
                 ListTile(
@@ -1814,8 +1822,7 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
               if (b.notes.isNotEmpty)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading:
-                      Icon(Icons.notes_outlined, color: scheme.primary),
+                  leading: Icon(Icons.notes_outlined, color: scheme.primary),
                   title: Text(b.notes),
                 ),
               if (myRating != null)
@@ -1832,13 +1839,13 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                 runSpacing: 8,
                 children: [
                   if (_canRate(b))
-                    FilledButton.icon(
+                    bizzyFilledButton(
                       onPressed: () {
                         Navigator.of(ctx).pop();
                         _rate(b);
                       },
                       icon: const Icon(Icons.star),
-                      label: const Text('Поставить оценку'),
+                      child: const Text('Поставить оценку'),
                     ),
                   FilledButton.tonalIcon(
                     onPressed: () {
@@ -1873,163 +1880,166 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _failed
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('Не удалось загрузить записи'),
-                      TextButton(
-                          onPressed: _load, child: const Text('Повторить')),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: _bookings.isEmpty
-                      ? ListView(
-                          children: const [
-                            SizedBox(height: 120),
-                            Center(
-                              child: Text(
-                                'У вас пока нет записей.\nВыберите мастера во вкладке «Услуги».',
-                                textAlign: TextAlign.center,
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Не удалось загрузить записи'),
+                  TextButton(onPressed: _load, child: const Text('Повторить')),
+                ],
+              ),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: _bookings.isEmpty
+                  ? ListView(
+                      children: const [
+                        SizedBox(height: 120),
+                        Center(
+                          child: Text(
+                            'У вас пока нет записей.\nВыберите мастера во вкладке «Услуги».',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      itemCount: _bookings.length,
+                      itemBuilder: (context, index) {
+                        final b = _bookings[index];
+                        final myRating = _myRatings[b.id];
+                        // Заголовок месяца — перед первой записью нового месяца.
+                        final showMonthHeader =
+                            index == 0 ||
+                            _bookings[index - 1].startsAt.month !=
+                                b.startsAt.month ||
+                            _bookings[index - 1].startsAt.year !=
+                                b.startsAt.year;
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (showMonthHeader)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  16,
+                                  16,
+                                  4,
+                                ),
+                                child: Text(
+                                  _monthLabel(b.startsAt),
+                                  style: Theme.of(context).textTheme.titleSmall
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                ),
                               ),
-                            ),
-                          ],
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.only(bottom: 24),
-                          itemCount: _bookings.length,
-                          itemBuilder: (context, index) {
-                            final b = _bookings[index];
-                            final myRating = _myRatings[b.id];
-                            // Заголовок месяца — перед первой записью нового месяца.
-                            final showMonthHeader = index == 0 ||
-                                _bookings[index - 1].startsAt.month !=
-                                    b.startsAt.month ||
-                                _bookings[index - 1].startsAt.year !=
-                                    b.startsAt.year;
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (showMonthHeader)
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                        16, 16, 16, 4),
-                                    child: Text(
-                                      _monthLabel(b.startsAt),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleSmall
-                                          ?.copyWith(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .primary,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                    ),
-                                  ),
-                                Card(
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 4,
-                                  ),
-                                  child: InkWell(
-                                    onTap: () => _showDetails(b),
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(12),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
+                            Card(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 4,
+                              ),
+                              child: InkWell(
+                                onTap: () => _showDetails(b),
+                                borderRadius: BorderRadius.circular(12),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
                                         children: [
-                                          Row(
+                                          Expanded(
+                                            child: Text(
+                                              b.serviceName,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleMedium,
+                                            ),
+                                          ),
+                                          Chip(
+                                            label: Text(_statusLabel(b.status)),
+                                            backgroundColor: _statusColor(
+                                              b.status,
+                                            ).withValues(alpha: 0.15),
+                                            side: BorderSide.none,
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        b.masterName.isEmpty
+                                            ? 'Мастер'
+                                            : b.masterName,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '${_fmt(b.startsAt)} • ${b.durationMinutes} мин'
+                                        '${b.servicePrice > 0 ? ' • ${formatMoney(b.servicePrice)}' : ''}'
+                                        '${b.prepaymentStatus != 'none' ? ' • предоплата' : ''}',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall,
+                                      ),
+                                      if (b.masterAddress.isNotEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 4,
+                                          ),
+                                          child: Row(
                                             children: [
+                                              Icon(
+                                                Icons.place_outlined,
+                                                size: 14,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .primary,
+                                              ),
+                                              const SizedBox(width: 4),
                                               Expanded(
                                                 child: Text(
-                                                  b.serviceName,
+                                                  b.masterAddress,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                   style: Theme.of(context)
                                                       .textTheme
-                                                      .titleMedium,
+                                                      .bodySmall,
                                                 ),
-                                              ),
-                                              Chip(
-                                                label: Text(
-                                                    _statusLabel(b.status)),
-                                                backgroundColor:
-                                                    _statusColor(b.status)
-                                                        .withValues(
-                                                            alpha: 0.15),
-                                                side: BorderSide.none,
                                               ),
                                             ],
                                           ),
-                                          const SizedBox(height: 4),
-                                          Text(b.masterName.isEmpty
-                                              ? 'Мастер'
-                                              : b.masterName),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            '${_fmt(b.startsAt)} • ${b.durationMinutes} мин'
-                                            '${b.servicePrice > 0 ? ' • ${formatMoney(b.servicePrice)}' : ''}'
-                                            '${b.prepaymentStatus != 'none' ? ' • предоплата' : ''}',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall,
-                                          ),
-                                          if (b.masterAddress.isNotEmpty)
-                                            Padding(
-                                              padding:
-                                                  const EdgeInsets.only(top: 4),
-                                              child: Row(
-                                                children: [
-                                                  Icon(
-                                                    Icons.place_outlined,
-                                                    size: 14,
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .primary,
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  Expanded(
-                                                    child: Text(
-                                                      b.masterAddress,
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: Theme.of(context)
-                                                          .textTheme
-                                                          .bodySmall,
-                                                    ),
-                                                  ),
-                                                ],
+                                        ),
+                                      if (myRating != null) ...[
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            for (var i = 1; i <= 5; i++)
+                                              Icon(
+                                                i <= myRating
+                                                    ? Icons.star
+                                                    : Icons.star_border,
+                                                size: 16,
+                                                color: Colors.amber,
                                               ),
-                                            ),
-                                          if (myRating != null) ...[
-                                            const SizedBox(height: 4),
-                                            Row(
-                                              children: [
-                                                for (var i = 1; i <= 5; i++)
-                                                  Icon(
-                                                    i <= myRating
-                                                        ? Icons.star
-                                                        : Icons.star_border,
-                                                    size: 16,
-                                                    color: Colors.amber,
-                                                  ),
-                                              ],
-                                            ),
                                           ],
-                                        ],
-                                      ),
-                                    ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 ),
-                              ],
-                            );
-                          },
-                        ),
-                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+            ),
     );
   }
 }
@@ -2252,8 +2262,7 @@ class _ClientProfileTab extends StatelessWidget {
                         ? NetworkImage(profile.avatarUrl)
                         : null,
                     child: profile.avatarUrl.isEmpty
-                        ? Icon(Icons.person,
-                            color: scheme.onPrimary, size: 36)
+                        ? Icon(Icons.person, color: scheme.onPrimary, size: 36)
                         : null,
                   ),
                   const SizedBox(width: 16),
@@ -2282,8 +2291,9 @@ class _ClientProfileTab extends StatelessWidget {
                                 Expanded(
                                   child: Text(
                                     profile.address,
-                                    style:
-                                        Theme.of(context).textTheme.bodySmall,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall,
                                   ),
                                 ),
                               ],
@@ -2310,12 +2320,9 @@ class _ClientProfileTab extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: () =>
-                showAppearancePicker(context, showBizzyLook: true),
+            onPressed: () => showAppearancePicker(context, showBizzyLook: true),
             icon: const Icon(Icons.palette_outlined),
-            label: Text(
-              'Внешний вид · ${themeModeLabel(appThemeMode.value)}',
-            ),
+            label: Text('Внешний вид · ${themeModeLabel(appThemeMode.value)}'),
           ),
           const SizedBox(height: 24),
           FilledButton.tonalIcon(
@@ -2339,9 +2346,8 @@ class _ClientProfileTab extends StatelessWidget {
               return Text(
                 'Версия $v${build.isNotEmpty ? '+$build' : ''}',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurface.withValues(alpha: 0.5),
-                    ),
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurface.withValues(alpha: 0.5)),
               );
             },
           ),
@@ -2437,14 +2443,11 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
       if (addr != null && addr.label.isNotEmpty) {
         setState(() => _addressController.text = addr.label);
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Геопозиция определена')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Геопозиция определена')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -2511,9 +2514,8 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
       if (!mounted) return;
       if (updated == null) throw Exception('Не удалось загрузить профиль');
       Navigator.of(context).pop(updated);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Профиль сохранён')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Профиль сохранён')));
     } catch (e) {
       await SyncLog.write('client_profile_edit', e.toString());
       if (!mounted) return;
@@ -2539,11 +2541,11 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
                 CircleAvatar(
                   radius: 48,
                   backgroundColor: scheme.primary,
-                  backgroundImage:
-                      _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
+                  backgroundImage: _avatarUrl.isNotEmpty
+                      ? NetworkImage(_avatarUrl)
+                      : null,
                   child: _avatarUrl.isEmpty
-                      ? Icon(Icons.person,
-                          color: scheme.onPrimary, size: 40)
+                      ? Icon(Icons.person, color: scheme.onPrimary, size: 40)
                       : null,
                 ),
                 if (_pickingAvatar)
@@ -2654,21 +2656,16 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
           ),
           const SizedBox(height: 12),
           FilledButton.tonalIcon(
-            onPressed: _saving
-                ? null
-                : () => showCredentialsEditor(context),
+            onPressed: _saving ? null : () => showCredentialsEditor(context),
             icon: const Icon(Icons.key_outlined),
             label: const Text('Изменить логин и пароль'),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(
-              _error!,
-              style: TextStyle(color: scheme.error),
-            ),
+            Text(_error!, style: TextStyle(color: scheme.error)),
           ],
           const SizedBox(height: 24),
-          FilledButton.icon(
+          bizzyFilledButton(
             onPressed: _saving ? null : _save,
             icon: _saving
                 ? const SizedBox(
@@ -2677,7 +2674,7 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.save),
-            label: const Text('Сохранить'),
+            child: const Text('Сохранить'),
           ),
         ],
       ),

@@ -104,23 +104,48 @@ Future<void> showAppearancePicker(BuildContext context) async {
 bool bizzyGlassActive(BuildContext context) =>
     Theme.of(context).brightness == Brightness.light;
 
-/// Обёртка нижней навигации: в светлой теме — блюр и
-/// полупрозрачная подложка (эффект стекла), в тёмной — как есть.
+/// Обёртка нижней навигации: в светлой теме — плавающая
+/// скруглённая «стеклянная» плашка с блюром (как на iPhone),
+/// в тёмной — обычная панель.
 /// Требует Scaffold(extendBody: true), иначе блюру нечего
 /// размывать.
 Widget bizzyNavBar(BuildContext context, {required Widget child}) {
   if (!bizzyGlassActive(context)) return child;
-  return ClipRect(
-    child: BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-      child: Theme(
-        data: Theme.of(context).copyWith(
-          navigationBarTheme: Theme.of(context).navigationBarTheme.copyWith(
-                backgroundColor: Colors.white.withValues(alpha: 0.62),
-                elevation: 0,
+  const radius = 30.0;
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+    // Тень и светлая кромка — снаружи клипа, блюр — внутри.
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.9)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.10),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+          child: Container(
+            color: Colors.white.withValues(alpha: 0.55),
+            child: Theme(
+              data: Theme.of(context).copyWith(
+                navigationBarTheme:
+                    Theme.of(context).navigationBarTheme.copyWith(
+                          backgroundColor: Colors.transparent,
+                          elevation: 0,
+                          height: 64,
+                        ),
               ),
+              child: child,
+            ),
+          ),
         ),
-        child: child,
       ),
     ),
   );
@@ -216,6 +241,17 @@ ThemeData bizzyTheme(Brightness brightness) {
             backgroundColor: Colors.white.withValues(alpha: 0.92),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24),
+            ),
+          )
+        : null,
+    // Нижние шторки тоже «матовые» — полупрозрачная белая панель.
+    bottomSheetTheme: isLight
+        ? BottomSheetThemeData(
+            backgroundColor: Colors.white.withValues(alpha: 0.88),
+            modalBackgroundColor: Colors.white.withValues(alpha: 0.88),
+            shape: const RoundedRectangleBorder(
+              borderRadius:
+                  BorderRadius.vertical(top: Radius.circular(28)),
             ),
           )
         : null,

@@ -41,7 +41,31 @@ class _ClientHomeState extends State<ClientHome> {
     final pages = [
       ClientCatalogTab(profile: widget.profile),
       const ClientFavoritesTab(),
-      const ClientHoneyTab(),
+      ClientHoneyTab(
+        // «Записаться» из предложения — профиль салона/мастера
+        // с его услугами и кнопкой записи.
+        onBookProvider: (providerId) => Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (context) => MasterDetailScreen(
+              // Карточка-заглушка: экран сам подтянет полный
+              // профиль провайдера из облака.
+              master: MasterCard(
+                userId: providerId,
+                name: '',
+                phone: '',
+                category: '',
+                description: '',
+                address: '',
+                social: '',
+                phonePublic: false,
+                avatarUrl: '',
+                ratingAvg: 0,
+                ratingCount: 0,
+              ),
+            ),
+          ),
+        ),
+      ),
       const ClientBookingsTab(),
       _ClientProfileTab(
         profile: widget.profile,
@@ -74,7 +98,7 @@ class _ClientHomeState extends State<ClientHome> {
             NavigationDestination(
               icon: Icon(Icons.card_giftcard_outlined),
               selectedIcon: Icon(Icons.card_giftcard),
-              label: 'Хони',
+              label: 'Honey',
             ),
             NavigationDestination(
               icon: Icon(Icons.event_note_outlined),

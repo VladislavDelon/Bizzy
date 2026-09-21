@@ -1984,7 +1984,7 @@ class CloudService {
     ];
   }
 
-  // ---------- «Хони» — предложения салонов ----------
+  // ---------- «Honey» — предложения салонов ----------
 
   /// Создать предложение от своего салона/мастера.
   Future<void> createOffer({
@@ -2009,7 +2009,7 @@ class CloudService {
     return [for (final r in rows) SalonOffer.fromMap(r)];
   }
 
-  /// Витрина «Хони» для клиента — активные предложения всех
+  /// Витрина «Honey» для клиента — активные предложения всех
   /// салонов и мастеров с именами провайдеров.
   Future<List<SalonOffer>> activeOffers() async {
     final rows = await supabase
@@ -2033,7 +2033,7 @@ class CloudService {
       .eq('provider_id', uid!);
 }
 
-/// Предложение в «Хони» — сертификат, скидка, бонус от салона.
+/// Предложение в «Honey» — сертификат, скидка, бонус от салона.
 class SalonOffer {
   const SalonOffer({
     required this.id,

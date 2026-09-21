@@ -3887,7 +3887,7 @@ class ClientsTab extends StatefulWidget {
   final int pendingBookings;
 
   /// Роль облачного аккаунта: 'master' | 'salon' — у салона
-  /// в шапке дополнительно кнопка «Хони» (предложения клиентам).
+  /// в шапке дополнительно кнопка «Honey» (предложения клиентам).
   final String cloudRole;
 
   /// Записи для раздела «Финансы» внутри вкладки.
@@ -4249,14 +4249,14 @@ class _ClientsTabState extends State<ClientsTab> {
                 },
               ),
             ),
-            // «Хони» — скидки/сертификаты/бонусы, которые салон
-            // показывает клиентам в их вкладке «Хони».
+            // «Honey» — скидки/сертификаты/бонусы, которые салон
+            // показывает клиентам в их вкладке «Honey».
             if (widget.cloudRole == 'salon')
               Card(
                 margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                 child: ListTile(
                   leading: const Icon(Icons.card_giftcard),
-                  title: const Text('Хони'),
+                  title: const Text('Honey'),
                   subtitle: const Text(
                     'Скидки и сертификаты, которые видят клиенты',
                   ),

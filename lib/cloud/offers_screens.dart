@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'cloud_service.dart';
 
-/// Управление «Хони» у салона/мастера: список своих предложений,
+/// Управление «Honey» у салона/мастера: список своих предложений,
 /// создание, включение/выключение, удаление.
 class SalonOffersScreen extends StatefulWidget {
   const SalonOffersScreen({super.key});
@@ -66,7 +66,7 @@ class _SalonOffersScreenState extends State<SalonOffersScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Удалить «${offer.title}»?'),
-        content: const Text('Предложение исчезнет из «Хони» у клиентов.'),
+        content: const Text('Предложение исчезнет из «Honey» у клиентов.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -94,12 +94,12 @@ class _SalonOffersScreenState extends State<SalonOffersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Хони')),
+      appBar: AppBar(title: const Text('Honey')),
       floatingActionButton: FloatingActionButton.extended(
         heroTag: null,
         onPressed: _createOffer,
         icon: const Icon(Icons.add),
-        label: const Text('Новая Хони'),
+        label: const Text('Создать Honey'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -137,7 +137,7 @@ class _SalonOffersScreenState extends State<SalonOffersScreen> {
                         padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
                         child: Text(
                           'Скидки, сертификаты и бонусы, которые клиенты '
-                          'видят во вкладке «Хони».',
+                          'видят во вкладке «Honey».',
                         ),
                       ),
                       if (_offers.isEmpty)
@@ -146,7 +146,7 @@ class _SalonOffersScreenState extends State<SalonOffersScreen> {
                           child: Center(
                             child: Text(
                               'Предложений пока нет.\n'
-                              'Нажмите «Новая Хони», чтобы создать первое —\n'
+                              'Нажмите «Создать Honey», чтобы добавить первое —\n'
                               'например, «Скидка на первое посещение».',
                               textAlign: TextAlign.center,
                             ),
@@ -183,7 +183,7 @@ class _SalonOffersScreenState extends State<SalonOffersScreen> {
   }
 }
 
-/// Диалог создания предложения «Хони».
+/// Диалог создания предложения «Honey».
 class _OfferEditDialog extends StatefulWidget {
   const _OfferEditDialog();
 
@@ -233,7 +233,7 @@ class _OfferEditDialogState extends State<_OfferEditDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Новая Хони'),
+      title: const Text('Новое Honey'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -287,10 +287,14 @@ class _OfferEditDialogState extends State<_OfferEditDialog> {
   }
 }
 
-/// Вкладка «Хони» у клиента — витрина активных предложений
+/// Вкладка «Honey» у клиента — витрина активных предложений
 /// от салонов и мастеров: сертификаты, скидки, бонусы.
 class ClientHoneyTab extends StatefulWidget {
-  const ClientHoneyTab({super.key});
+  const ClientHoneyTab({super.key, this.onBookProvider});
+
+  /// Открыть запись к салону/мастеру, который дал предложение —
+  /// передаётся из ClientHome, чтобы не тянуть сюда каталог.
+  final void Function(String providerId)? onBookProvider;
 
   @override
   State<ClientHoneyTab> createState() => _ClientHoneyTabState();
@@ -326,10 +330,96 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
     }
   }
 
+  /// Карточка предложения во весь экран-шторку: вся информация
+  /// и кнопка «Записаться» к этому салону.
+  Future<void> _openOffer(SalonOffer offer) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.card_giftcard,
+                      color: Theme.of(sheetContext).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        offer.providerName.isNotEmpty
+                            ? offer.providerName
+                            : 'Салон',
+                        style:
+                            Theme.of(sheetContext).textTheme.titleMedium,
+                      ),
+                    ),
+                    if (offer.value.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Theme.of(sheetContext)
+                              .colorScheme
+                              .primaryContainer,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text(
+                          offer.value,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  offer.title,
+                  style: Theme.of(sheetContext).textTheme.headlineSmall,
+                ),
+                if (offer.description.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    offer.description,
+                    style: Theme.of(sheetContext).textTheme.bodyMedium,
+                  ),
+                ],
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: widget.onBookProvider == null
+                        ? null
+                        : () {
+                            Navigator.of(sheetContext).pop();
+                            widget.onBookProvider!(offer.providerId);
+                          },
+                    icon: const Icon(Icons.event_available),
+                    label: const Text('Записаться'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Хони')),
+      appBar: AppBar(title: const Text('Honey')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -382,8 +472,11 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                           children: [
                             for (final o in _offers)
                               Card(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(14),
+                                clipBehavior: Clip.antiAlias,
+                                child: InkWell(
+                                  onTap: () => _openOffer(o),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(14),
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
@@ -442,6 +535,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
                                         Text(o.description),
                                       ],
                                     ],
+                                  ),
                                   ),
                                 ),
                               ),

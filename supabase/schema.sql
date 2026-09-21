@@ -150,6 +150,10 @@ create table if not exists public.appointments (
     check (status in ('pending', 'confirmed', 'cancelled', 'completed')),
   prepayment_status text not null default 'none'
     check (prepayment_status in ('none', 'claimed', 'confirmed')),
+  -- Цена услуги на момент записи (уже со скидкой Honey, если была).
+  service_price numeric not null default 0,
+  -- По какому Honey записался клиент (если через акцию).
+  offer_id bigint,
   notes text not null default '',
   created_at timestamptz not null default now()
 );
@@ -387,7 +391,7 @@ drop policy if exists "favorites_select" on public.favorites;
 drop policy if exists "favorites_insert" on public.favorites;
 drop policy if exists "favorites_delete" on public.favorites;
 create policy "favorites_select" on public.favorites
-  for select using (auth.uid() = client_id);
+  for select using (auth.uid() = client_id or auth.uid() = master_id);
 create policy "favorites_insert" on public.favorites
   for insert with check (auth.uid() = client_id);
 create policy "favorites_delete" on public.favorites
@@ -549,6 +553,18 @@ create table if not exists public.offers (
   description text not null default '',
   value text not null default '',
   active boolean not null default true,
+  -- Картинка-фон и ссылка (Instagram и т.п.) для рекламы.
+  image_url text not null default '',
+  link_url text not null default '',
+  -- Скидка в процентах: клиент видит зачёркнутую цену и итог.
+  discount_percent numeric not null default 0,
+  -- На все услуги или только на выбранные (service_ids).
+  all_services boolean not null default true,
+  service_ids bigint[] not null default '{}',
+  -- Срок действия: NULL = бессрочно. После valid_until
+  -- предложение автоматически исчезает из витрины.
+  valid_from timestamptz,
+  valid_until timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -561,3 +577,57 @@ create policy "offers_select" on public.offers
 drop policy if exists "offers_write" on public.offers;
 create policy "offers_write" on public.offers
   for all using (auth.uid() = provider_id) with check (auth.uid() = provider_id);
+
+-- Подаренные Honey конкретным клиентам.
+create table if not exists public.offer_gifts (
+  id bigint generated always as identity primary key,
+  offer_id bigint not null references public.offers(id) on delete cascade,
+  provider_id uuid not null references public.profiles(id) on delete cascade,
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (offer_id, client_id)
+);
+
+alter table public.offer_gifts enable row level security;
+
+-- Провайдер дарит только СВОИ предложения (проверка владения offer).
+drop policy if exists "gift_provider" on public.offer_gifts;
+create policy "gift_provider" on public.offer_gifts
+  for all using (auth.uid() = provider_id)
+  with check (
+    auth.uid() = provider_id
+    and exists (
+      select 1 from public.offers o
+      where o.id = offer_id and o.provider_id = auth.uid()
+    )
+  );
+
+drop policy if exists "gift_client_read" on public.offer_gifts;
+create policy "gift_client_read" on public.offer_gifts
+  for select using (auth.uid() = client_id);
+
+-- Клиент может «погасить» подарок после записи (one-time use).
+drop policy if exists "gift_client_delete" on public.offer_gifts;
+create policy "gift_client_delete" on public.offer_gifts
+  for delete using (auth.uid() = client_id);
+
+-- Предоплата по конкретному клиенту.
+create table if not exists public.client_prepay_rules (
+  id bigint generated always as identity primary key,
+  provider_id uuid not null references public.profiles(id) on delete cascade,
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  prepay_required boolean not null default true,
+  amount numeric not null default 0,
+  created_at timestamptz not null default now(),
+  unique (provider_id, client_id)
+);
+
+alter table public.client_prepay_rules enable row level security;
+
+drop policy if exists "prepay_provider" on public.client_prepay_rules;
+create policy "prepay_provider" on public.client_prepay_rules
+  for all using (auth.uid() = provider_id) with check (auth.uid() = provider_id);
+
+drop policy if exists "prepay_client_read" on public.client_prepay_rules;
+create policy "prepay_client_read" on public.client_prepay_rules
+  for select using (auth.uid() = client_id);

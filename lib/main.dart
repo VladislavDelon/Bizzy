@@ -7,6 +7,7 @@ import 'package:bizzy_app/app_theme.dart';
 import 'package:bizzy_app/cloud/auth_screens.dart';
 import 'package:bizzy_app/cloud/client_app.dart';
 import 'package:bizzy_app/cloud/cloud_service.dart';
+import 'package:bizzy_app/cloud/fan_push.dart';
 import 'package:bizzy_app/cloud/master_screens.dart';
 import 'package:bizzy_app/cloud/offers_screens.dart';
 import 'package:bizzy_app/cloud/supabase_config.dart';
@@ -3567,10 +3568,26 @@ class _HomeTabState extends State<HomeTab> {
                         headerStyle: const HeaderStyle(
                           formatButtonVisible: false,
                         ),
-                        calendarStyle: const CalendarStyle(
-                          markerDecoration: BoxDecoration(
+                        calendarStyle: CalendarStyle(
+                          markerDecoration: const BoxDecoration(
                             color: Colors.yellow,
                             shape: BoxShape.circle,
+                          ),
+                          // Сегодня — жёлтое кольцо без заливки,
+                          // цифра внутри остаётся видимой.
+                          todayDecoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: bizzySeedColor,
+                              width: 1.6,
+                            ),
+                          ),
+                          todayTextStyle: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).brightness ==
+                                    Brightness.light
+                                ? Colors.black
+                                : Colors.white,
                           ),
                         ),
                         calendarBuilders: CalendarBuilders<Object>(
@@ -4647,6 +4664,14 @@ class _AddServiceDialogState extends State<AddServiceDialog> {
               durationMinutes: saved.durationMinutes,
               published: saved.published,
             );
+            // Фанам — пуш о новой услуге (только если она видна клиентам).
+            if (saved.published) {
+              await notifyFavoriteClients(
+                title: 'Новая услуга',
+                body: 'Ваш избранный мастер/салон добавил услугу '
+                    '«${saved.name}» — ${formatMoney(saved.price)}',
+              );
+            }
           }
           final synced = saved.copyWith(
             externalId: 'cloud:service:${cloud.id}',
@@ -4992,6 +5017,30 @@ class _ServicesTabState extends State<ServicesTab> {
                   setState(() => _query = value.trim().toLowerCase()),
             ),
           ),
+          // Honey у мастера-одиночки (и салона) — вход в управление
+          // акциями прямо из раздела «Услуги».
+          if (cloudSignedIn)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Card(
+                child: ListTile(
+                  leading: Icon(
+                    Icons.card_giftcard,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  title: const Text('Honey'),
+                  subtitle: const Text(
+                    'Скидки и акции на ваши услуги для клиентов',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute(
+                      builder: (context) => const SalonOffersScreen(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())

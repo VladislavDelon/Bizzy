@@ -1213,6 +1213,7 @@ class CloudService {
     double servicePrice = 0,
     String notes = '',
     String prepaymentStatus = 'none',
+    int? offerId,
   }) async {
     final payload = <String, dynamic>{
       'client_id': uid,
@@ -1224,9 +1225,10 @@ class CloudService {
       'service_price': servicePrice,
       'prepayment_status': prepaymentStatus,
       'notes': notes,
+      'offer_id': offerId,
     };
     // Повторяем вставку, убирая колонки, которых нет в старой базе.
-    for (var attempt = 0; attempt < 3; attempt++) {
+    for (var attempt = 0; attempt < 4; attempt++) {
       try {
         final row = await supabase
             .from('appointments')
@@ -1235,6 +1237,11 @@ class CloudService {
             .single();
         return CloudBooking.fromMap(row);
       } on PostgrestException catch (e) {
+        if (_isMissingColumn(e, 'offer_id') &&
+            payload.containsKey('offer_id')) {
+          payload.remove('offer_id');
+          continue;
+        }
         if (_isMissingColumn(e, 'service_price') &&
             payload.containsKey('service_price')) {
           payload.remove('service_price');
@@ -1986,17 +1993,43 @@ class CloudService {
 
   // ---------- «Honey» — предложения салонов ----------
 
+  /// Картинка-фон для Honey → avatars/[uid]/offers/[ts].jpg.
+  Future<String> uploadOfferImage(String filePath) async {
+    final userId = uid;
+    if (userId == null) throw Exception('Не авторизован');
+    final dest =
+        '$userId/offers/${DateTime.now().millisecondsSinceEpoch}.jpg';
+    await supabase.storage
+        .from('avatars')
+        .upload(dest, File(filePath));
+    return supabase.storage.from('avatars').getPublicUrl(dest);
+  }
+
   /// Создать предложение от своего салона/мастера.
   Future<void> createOffer({
     required String title,
     String description = '',
     String value = '',
+    String imageUrl = '',
+    String linkUrl = '',
+    double discountPercent = 0,
+    bool allServices = true,
+    List<int> serviceIds = const [],
+    DateTime? validFrom,
+    DateTime? validUntil,
   }) =>
       supabase.from('offers').insert({
         'provider_id': uid,
         'title': title,
         'description': description,
         'value': value,
+        'image_url': imageUrl,
+        'link_url': linkUrl,
+        'discount_percent': discountPercent,
+        'all_services': allServices,
+        'service_ids': serviceIds,
+        'valid_from': validFrom?.toUtc().toIso8601String(),
+        'valid_until': validUntil?.toUtc().toIso8601String(),
       });
 
   /// Мои предложения (управление у салона/мастера).
@@ -2010,14 +2043,139 @@ class CloudService {
   }
 
   /// Витрина «Honey» для клиента — активные предложения всех
-  /// салонов и мастеров с именами провайдеров.
+  /// салонов и мастеров. Просроченные (valid_until в прошлом)
+  /// и ещё не начавшиеся отфильтровываются — Honey «испаряется».
   Future<List<SalonOffer>> activeOffers() async {
+    List<dynamic> rows;
+    try {
+      final now = DateTime.now().toUtc().toIso8601String();
+      rows = await supabase
+          .from('offers')
+          .select('*, provider:profiles!offers_provider_id_fkey(name)')
+          .eq('active', true)
+          // Серверный фильтр срока: истёкшие и ещё не начавшиеся
+          // Honey не отдаются клиенту вообще.
+          .or('valid_until.is.null,valid_until.gte.$now')
+          .or('valid_from.is.null,valid_from.lte.$now')
+          .order('created_at', ascending: false);
+    } on PostgrestException {
+      // Старая база без valid_from/valid_until — просто активные.
+      rows = await supabase
+          .from('offers')
+          .select('*, provider:profiles!offers_provider_id_fkey(name)')
+          .eq('active', true)
+          .order('created_at', ascending: false);
+    }
+    return [
+      for (final r in rows)
+        SalonOffer.fromMap(r as Map<String, dynamic>),
+    ].where((o) => o.isLive).toList();
+  }
+
+  /// Honey, подаренные именно мне салонами/мастерами.
+  Future<List<SalonOffer>> giftedOffers() async {
     final rows = await supabase
-        .from('offers')
-        .select('*, provider:profiles!offers_provider_id_fkey(name)')
-        .eq('active', true)
+        .from('offer_gifts')
+        .select(
+            'offer:offers!offer_gifts_offer_id_fkey(*, provider:profiles!offers_provider_id_fkey(name))')
+        .eq('client_id', uid!)
         .order('created_at', ascending: false);
-    return [for (final r in rows) SalonOffer.fromMap(r)];
+    return [
+      for (final r in rows)
+        if (r['offer'] != null)
+          SalonOffer.fromMap(r['offer'] as Map<String, dynamic>)
+              .copyGifted(),
+    ].where((o) => o.isLive).toList();
+  }
+
+  /// Подарить Honey конкретному клиенту.
+  Future<void> giftOffer(int offerId, String clientId) =>
+      supabase.from('offer_gifts').upsert(
+        {
+          'offer_id': offerId,
+          'provider_id': uid,
+          'client_id': clientId,
+        },
+        onConflict: 'offer_id, client_id',
+      );
+
+  /// Погасить подаренный Honey после записи — разовое использование.
+  Future<void> consumeGift(int offerId) => supabase
+      .from('offer_gifts')
+      .delete()
+      .eq('offer_id', offerId)
+      .eq('client_id', uid!);
+
+  /// Клиенты, добавившие меня в избранное — для push о новых
+  /// услугах/фото/Honey (RLS разрешает читать свои fan-строки).
+  Future<List<String>> fanClientIds() async {
+    final rows = await supabase
+        .from('favorites')
+        .select('client_id')
+        .eq('master_id', uid!);
+    return [for (final r in rows) _parseString(r['client_id'])];
+  }
+
+  /// Правило предоплаты по клиенту: если у провайдера стоит
+  /// пометка — клиент при записи увидит «принимает по предоплате».
+  /// Возвращает null, если правила нет или предоплата выключена.
+  Future<({double amount})?> clientPrepayRule(String providerId) async {
+    final rows = await supabase
+        .from('client_prepay_rules')
+        .select('amount, prepay_required')
+        .eq('provider_id', providerId)
+        .eq('client_id', uid!)
+        .eq('prepay_required', true)
+        .limit(1);
+    if (rows.isEmpty) return null;
+    return (amount: _parseDouble(rows.first['amount']));
+  }
+
+  /// Провайдер: текущее правило предоплаты для клиента
+  /// (для показа состояния в карточке клиента).
+  Future<({bool required, double amount})?> clientPrepayRuleFor(
+      String clientId) async {
+    final rows = await supabase
+        .from('client_prepay_rules')
+        .select('amount, prepay_required')
+        .eq('provider_id', uid!)
+        .eq('client_id', clientId)
+        .limit(1);
+    if (rows.isEmpty) return null;
+    return (
+      required: _parseBool(rows.first['prepay_required'], fallback: false),
+      amount: _parseDouble(rows.first['amount']),
+    );
+  }
+
+  /// Провайдер: включить/выключить предоплату для клиента
+  /// и задать сумму. required=false или amount<=0 — запись
+  /// остаётся, но предоплата считается выключенной.
+  Future<void> setClientPrepay(
+      String clientId, bool required, double amount) async {
+    if (!required) {
+      await supabase
+          .from('client_prepay_rules')
+          .upsert(
+            {
+              'provider_id': uid,
+              'client_id': clientId,
+              'prepay_required': false,
+              'amount': 0,
+            },
+            onConflict: 'provider_id, client_id',
+          );
+      return;
+    }
+    await supabase.from('client_prepay_rules').upsert(
+      {
+        'provider_id': uid,
+        'client_id': clientId,
+        'prepay_required': true,
+        'amount': amount,
+      },
+      onConflict: 'provider_id, client_id',
+    );
   }
 
   /// Включить/выключить предложение.
@@ -2043,6 +2201,14 @@ class SalonOffer {
     required this.description,
     required this.value,
     required this.active,
+    this.imageUrl = '',
+    this.linkUrl = '',
+    this.discountPercent = 0,
+    this.allServices = true,
+    this.serviceIds = const [],
+    this.validFrom,
+    this.validUntil,
+    this.isGift = false,
     this.createdAt,
   });
 
@@ -2056,8 +2222,64 @@ class SalonOffer {
 
   /// Размер выгоды в свободной форме: «−20%», «500 ₸», «Бонус».
   final String value;
+
+  /// Картинка-фон карточки (реклама процедуры).
+  final String imageUrl;
+
+  /// Ссылка — например, на Instagram салона.
+  final String linkUrl;
+
+  /// Скидка в процентах — для автоподсчёта цены со скидкой.
+  final double discountPercent;
+
+  /// true — действует на все услуги; false — только на serviceIds.
+  final bool allServices;
+  final List<int> serviceIds;
+
+  /// Срок действия; null — без ограничения.
+  final DateTime? validFrom;
+  final DateTime? validUntil;
+
+  /// Подарено мне конкретно салоном/мастером.
+  final bool isGift;
   final bool active;
   final DateTime? createdAt;
+
+  /// Живое ли предложение: включено и срок не вышел/не наступил.
+  bool get isLive {
+    if (!active) return false;
+    final now = DateTime.now();
+    if (validFrom != null && now.isBefore(validFrom!)) return false;
+    if (validUntil != null && now.isAfter(validUntil!)) return false;
+    return true;
+  }
+
+  /// Действует ли скидка на конкретную услугу.
+  bool appliesTo(int? serviceId) =>
+      allServices || (serviceId != null && serviceIds.contains(serviceId));
+
+  /// Цена со скидкой (округление до целого — тиын не считаем).
+  double discountedPrice(double price) =>
+      (price * (100 - discountPercent) / 100).roundToDouble();
+
+  SalonOffer copyGifted() => SalonOffer(
+        id: id,
+        providerId: providerId,
+        providerName: providerName,
+        title: title,
+        description: description,
+        value: value,
+        active: active,
+        imageUrl: imageUrl,
+        linkUrl: linkUrl,
+        discountPercent: discountPercent,
+        allServices: allServices,
+        serviceIds: serviceIds,
+        validFrom: validFrom,
+        validUntil: validUntil,
+        isGift: true,
+        createdAt: createdAt,
+      );
 
   factory SalonOffer.fromMap(Map<String, dynamic> map) {
     final provider = _pickProfileMap(map['provider']);
@@ -2070,6 +2292,16 @@ class SalonOffer {
       description: _parseString(map['description']),
       value: _parseString(map['value']),
       active: _parseBool(map['active'], fallback: true),
+      imageUrl: _parseString(map['image_url']),
+      linkUrl: _parseString(map['link_url']),
+      discountPercent: _parseDouble(map['discount_percent']),
+      allServices: _parseBool(map['all_services'], fallback: true),
+      serviceIds: [
+        for (final e in (map['service_ids'] as List? ?? const []))
+          _parseInt(e),
+      ],
+      validFrom: _parseDateTime(map['valid_from']),
+      validUntil: _parseDateTime(map['valid_until']),
       createdAt: _parseDateTime(map['created_at']),
     );
   }

@@ -9,6 +9,7 @@ import '../app_theme.dart';
 import '../notifications/push_service.dart';
 import 'cloud_service.dart';
 import 'credentials_dialog.dart';
+import 'fan_push.dart';
 import 'geo_service.dart';
 import 'map_screens.dart';
 import 'master_public_profile.dart';
@@ -278,6 +279,11 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       final photo = await _cloud.uploadPortfolioPhoto(file.path);
       if (!mounted) return;
       setState(() => _portfolio = [..._portfolio, photo]);
+      // Фанам — пуш о новой работе в портфолио.
+      await notifyFavoriteClients(
+        title: 'Новая работа',
+        body: 'Ваш избранный мастер/салон добавил фото в портфолио',
+      );
     } catch (e, st) {
       await SyncLog.write('portfolio', 'Загрузка фото: $e\n$st');
       if (!mounted) return;
@@ -1584,14 +1590,126 @@ class ClientDetailScreen extends StatefulWidget {
 
 class _ClientDetailScreenState extends State<ClientDetailScreen> {
   final _cloud = CloudService();
+  final _prepayAmount = TextEditingController();
   List<ClientReview> _reviews = [];
   bool _loading = true;
   bool _failed = false;
+  bool _prepayRequired = false;
+  bool _prepayBusy = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadPrepay();
+  }
+
+  @override
+  void dispose() {
+    _prepayAmount.dispose();
+    super.dispose();
+  }
+
+  /// Персональное правило предоплаты для этого клиента.
+  Future<void> _loadPrepay() async {
+    try {
+      final rule = await _cloud.clientPrepayRuleFor(widget.clientId);
+      if (!mounted || rule == null) return;
+      setState(() {
+        _prepayRequired = rule.required;
+        if (rule.amount > 0) {
+          _prepayAmount.text = rule.amount.toStringAsFixed(0);
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _savePrepay() async {
+    setState(() => _prepayBusy = true);
+    try {
+      final amount =
+          double.tryParse(_prepayAmount.text.trim().replaceAll(' ', '')) ?? 0;
+      await _cloud.setClientPrepay(widget.clientId, _prepayRequired, amount);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _prepayRequired
+                ? 'Клиент будет записываться только по предоплате'
+                : 'Персональная предоплата выключена',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось сохранить: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _prepayBusy = false);
+    }
+  }
+
+  /// Подарить клиенту один из своих опубликованных Honey.
+  Future<void> _giftHoney() async {
+    List<SalonOffer> offers;
+    try {
+      offers = (await _cloud.myOffers()).where((o) => o.isLive).toList();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось загрузить Honey: $e')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    if (offers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('У вас пока нет активных Honey — создайте '
+              'их в разделе Honey'),
+        ),
+      );
+      return;
+    }
+    final picked = await showDialog<SalonOffer>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Подарить Honey'),
+        children: [
+          for (final o in offers)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(o),
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.card_giftcard),
+                title: Text(o.title),
+                subtitle: o.value.isNotEmpty ? Text(o.value) : null,
+              ),
+            ),
+        ],
+      ),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      await _cloud.giftOffer(picked.id, widget.clientId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('«${picked.title}» подарен клиенту')),
+      );
+      try {
+        await PushNotificationService.sendPush(
+          toUserId: widget.clientId,
+          title: 'Вам подарили Honey',
+          body: '«${picked.title}» — откройте вкладку Honey',
+        );
+      } catch (_) {}
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось подарить: $e')),
+      );
+    }
   }
 
   Future<void> _load() async {
@@ -1670,6 +1788,68 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                           subtitle: widget.clientPhone.isEmpty
                               ? null
                               : Text(widget.clientPhone),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      // Персональная предоплата для этого клиента.
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text('Принимать по предоплате'),
+                                subtitle: const Text(
+                                  'Клиент увидит сумму предоплаты при записи',
+                                ),
+                                value: _prepayRequired,
+                                onChanged: (v) =>
+                                    setState(() => _prepayRequired = v),
+                              ),
+                              if (_prepayRequired)
+                                TextField(
+                                  controller: _prepayAmount,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Сумма предоплаты',
+                                    hintText: '5000',
+                                  ),
+                                ),
+                              const SizedBox(height: 4),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: _prepayBusy ? null : _savePrepay,
+                                  child: _prepayBusy
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Text('Сохранить'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Card(
+                        child: ListTile(
+                          leading: Icon(
+                            Icons.card_giftcard,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          title: const Text('Подарить Honey'),
+                          subtitle: const Text(
+                            'Скидка или бонус лично этому клиенту',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: _giftHoney,
                         ),
                       ),
                       if (_reviews.isNotEmpty) ...[

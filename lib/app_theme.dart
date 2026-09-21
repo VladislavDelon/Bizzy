@@ -113,26 +113,47 @@ Widget bizzyNavBar(BuildContext context, {required Widget child}) {
   if (!bizzyGlassActive(context)) return child;
   const radius = 30.0;
   return Padding(
-    padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+    // Узкие поля — плашка шире, лейблы вкладок не обрезаются.
+    padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
     // Тень и светлая кромка — снаружи клипа, блюр — внутри.
     child: DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.9)),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.95),
+          width: 1.2,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.10),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
+            color: Colors.black.withValues(alpha: 0.16),
+            blurRadius: 32,
+            offset: const Offset(0, 10),
+          ),
+          // Верхний «блик» — как у настоящего стекла.
+          BoxShadow(
+            color: Colors.white.withValues(alpha: 0.7),
+            blurRadius: 12,
+            offset: const Offset(0, -4),
           ),
         ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(radius),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+          filter: ImageFilter.blur(sigmaX: 32, sigmaY: 32),
           child: Container(
-            color: Colors.white.withValues(alpha: 0.55),
+            // Градиент сверху-вниз — эффект iOS-материала:
+            // верх светлее, низ прозрачнее, блюр читается.
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.white.withValues(alpha: 0.72),
+                  Colors.white.withValues(alpha: 0.42),
+                ],
+              ),
+            ),
             child: Theme(
               data: Theme.of(context).copyWith(
                 navigationBarTheme:
@@ -140,6 +161,20 @@ Widget bizzyNavBar(BuildContext context, {required Widget child}) {
                           backgroundColor: Colors.transparent,
                           elevation: 0,
                           height: 64,
+                          // 11pt — «Избранное» и «Профиль»
+                          // помещаются целиком в одну строку.
+                          labelTextStyle: WidgetStateProperty.resolveWith(
+                            (states) => TextStyle(
+                              fontSize: 11,
+                              height: 1.1,
+                              fontWeight: states.contains(WidgetState.selected)
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
+                              color: states.contains(WidgetState.selected)
+                                  ? Colors.black
+                                  : Colors.grey[700],
+                            ),
+                          ),
                         ),
               ),
               child: child,

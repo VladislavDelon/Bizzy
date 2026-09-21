@@ -196,6 +196,21 @@ class _TasksScreenState extends State<TasksScreen> {
                           color: Theme.of(context).colorScheme.primary,
                           shape: BoxShape.circle,
                         ),
+                        // Сегодня — жёлтое кольцо без заливки.
+                        todayDecoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: const Color(0xFFFFD600),
+                            width: 1.6,
+                          ),
+                        ),
+                        todayTextStyle: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).brightness ==
+                                  Brightness.light
+                              ? Colors.black
+                              : Colors.white,
+                        ),
                       ),
                     ),
                     const Divider(height: 1),

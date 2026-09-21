@@ -43,14 +43,16 @@ class _ClientHomeState extends State<ClientHome> {
       const ClientFavoritesTab(),
       ClientHoneyTab(
         // «Записаться» из предложения — профиль салона/мастера
-        // с его услугами и кнопкой записи.
-        onBookProvider: (providerId) => Navigator.of(context).push<void>(
+        // с его услугами и кнопкой записи; само Honey едет
+        // в диалог записи и режет цену на скидку.
+        onBookOffer: (offer) => Navigator.of(context).push<void>(
           MaterialPageRoute(
             builder: (context) => MasterDetailScreen(
+              offer: offer,
               // Карточка-заглушка: экран сам подтянет полный
               // профиль провайдера из облака.
               master: MasterCard(
-                userId: providerId,
+                userId: offer.providerId,
                 name: '',
                 phone: '',
                 category: '',
@@ -771,9 +773,13 @@ class _ClientFavoritesTabState extends State<ClientFavoritesTab> {
 
 /// Карточка мастера: профиль, услуги, кнопка записи.
 class MasterDetailScreen extends StatefulWidget {
-  const MasterDetailScreen({super.key, required this.master});
+  const MasterDetailScreen({super.key, required this.master, this.offer});
 
   final MasterCard master;
+
+  /// Honey, из которого пришёл клиент — скидка применится
+  /// к цене в диалоге записи.
+  final SalonOffer? offer;
 
   @override
   State<MasterDetailScreen> createState() => _MasterDetailScreenState();
@@ -857,8 +863,11 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
   Future<void> _book() async {
     final result = await showDialog<bool>(
       context: context,
-      builder: (context) =>
-          BookAppointmentDialog(master: _master ?? widget.master, services: _services),
+      builder: (context) => BookAppointmentDialog(
+        master: _master ?? widget.master,
+        services: _services,
+        offer: widget.offer,
+      ),
     );
     if (result == true && mounted) Navigator.of(context).pop(true);
   }
@@ -903,10 +912,15 @@ class BookAppointmentDialog extends StatefulWidget {
     super.key,
     required this.master,
     required this.services,
+    this.offer,
   });
 
   final MasterCard master;
   final List<CloudServiceItem> services;
+
+  /// Honey, по которому записывается клиент: действующая скидка
+  /// режет цену выбранной услуги, подарок гасится после записи.
+  final SalonOffer? offer;
 
   @override
   State<BookAppointmentDialog> createState() => _BookAppointmentDialogState();
@@ -926,12 +940,37 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
   String? _error;
   bool _prepayDone = false;
 
-  bool get _needsPrepay => widget.master.prepayEnabled;
+  /// Персональное правило предоплаты от мастера/салона
+  /// (сильнее общего prepayEnabled — задаётся конкретному клиенту).
+  ({double amount})? _clientPrepay;
+
+  bool get _needsPrepay =>
+      _clientPrepay != null || widget.master.prepayEnabled;
+
+  /// Сумма предоплаты: персональная по клиенту, иначе общая у мастера.
+  double get _prepayAmount =>
+      _clientPrepay != null && _clientPrepay!.amount > 0
+          ? _clientPrepay!.amount
+          : widget.master.prepayAmount;
+
+  /// Действует ли скидка Honey на выбранную услугу прямо сейчас.
+  bool get _offerApplies {
+    final o = widget.offer;
+    return o != null &&
+        o.isLive &&
+        o.discountPercent > 0 &&
+        o.appliesTo(_service?.id);
+  }
+
+  /// Итоговая цена с учётом скидки Honey (без скидки — обычная).
+  double get _finalPrice {
+    final price = _service?.price ?? 0;
+    return _offerApplies ? widget.offer!.discountedPrice(price) : price;
+  }
 
   /// Сколько останется доплатить на месте после предоплаты (не ниже 0).
   double get _remainingAfterPrepay {
-    final price = _service?.price ?? 0;
-    final left = price - widget.master.prepayAmount;
+    final left = _finalPrice - _prepayAmount;
     return left < 0 ? 0 : left;
   }
 
@@ -943,6 +982,18 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
   void initState() {
     super.initState();
     _loadSlots(_date);
+    _loadClientPrepay();
+  }
+
+  /// Персональная предоплата: мастер/салон мог пометить именно
+  /// этого клиента как «только по предоплате» со своей суммой.
+  Future<void> _loadClientPrepay() async {
+    if (widget.master.userId.isEmpty) return;
+    try {
+      final rule = await _cloud.clientPrepayRule(widget.master.userId);
+      if (!mounted || rule == null) return;
+      setState(() => _clientPrepay = rule);
+    } catch (_) {}
   }
 
   @override
@@ -1084,16 +1135,33 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
           if (picked != null) masterId = picked;
         } catch (_) {}
       }
+      // Заметка «по Honey» — мастер видит, что запись пришла
+      // по акции, даже без отдельного поля в старой базе.
+      var notes = _notes.text.trim();
+      final offer = widget.offer;
+      if (offer != null && offer.isLive) {
+        notes = notes.isEmpty
+            ? 'По Honey «${offer.title}»'
+            : '$notes · По Honey «${offer.title}»';
+      }
       final booking = await _cloud.bookAppointment(
         masterId: masterId,
         serviceId: _service?.id,
         serviceName: _service?.name ?? custom,
         startsAt: startsAt,
         durationMinutes: _service?.durationMinutes ?? 60,
-        servicePrice: _service?.price ?? 0,
-        notes: _notes.text.trim(),
+        // Цена УЖЕ со скидкой Honey — это и есть сумма записи.
+        servicePrice: _finalPrice,
+        offerId: offer?.id,
+        notes: notes,
         prepaymentStatus: _needsPrepay ? 'claimed' : 'none',
       );
+      // Подаренный Honey — разовый: гасим после успешной записи.
+      if (offer != null && offer.isGift) {
+        try {
+          await _cloud.consumeGift(offer.id);
+        } catch (_) {}
+      }
       await PushNotificationService.sendPush(
         toUserId: booking.masterId,
         title: 'Новая заявка',
@@ -1125,6 +1193,40 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Баннер Honey, из которого пришла запись.
+            if (widget.offer != null) ...[
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .tertiaryContainer
+                      .withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      widget.offer!.isGift ? Icons.redeem : Icons.card_giftcard,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        widget.offer!.isLive
+                            ? 'Honey «${widget.offer!.title}»'
+                                '${widget.offer!.discountPercent > 0 ? ' · −${widget.offer!.discountPercent.toStringAsFixed(0)}%' : ''}'
+                            : 'Срок Honey «${widget.offer!.title}» истёк — '
+                                'скидка не применяется',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             if (widget.services.isNotEmpty)
               InputDecorator(
                 decoration: const InputDecoration(
@@ -1170,6 +1272,45 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                   border: OutlineInputBorder(),
                 ),
               ),
+            ],
+            // Цена выбранной услуги: со скидкой Honey — зачёркнутая
+            // старая + итоговая, без скидки — обычная.
+            if (_service != null && _service!.price > 0) ...[
+              const SizedBox(height: 8),
+              if (_offerApplies)
+                Row(
+                  children: [
+                    Text(
+                      formatMoney(_service!.price),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            decoration: TextDecoration.lineThrough,
+                            color: Theme.of(context).colorScheme.outline,
+                          ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.arrow_forward, size: 16),
+                    const SizedBox(width: 8),
+                    Text(
+                      formatMoney(_finalPrice),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '−${widget.offer!.discountPercent.toStringAsFixed(0)}%',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                    ),
+                  ],
+                )
+              else
+                Text(
+                  'Стоимость: ${formatMoney(_service!.price)}',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
             ],
             const SizedBox(height: 12),
             Row(
@@ -1268,8 +1409,8 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                         Expanded(
                           child: Text(
                             '${widget.master.isSalon ? 'Салон' : 'Мастер'} '
-                            'работает по предоплате: '
-                            '${formatMoney(widget.master.prepayAmount)}',
+                            'принимает вас по предоплате: '
+                            '${formatMoney(_prepayAmount)}',
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                         ),

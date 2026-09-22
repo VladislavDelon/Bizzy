@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app_theme.dart';
@@ -13,6 +16,8 @@ import 'geo_service.dart';
 import 'map_screens.dart';
 import 'master_public_profile.dart';
 import 'offers_screens.dart';
+import 'qr_share.dart';
+import 'work_hours.dart';
 
 /// Главный экран клиента: каталог мастеров, мои записи, профиль.
 class ClientHome extends StatefulWidget {
@@ -343,6 +348,31 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
     }
   }
 
+  /// Сканирование QR провайдера: код несёт его userId,
+  /// после сканирования сразу открываем публичный профиль.
+  Future<void> _openQrScanner() async {
+    final providerId = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const ProviderQrScanScreen()),
+    );
+    if (providerId == null || providerId.isEmpty || !mounted) return;
+    try {
+      final master = await _cloud.masterCard(providerId);
+      if (!mounted) return;
+      if (master == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Профиль по этому QR не найден')),
+        );
+        return;
+      }
+      await _openMaster(master);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось открыть профиль')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -351,6 +381,11 @@ class _ClientCatalogTabState extends State<ClientCatalogTab> {
           'Привет, ${widget.profile.name.isEmpty ? 'клиент' : widget.profile.name}!',
         ),
         actions: [
+          IconButton(
+            tooltip: 'Сканировать QR мастера',
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: _openQrScanner,
+          ),
           IconButton(
             tooltip: 'Мастера на карте',
             icon: const Icon(Icons.map_outlined),
@@ -788,13 +823,22 @@ class _ClientFavoritesTabState extends State<ClientFavoritesTab> {
 
 /// Карточка мастера: профиль, услуги, кнопка записи.
 class MasterDetailScreen extends StatefulWidget {
-  const MasterDetailScreen({super.key, required this.master, this.offer});
+  const MasterDetailScreen({
+    super.key,
+    required this.master,
+    this.offer,
+    this.prebookServiceIds = const [],
+  });
 
   final MasterCard master;
 
   /// Honey, из которого пришёл клиент — скидка применится
   /// к цене в диалоге записи.
   final SalonOffer? offer;
+
+  /// «Записаться снова»: id услуг прошлого визита — после загрузки
+  /// профиля диалог записи откроется сразу с выбранными услугами.
+  final List<int> prebookServiceIds;
 
   @override
   State<MasterDetailScreen> createState() => _MasterDetailScreenState();
@@ -877,6 +921,12 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
         _offers = offers;
         _loading = false;
       });
+      // «Записаться снова» — открываем диалог с услугами прошлого визита.
+      if (widget.prebookServiceIds.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _book(null, null, widget.prebookServiceIds);
+        });
+      }
     } catch (e, st) {
       await SyncLog.write('master_detail', '$e\n$st');
       if (!mounted) return;
@@ -887,7 +937,11 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
     }
   }
 
-  Future<void> _book([CloudServiceItem? service, SalonOffer? offer]) async {
+  Future<void> _book([
+    CloudServiceItem? service,
+    SalonOffer? offer,
+    List<int> serviceIds = const [],
+  ]) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => BookAppointmentDialog(
@@ -895,6 +949,7 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
         services: _services,
         offer: offer ?? widget.offer,
         initialService: service,
+        initialServiceIds: serviceIds,
       ),
     );
     if (result == true && mounted) Navigator.of(context).pop(true);
@@ -945,6 +1000,7 @@ class BookAppointmentDialog extends StatefulWidget {
     required this.services,
     this.offer,
     this.initialService,
+    this.initialServiceIds = const [],
   });
 
   final MasterCard master;
@@ -957,6 +1013,10 @@ class BookAppointmentDialog extends StatefulWidget {
   /// Услуга, по которой тапнули в профиле — сразу выбрана.
   final CloudServiceItem? initialService;
 
+  /// «Записаться снова»: id услуг прошлого визита — совпавшие
+  /// с текущим прайсом выбираются сразу.
+  final List<int> initialServiceIds;
+
   @override
   State<BookAppointmentDialog> createState() => _BookAppointmentDialogState();
 }
@@ -965,7 +1025,9 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
   final _cloud = CloudService();
   final _customService = TextEditingController();
   final _notes = TextEditingController();
-  CloudServiceItem? _service;
+
+  /// Выбранные услуги — клиент может взять несколько за один визит.
+  final Set<CloudServiceItem> _services = {};
   DateTime _date = DateTime.now();
   TimeOfDay _time = const TimeOfDay(hour: 9, minute: 0);
   DateTime? _selectedSlot;
@@ -974,6 +1036,12 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
   bool _saving = false;
   String? _error;
   bool _prepayDone = false;
+
+  /// Расписание провайдера — слоты строятся только внутри рабочих часов.
+  WorkWeek? _week;
+
+  /// Провайдер добавил клиента в чёрный список — запись закрыта.
+  bool _blocked = false;
 
   /// Персональное правило предоплаты от мастера/салона
   /// (сильнее общего prepayEnabled — задаётся конкретному клиенту).
@@ -986,7 +1054,15 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
       ? _clientPrepay!.amount
       : widget.master.prepayAmount;
 
-  /// Действует ли скидка Honey на выбранную услугу прямо сейчас.
+  /// Суммарная длительность визита: выбранные услуги складываются.
+  int get _totalDuration => _services.isEmpty
+      ? 60
+      : _services.fold(0, (sum, s) => sum + s.durationMinutes);
+
+  /// Полная цена без скидки.
+  double get _fullPrice => _services.fold(0.0, (sum, s) => sum + s.price);
+
+  /// Действует ли скидка Honey хотя бы на одну выбранную услугу.
   /// Использованный Honey скидку не даёт — только инфо-баннер.
   bool get _offerApplies {
     final o = widget.offer;
@@ -994,13 +1070,26 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
         o.isLive &&
         !o.used &&
         o.discountPercent > 0 &&
-        o.appliesTo(_service?.id);
+        (_services.isEmpty
+            ? o.appliesTo(null)
+            : _services.any((s) => o.appliesTo(s.id)));
   }
 
-  /// Итоговая цена с учётом скидки Honey (без скидки — обычная).
+  /// Итоговая цена: скидка применяется к каждой услуге, на которую
+  /// действует Honey; остальные идут по полной цене.
   double get _finalPrice {
-    final price = _service?.price ?? 0;
-    return _offerApplies ? widget.offer!.discountedPrice(price) : price;
+    final o = widget.offer;
+    if (o == null || !o.isLive || o.used || o.discountPercent <= 0) {
+      return _fullPrice;
+    }
+    if (_services.isEmpty) {
+      return o.appliesTo(null) ? o.discountedPrice(0) : 0;
+    }
+    return _services.fold(
+      0.0,
+      (sum, s) =>
+          sum + (o.appliesTo(s.id) ? o.discountedPrice(s.price) : s.price),
+    );
   }
 
   /// Сколько останется доплатить на месте после предоплаты (не ниже 0).
@@ -1009,17 +1098,43 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
     return left < 0 ? 0 : left;
   }
 
-  static const _workStart = TimeOfDay(hour: 9, minute: 0);
-  static const _workEnd = TimeOfDay(hour: 18, minute: 0);
-  static const _slotStepMinutes = 60;
-
   @override
   void initState() {
     super.initState();
     // Тап по услуге в профиле — она сразу выбрана в диалоге.
-    _service = widget.initialService;
+    if (widget.initialService != null) _services.add(widget.initialService!);
+    // «Записаться снова» — предвыбор услуг прошлого визита.
+    for (final id in widget.initialServiceIds) {
+      for (final s in widget.services) {
+        if (s.id == id) _services.add(s);
+      }
+    }
     _loadSlots(_date);
     _loadClientPrepay();
+    _loadWorkHours();
+    _checkBlocked();
+  }
+
+  /// Расписание мастера/салона: слоты строятся внутри рабочих часов,
+  /// выходные без окон. Не задано — дефолтные 9:00–18:00 каждый день.
+  Future<void> _loadWorkHours() async {
+    if (widget.master.userId.isEmpty) return;
+    try {
+      final raw = await _cloud.workHoursOf(widget.master.userId);
+      if (!mounted) return;
+      setState(() => _week = WorkWeek.fromJson(raw));
+      // Часы пришли позже первой загрузки — пересчитываем слоты.
+      await _loadSlots(_date);
+    } catch (_) {}
+  }
+
+  /// Чёрный список: провайдер закрыл запись этому клиенту.
+  Future<void> _checkBlocked() async {
+    if (widget.master.userId.isEmpty) return;
+    try {
+      final blocked = await _cloud.isBlockedBy(widget.master.userId);
+      if (blocked && mounted) setState(() => _blocked = true);
+    } catch (_) {}
   }
 
   /// Персональная предоплата: мастер/салон мог пометить именно
@@ -1048,32 +1163,13 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
         widget.master.userId,
         day,
       );
-      final duration = _service?.durationMinutes ?? 60;
-      final slots = <DateTime>[];
-      var current = DateTime(
-        day.year,
-        day.month,
-        day.day,
-        _workStart.hour,
-        _workStart.minute,
+      final slots = computeFreeSlots(
+        day: day,
+        durationMinutes: _totalDuration,
+        busy: bookings,
+        week: _week,
+        stepMinutes: 30,
       );
-      final end = DateTime(
-        day.year,
-        day.month,
-        day.day,
-        _workEnd.hour,
-        _workEnd.minute,
-      ).subtract(Duration(minutes: duration));
-      while (!current.isAfter(end)) {
-        final slotEnd = current.add(Duration(minutes: duration));
-        final overlap = bookings.any((b) {
-          final bStart = b.startsAt;
-          final bEnd = bStart.add(Duration(minutes: b.durationMinutes));
-          return current.isBefore(bEnd) && bStart.isBefore(slotEnd);
-        });
-        if (!overlap) slots.add(current);
-        current = current.add(const Duration(minutes: _slotStepMinutes));
-      }
       if (!mounted) return;
       setState(() {
         _slots = slots;
@@ -1148,7 +1244,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
   Future<void> _submit() async {
     if (_saving) return;
     final custom = _customService.text.trim();
-    if (_service == null && custom.isEmpty) {
+    if (_services.isEmpty && custom.isEmpty) {
       setState(() => _error = 'Выберите услугу или напишите свою');
       return;
     }
@@ -1199,13 +1295,18 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
       }
       final booking = await _cloud.bookAppointment(
         masterId: masterId,
-        serviceId: _service?.id,
-        serviceName: _service?.name ?? custom,
+        serviceId: _services.isEmpty ? null : _services.first.id,
+        serviceIds: _services.isEmpty
+            ? null
+            : _services.map((s) => s.id).toList(),
+        serviceName: _services.isEmpty
+            ? custom
+            : _services.map((s) => s.name).join(' + '),
         // Запись «в салон» — салон видит её и после назначения
         // мастеру. У частного мастера заявка личная.
         salonId: widget.master.isSalon ? widget.master.userId : null,
         startsAt: startsAt,
-        durationMinutes: _service?.durationMinutes ?? 60,
+        durationMinutes: _totalDuration,
         // Цена УЖЕ со скидкой Honey — это и есть сумма записи.
         servicePrice: _finalPrice,
         offerId: offer?.id,
@@ -1290,44 +1391,39 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
               ),
               const SizedBox(height: 12),
             ],
-            if (widget.services.isNotEmpty)
-              InputDecorator(
-                decoration: const InputDecoration(
-                  labelText: 'Услуга',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
-                isEmpty: _service == null,
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<CloudServiceItem?>(
-                    value: _service,
-                    isExpanded: true,
-                    isDense: true,
-                    items: [
-                      for (final s in widget.services)
-                        DropdownMenuItem(
-                          value: s,
-                          child: Text(
-                            '${s.name} • ${s.price.toStringAsFixed(0)}',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      const DropdownMenuItem<CloudServiceItem?>(
-                        value: null,
-                        child: Text('— Своя услуга —'),
-                      ),
-                    ],
-                    onChanged: (v) {
-                      setState(() => _service = v);
-                      _loadSlots(_date);
-                    },
-                  ),
+            if (widget.services.isNotEmpty) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Услуги — можно выбрать несколько',
+                  style: Theme.of(context).textTheme.labelLarge,
                 ),
               ),
-            if (_service == null) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (final s in widget.services)
+                    FilterChip(
+                      label: Text('${s.name} • ${s.price.toStringAsFixed(0)}'),
+                      selected: _services.contains(s),
+                      onSelected: (v) {
+                        setState(() {
+                          if (v) {
+                            _services.add(s);
+                          } else {
+                            _services.remove(s);
+                          }
+                        });
+                        _loadSlots(_date);
+                      },
+                    ),
+                ],
+              ),
+            ],
+            // Своя услуга — только когда ничего не выбрано из списка.
+            if (_services.isEmpty) ...[
               const SizedBox(height: 12),
               TextField(
                 controller: _customService,
@@ -1338,15 +1434,14 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                 ),
               ),
             ],
-            // Цена выбранной услуги: со скидкой Honey — зачёркнутая
-            // старая + итоговая, без скидки — обычная.
-            if (_service != null && _service!.price > 0) ...[
+            // Сумма визита: со скидкой Honey — зачёркнутая старая + итоговая.
+            if (_services.isNotEmpty && _fullPrice > 0) ...[
               const SizedBox(height: 8),
               if (_offerApplies)
                 Row(
                   children: [
                     Text(
-                      formatMoney(_service!.price),
+                      formatMoney(_fullPrice),
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         decoration: TextDecoration.lineThrough,
                         color: Theme.of(context).colorScheme.outline,
@@ -1362,18 +1457,11 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                         color: Theme.of(context).colorScheme.primary,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '−${widget.offer!.discountPercent.toStringAsFixed(0)}%',
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
                   ],
                 )
               else
                 Text(
-                  'Стоимость: ${formatMoney(_service!.price)}',
+                  'Итого: ${formatMoney(_fullPrice)} • $_totalDuration мин',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
             ],
@@ -1488,7 +1576,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
-                    if (_service != null && _service!.price > 0)
+                    if (_services.isNotEmpty && _fullPrice > 0)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
@@ -1558,6 +1646,14 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                 ),
               ),
             ],
+            if (_blocked) ...[
+              const SizedBox(height: 8),
+              Text(
+                '${widget.master.isSalon ? 'Салон' : 'Мастер'} '
+                'ограничил запись для вашего аккаунта',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 8),
               Text(
@@ -1574,7 +1670,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
           child: const Text('Отмена'),
         ),
         bizzyFilledButton(
-          onPressed: (_saving || (_needsPrepay && !_prepayDone))
+          onPressed: (_saving || _blocked || (_needsPrepay && !_prepayDone))
               ? null
               : _submit,
           child: Text(
@@ -1604,6 +1700,10 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
   bool _loading = true;
   bool _failed = false;
 
+  /// За сколько минут до записи приходит напоминание (настраивается).
+  int _reminderMinutes = 60;
+  static const _reminderKey = 'cloud_reminder_minutes';
+
   @override
   void initState() {
     super.initState();
@@ -1627,12 +1727,15 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
       ]);
       final bookings = results[0] as List<CloudBooking>;
       final ratings = results[1] as Map<int, int>;
+      final prefs = await SharedPreferences.getInstance();
+      _reminderMinutes = prefs.getInt(_reminderKey) ?? 60;
       if (!mounted) return;
       setState(() {
         _bookings = bookings;
         _myRatings = ratings;
       });
       await _scheduleReminders(bookings);
+      await _maybeNudgeRevisit(bookings);
     } catch (_) {
       if (!mounted) return;
       setState(() => _failed = true);
@@ -1642,7 +1745,7 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
   }
 
   Future<void> _scheduleReminders(List<CloudBooking> bookings) async {
-    const reminderMinutes = 30;
+    final reminderMinutes = _reminderMinutes;
     final now = DateTime.now();
     for (final b in bookings) {
       if (b.status == 'cancelled' || b.status == 'completed') {
@@ -1660,6 +1763,47 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
       } else {
         await PushNotificationService.cancelCloudReminder(b.id);
       }
+    }
+  }
+
+  /// «Давно не были»: если после последнего завершённого визита к мастеру
+  /// прошло 21+ дней и нет активной записи — мягкое локальное напоминание.
+  /// Не чаще раза в 14 дней на одного мастера.
+  Future<void> _maybeNudgeRevisit(List<CloudBooking> bookings) async {
+    final now = DateTime.now();
+    final lastVisit = <String, DateTime>{};
+    final nameByMaster = <String, String>{};
+    for (final b in bookings) {
+      nameByMaster[b.masterId] = b.masterName;
+      if (b.status == 'completed' &&
+          (lastVisit[b.masterId]?.isBefore(b.startsAt) ?? true)) {
+        lastVisit[b.masterId] = b.startsAt;
+      }
+    }
+    final activeMasters = bookings
+        .where(
+          (b) =>
+              (b.status == 'pending' || b.status == 'confirmed') &&
+              b.startsAt.isAfter(now),
+        )
+        .map((b) => b.masterId)
+        .toSet();
+    final prefs = await SharedPreferences.getInstance();
+    for (final e in lastVisit.entries) {
+      if (activeMasters.contains(e.key)) continue;
+      if (now.difference(e.value).inDays < 21) continue;
+      final key = 'revisit_nudge_${e.key}';
+      final lastNudge = DateTime.fromMillisecondsSinceEpoch(
+        prefs.getInt(key) ?? 0,
+      );
+      if (now.difference(lastNudge).inDays < 14) continue;
+      await prefs.setInt(key, now.millisecondsSinceEpoch);
+      final name = nameByMaster[e.key] ?? '';
+      await PushNotificationService.showLocal(
+        title: 'Давно не были${name.isEmpty ? '' : ' у $name'}',
+        body: 'Запишитесь снова — откройте Bizzy и выберите время',
+        payload: jsonEncode({'master_id': e.key}),
+      );
     }
   }
 
@@ -1725,11 +1869,13 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
 
   String _monthLabel(DateTime d) => '${_months[d.month - 1]} ${d.year}';
 
-  /// Повторная запись: открывает карточку того же мастера,
-  /// где клиент выбирает услугу и время заново.
+  /// Повторная запись: открывает профиль того же провайдера
+  /// (салон — если запись была через салон) с предвыбранными услугами.
   Future<void> _repeat(CloudBooking b) async {
     try {
-      final master = await _cloud.masterCard(b.masterId);
+      final master = await _cloud.masterCard(
+        b.salonId.isNotEmpty ? b.salonId : b.masterId,
+      );
       if (!mounted) return;
       if (master == null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1739,7 +1885,12 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
       }
       final booked = await Navigator.of(context).push<bool>(
         MaterialPageRoute(
-          builder: (context) => MasterDetailScreen(master: master),
+          builder: (context) => MasterDetailScreen(
+            master: master,
+            prebookServiceIds: b.serviceIds.isNotEmpty
+                ? b.serviceIds
+                : [if (b.serviceId != null) b.serviceId!],
+          ),
         ),
       );
       if (booked == true && mounted) {
@@ -1756,9 +1907,130 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
     }
   }
 
-  /// Детали записи + действия: повторить, оценить, отменить.
-  void _showDetails(CloudBooking b) {
+  /// Перенос записи клиентом: день → свободный слот → новое время.
+  Future<void> _reschedule(CloudBooking b) async {
+    final day = await showDatePicker(
+      context: context,
+      initialDate: b.startsAt.isAfter(DateTime.now())
+          ? b.startsAt
+          : DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (day == null || !mounted) return;
+
+    List<DateTime> slots = [];
+    var failed = false;
+    try {
+      final results = await Future.wait([
+        _cloud.masterBookingsForDay(b.masterId, day),
+        _cloud
+            .workHoursOf(b.masterId)
+            .then<Map<String, dynamic>?>((v) => v)
+            .catchError((_) => null),
+      ]);
+      slots = computeFreeSlots(
+        day: day,
+        durationMinutes: b.durationMinutes,
+        busy: (results[0] as List<CloudBooking>)
+            .where((x) => x.id != b.id)
+            .toList(),
+        week: WorkWeek.fromJson(results[1] as Map<String, dynamic>?),
+        stepMinutes: 30,
+      );
+    } catch (_) {
+      failed = true;
+    }
+    if (!mounted) return;
+
+    final picked = await showModalBottomSheet<DateTime>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Свободное время',
+                style: Theme.of(ctx).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              if (failed)
+                const Text('Не удалось загрузить слоты — попробуйте позже')
+              else if (slots.isEmpty)
+                const Text('На этот день свободных окон нет')
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final s in slots)
+                      ActionChip(
+                        label: Text(
+                          '${s.hour.toString().padLeft(2, '0')}:'
+                          '${s.minute.toString().padLeft(2, '0')}',
+                        ),
+                        onPressed: () => Navigator.of(ctx).pop(s),
+                      ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+
+    try {
+      await _cloud.rescheduleBooking(b.id, picked);
+      await PushNotificationService.cancelCloudReminder(b.id);
+      await PushNotificationService.scheduleCloudReminder(
+        id: b.id,
+        dateTime: picked,
+        reminderMinutes: _reminderMinutes,
+        title: 'Скоро запись',
+        body: '${b.serviceName} • ${_fmt(picked)}',
+      );
+      if (b.masterId.isNotEmpty) {
+        await PushNotificationService.sendPush(
+          toUserId: b.masterId,
+          title: 'Запись перенесена',
+          body:
+              '${b.clientName.isEmpty ? 'Клиент' : b.clientName} '
+              'перенёс запись на ${_fmt(picked)}',
+          data: {'appointment_id': b.id, 'status': b.status},
+        );
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Запись перенесена')));
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось перенести запись')),
+      );
+    }
+  }
+
+  /// Выбор интервала напоминания: сохраняется и применяется к записям.
+  Future<void> _setReminderMinutes(int minutes) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_reminderKey, minutes);
+    if (!mounted) return;
+    setState(() => _reminderMinutes = minutes);
+    await _scheduleReminders(_bookings);
+  }
+
+  /// Детали записи + действия: повторить, перенести, оценить, отменить.
+  Future<void> _showDetails(CloudBooking b) async {
     final myRating = _myRatings[b.id];
+    // Если я уже оценил визит — подтягиваю ответ мастера/салона.
+    final reply = myRating == null ? '' : await _cloud.ratingReplyFor(b.id);
+    if (!mounted) return;
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
@@ -1825,7 +2097,7 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                   leading: Icon(Icons.notes_outlined, color: scheme.primary),
                   title: Text(b.notes),
                 ),
-              if (myRating != null)
+              if (myRating != null) ...[
                 Row(
                   children: [
                     Icon(Icons.star, size: 16, color: Colors.amber),
@@ -1833,6 +2105,62 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                     Text('Ваша оценка: $myRating из 5'),
                   ],
                 ),
+                if (reply.isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest.withValues(
+                        alpha: 0.5,
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Ответ '
+                          '${b.masterName.isEmpty ? 'мастера' : b.masterName}',
+                          style: Theme.of(ctx).textTheme.labelSmall
+                              ?.copyWith(color: scheme.primary),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(reply),
+                      ],
+                    ),
+                  ),
+              ],
+              // Напоминание: за сколько до визита предупредить клиента.
+              if ((b.status == 'pending' || b.status == 'confirmed') &&
+                  b.startsAt.isAfter(DateTime.now())) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.notifications_outlined,
+                      size: 18,
+                      color: scheme.primary,
+                    ),
+                    const Text('Напомнить за:'),
+                    for (final m in [30, 60, 180, 1440])
+                      ChoiceChip(
+                        label: Text(
+                          m >= 1440
+                              ? '${m ~/ 1440} д'
+                              : m >= 60
+                              ? '${m ~/ 60} ч'
+                              : '$m мин',
+                        ),
+                        selected: _reminderMinutes == m,
+                        onSelected: (_) => _setReminderMinutes(m),
+                      ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 16),
               Wrap(
                 spacing: 8,
@@ -1853,8 +2181,18 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
                       _repeat(b);
                     },
                     icon: const Icon(Icons.repeat),
-                    label: const Text('Повторить запись'),
+                    label: const Text('Записаться снова'),
                   ),
+                  if ((b.status == 'pending' || b.status == 'confirmed') &&
+                      b.startsAt.isAfter(DateTime.now()))
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        _reschedule(b);
+                      },
+                      icon: const Icon(Icons.schedule),
+                      label: const Text('Перенести'),
+                    ),
                   if (b.status == 'pending' || b.status == 'confirmed')
                     OutlinedButton.icon(
                       onPressed: () {

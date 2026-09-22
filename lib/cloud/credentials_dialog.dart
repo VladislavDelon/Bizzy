@@ -52,7 +52,8 @@ Future<void> showCredentialsEditor(BuildContext context) async {
                 labelText: 'Повторите новый пароль',
                 border: OutlineInputBorder(),
               ),
-              validator: (v) => v != newCtrl.text ? 'Пароли не совпадают' : null,
+              validator: (v) =>
+                  v != newCtrl.text ? 'Пароли не совпадают' : null,
             ),
           ],
         ),
@@ -90,14 +91,14 @@ Future<void> showCredentialsEditor(BuildContext context) async {
       password: password.isNotEmpty ? password : null,
     );
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Данные для входа обновлены')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Данные для входа обновлены')));
   } catch (e) {
     await SyncLog.write('credentials', e.toString());
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Не удалось обновить данные')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Не удалось обновить данные')));
   }
 }

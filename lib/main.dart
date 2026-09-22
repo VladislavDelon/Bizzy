@@ -10,7 +10,11 @@ import 'package:bizzy_app/cloud/cloud_service.dart';
 import 'package:bizzy_app/cloud/credentials_dialog.dart';
 import 'package:bizzy_app/cloud/fan_push.dart';
 import 'package:bizzy_app/cloud/master_screens.dart';
+import 'package:bizzy_app/cloud/blacklist_screen.dart';
 import 'package:bizzy_app/cloud/offers_screens.dart';
+import 'package:bizzy_app/cloud/onboarding_screen.dart';
+import 'package:bizzy_app/cloud/provider_stats_screen.dart';
+import 'package:bizzy_app/cloud/team_schedule_screen.dart';
 import 'package:bizzy_app/cloud/supabase_config.dart';
 import 'package:bizzy_app/currency.dart';
 import 'package:bizzy_app/notifications/notifications_screen.dart';
@@ -3242,6 +3246,7 @@ class _MainShellState extends State<MainShell> {
         onEdit: _showAppointmentDialog,
         onDelete: _deleteAppointment,
         onTasksChanged: _loadTasks,
+        onRefresh: _loadAppointments,
       ),
       // У салона вторая вкладка — команда мастеров (ключ + облачный
       // список + локальный справочник), у частного мастера — «Мои дела».
@@ -3414,6 +3419,7 @@ class HomeTab extends StatefulWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onTasksChanged,
+    this.onRefresh,
   });
 
   final AppointmentsDatabase database;
@@ -3430,6 +3436,9 @@ class HomeTab extends StatefulWidget {
   onEdit;
   final Future<void> Function(int) onDelete;
   final Future<void> Function() onTasksChanged;
+
+  /// Перечитать записи после действий над облачной заявкой.
+  final Future<void> Function()? onRefresh;
 
   @override
   State<HomeTab> createState() => _HomeTabState();
@@ -3472,6 +3481,28 @@ class _HomeTabState extends State<HomeTab> {
 
   void _selectDay(DateTime day) {
     widget.selectedDayNotifier.value = _startOfDay(day);
+  }
+
+  /// Тап по записи: облачная заявка открывает шторку действий
+  /// (завершить/отменить/оценить клиента), локальная — редактор.
+  Future<void> _openAppointment(Appointment a) async {
+    if (cloudSignedIn && a.externalId.startsWith('cloud:')) {
+      final id = int.tryParse(a.externalId.substring(6));
+      if (id != null) {
+        await showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          showDragHandle: true,
+          builder: (context) => CloudBookingSheet(
+            bookingId: id,
+            onChanged: () => widget.onRefresh?.call(),
+          ),
+        );
+        await widget.onRefresh?.call();
+        return;
+      }
+    }
+    await widget.onEdit(appointment: a, initialDate: a.dateTime);
   }
 
   Future<void> _openTasks() async {
@@ -3773,34 +3804,34 @@ class _HomeTabState extends State<HomeTab> {
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
-                            PopupMenuButton<String>(
-                              onSelected: (value) {
-                                if (value == 'edit') {
-                                  widget.onEdit(
-                                    appointment: a,
-                                    initialDate: a.dateTime,
-                                  );
-                                } else if (value == 'delete') {
-                                  widget.onDelete(a.id!);
-                                }
-                              },
-                              itemBuilder: (context) => const [
-                                PopupMenuItem(
-                                  value: 'edit',
-                                  child: Text('Редактировать'),
-                                ),
-                                PopupMenuItem(
-                                  value: 'delete',
-                                  child: Text('Удалить'),
-                                ),
-                              ],
-                            ),
+                            // У облачной заявки локальные правки/удаление
+                            // бессмысленны — действия в её шторке.
+                            if (!a.externalId.startsWith('cloud:'))
+                              PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'edit') {
+                                    widget.onEdit(
+                                      appointment: a,
+                                      initialDate: a.dateTime,
+                                    );
+                                  } else if (value == 'delete') {
+                                    widget.onDelete(a.id!);
+                                  }
+                                },
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Редактировать'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Удалить'),
+                                  ),
+                                ],
+                              ),
                           ],
                         ),
-                        onTap: () => widget.onEdit(
-                          appointment: a,
-                          initialDate: a.dateTime,
-                        ),
+                        onTap: () => _openAppointment(a),
                       ),
                     );
                   },
@@ -4227,6 +4258,7 @@ class _ClientsTabState extends State<ClientsTab> {
                 company: widget.company,
                 appointments: widget.appointments,
                 loading: widget.appointmentsLoading,
+                cloudRole: widget.cloudRole,
               ),
             )
           else ...[
@@ -5163,12 +5195,16 @@ class FinanceTab extends StatefulWidget {
     required this.company,
     required this.appointments,
     required this.loading,
+    this.cloudRole = 'master',
   });
 
   final AppointmentsDatabase database;
   final Company company;
   final List<Appointment> appointments;
   final bool loading;
+
+  /// 'master' | 'salon' — для облачной статистики по команде.
+  final String cloudRole;
 
   @override
   State<FinanceTab> createState() => _FinanceTabState();
@@ -5269,6 +5305,21 @@ class _FinanceTabState extends State<FinanceTab> {
             ],
           ),
         ),
+        // Облачная статистика: заявки каталога, у салона — по команде.
+        if (cloudSignedIn)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: OutlinedButton.icon(
+              onPressed: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (context) =>
+                      ProviderStatsScreen(isSalon: widget.cloudRole == 'salon'),
+                ),
+              ),
+              icon: const Icon(Icons.insights_outlined, size: 18),
+              label: const Text('Статистика по записям Bizzy'),
+            ),
+          ),
         if (serviceNames.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -5583,6 +5634,27 @@ class _MoreTabState extends State<MoreTab> {
               ),
             ),
           ),
+        if (cloudSignedIn && !widget.offlineMode) ...[
+          if (widget.cloudRole == 'salon')
+            ListTile(
+              leading: const Icon(Icons.calendar_view_week_outlined),
+              title: const Text('Расписание команды'),
+              subtitle: const Text('Записи мастеров по дням'),
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (context) => const TeamScheduleScreen(),
+                ),
+              ),
+            ),
+          ListTile(
+            leading: const Icon(Icons.block),
+            title: const Text('Чёрный список'),
+            subtitle: const Text('Клиенты без права записи'),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (context) => const BlacklistScreen()),
+            ),
+          ),
+        ],
         ListTile(
           leading: const Icon(Icons.settings),
           title: const Text('Настройки'),
@@ -7182,6 +7254,21 @@ class _MasterBridgeState extends State<_MasterBridge> {
         await CloudService().ensureMasterCard();
       } catch (_) {
         // Каталог не критичен для локальной работы.
+      }
+      // Мастер настройки для новых мастеров и салонов — с кнопкой
+      // «Пропустить». Флаг onboarded пишется в профиль, повторно
+      // не показывается; на старой базе колонки нет → считается пройденным.
+      if (!widget.profile.onboarded) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (context) =>
+                  OnboardingScreen(isSalon: widget.profile.isSalon),
+            ),
+          );
+        });
+        return;
       }
       // Автоматически открываем анкету только у частного мастера —
       // салон сразу попадает в рабочее место.

@@ -34,12 +34,14 @@ class GeoService {
     final q = address.trim();
     if (q.isEmpty) return null;
     try {
-      final uri = Uri.parse('$_base/search').replace(queryParameters: {
-        'q': q,
-        'format': 'jsonv2',
-        'limit': '1',
-        'addressdetails': '0',
-      });
+      final uri = Uri.parse('$_base/search').replace(
+        queryParameters: {
+          'q': q,
+          'format': 'jsonv2',
+          'limit': '1',
+          'addressdetails': '0',
+        },
+      );
       final res = await http
           .get(uri, headers: _headers)
           .timeout(const Duration(seconds: 10));
@@ -60,12 +62,14 @@ class GeoService {
   /// Координаты → адрес (для подстановки в поле после выбора точки на карте).
   Future<GeoAddress?> reverseGeocode(double lat, double lng) async {
     try {
-      final uri = Uri.parse('$_base/reverse').replace(queryParameters: {
-        'lat': '$lat',
-        'lon': '$lng',
-        'format': 'jsonv2',
-        'zoom': '17',
-      });
+      final uri = Uri.parse('$_base/reverse').replace(
+        queryParameters: {
+          'lat': '$lat',
+          'lon': '$lng',
+          'format': 'jsonv2',
+          'zoom': '17',
+        },
+      );
       final res = await http
           .get(uri, headers: _headers)
           .timeout(const Duration(seconds: 10));
@@ -102,23 +106,20 @@ class GeoService {
       );
     }
     final pos = await Geolocator.getCurrentPosition(
-      locationSettings:
-          const LocationSettings(timeLimit: Duration(seconds: 15)),
+      locationSettings: const LocationSettings(
+        timeLimit: Duration(seconds: 15),
+      ),
     );
     return GeoPoint(pos.latitude, pos.longitude);
   }
 
   /// Расстояние по прямой в километрах (формула гаверсинуса).
-  static double distanceKm(
-    double lat1,
-    double lng1,
-    double lat2,
-    double lng2,
-  ) {
+  static double distanceKm(double lat1, double lng1, double lat2, double lng2) {
     const r = 6371.0; // радиус Земли, км
     final dLat = _deg(lat2 - lat1);
     final dLng = _deg(lng2 - lng1);
-    final a = sin(dLat / 2) * sin(dLat / 2) +
+    final a =
+        sin(dLat / 2) * sin(dLat / 2) +
         cos(_deg(lat1)) * cos(_deg(lat2)) * sin(dLng / 2) * sin(dLng / 2);
     return r * 2 * atan2(sqrt(a), sqrt(1 - a));
   }

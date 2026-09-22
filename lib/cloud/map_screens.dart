@@ -13,12 +13,12 @@ const LatLng kDefaultMapCenter = LatLng(55.751244, 37.618423);
 /// языке региона (в РУ/КЗ — на русском). Работает без ключа,
 /// тайлы отдаются с CDN — грузится быстрее Wikimedia/OSM.
 TileLayer osmTileLayer() => TileLayer(
-      urlTemplate:
-          'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-      subdomains: const ['a', 'b', 'c', 'd'],
-      userAgentPackageName: 'com.example.bizzy_app',
-      maxZoom: 19,
-    );
+  urlTemplate:
+      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+  subdomains: const ['a', 'b', 'c', 'd'],
+  userAgentPackageName: 'com.example.bizzy_app',
+  maxZoom: 19,
+);
 
 /// Синяя точка «я на карте».
 class _MyLocationMarker extends StatelessWidget {
@@ -33,9 +33,7 @@ class _MyLocationMarker extends StatelessWidget {
         color: Colors.blueAccent,
         shape: BoxShape.circle,
         border: Border.all(color: Colors.white, width: 3),
-        boxShadow: const [
-          BoxShadow(color: Colors.black26, blurRadius: 6),
-        ],
+        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
       ),
     );
   }
@@ -94,8 +92,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
             options: MapOptions(
               initialCenter: center,
               initialZoom: _picked != null ? 15 : 10,
-              onTap: (tapPosition, point) =>
-                  setState(() => _picked = point),
+              onTap: (tapPosition, point) => setState(() => _picked = point),
             ),
             children: [
               osmTileLayer(),
@@ -133,7 +130,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
               child: Text(
                 _picked == null
                     ? 'Определяем ваше положение…\n'
-                        'Можно коснуться карты и поставить метку'
+                          'Можно коснуться карты и поставить метку'
                     : 'Метку можно передвинуть новым касанием',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall,
@@ -211,12 +208,13 @@ class _MastersMapScreenState extends State<MastersMapScreen> {
     if (_myLat != null && _myLng != null) {
       return LatLng(_myLat!, _myLng!);
     }
-    final withCoords =
-        widget.masters.where((m) => m.hasLocation).toList();
+    final withCoords = widget.masters.where((m) => m.hasLocation).toList();
     if (withCoords.isEmpty) return kDefaultMapCenter;
-    final lat = withCoords.map((m) => m.lat!).reduce((a, b) => a + b) /
+    final lat =
+        withCoords.map((m) => m.lat!).reduce((a, b) => a + b) /
         withCoords.length;
-    final lng = withCoords.map((m) => m.lng!).reduce((a, b) => a + b) /
+    final lng =
+        withCoords.map((m) => m.lng!).reduce((a, b) => a + b) /
         withCoords.length;
     return LatLng(lat, lng);
   }
@@ -261,14 +259,17 @@ class _MastersMapScreenState extends State<MastersMapScreen> {
                         ),
                         Row(
                           children: [
-                            const Icon(Icons.star,
-                                size: 14, color: Colors.amber),
+                            const Icon(
+                              Icons.star,
+                              size: 14,
+                              color: Colors.amber,
+                            ),
                             const SizedBox(width: 4),
                             Text(
                               master.ratingCount == 0
                                   ? 'Новый'
                                   : '${master.ratingAvg.toStringAsFixed(1)} '
-                                      '(${master.ratingCount})',
+                                        '(${master.ratingCount})',
                               style: Theme.of(ctx).textTheme.bodySmall,
                             ),
                           ],

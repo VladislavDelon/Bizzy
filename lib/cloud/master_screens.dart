@@ -13,6 +13,10 @@ import 'fan_push.dart';
 import 'geo_service.dart';
 import 'map_screens.dart';
 import 'master_public_profile.dart';
+import 'provider_reviews_screen.dart';
+import 'qr_share.dart';
+import 'team_schedule_screen.dart';
+import 'work_hours.dart';
 
 /// Экран профиля мастера/салона: категория, описание, рейтинг.
 /// Показывается при первом входе мастера и из «Ещё».
@@ -979,6 +983,52 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                     ),
                   ],
                   const SizedBox(height: 12),
+                  Card(
+                    margin: EdgeInsets.zero,
+                    child: Column(
+                      children: [
+                        ListTile(
+                          leading: const Icon(Icons.schedule),
+                          title: const Text('Рабочие часы'),
+                          subtitle: const Text(
+                            'Когда клиенты могут записаться',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).push<void>(
+                            MaterialPageRoute(
+                              builder: (context) => const WorkHoursScreen(),
+                            ),
+                          ),
+                        ),
+                        const Divider(height: 1, indent: 16, endIndent: 16),
+                        ListTile(
+                          leading: const Icon(Icons.reviews_outlined),
+                          title: const Text('Отзывы обо мне'),
+                          subtitle: const Text('Оценки клиентов и ответы'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).push<void>(
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  const ProviderReviewsScreen(),
+                            ),
+                          ),
+                        ),
+                        const Divider(height: 1, indent: 16, endIndent: 16),
+                        ListTile(
+                          leading: const Icon(Icons.qr_code),
+                          title: const Text('Поделиться профилем'),
+                          subtitle: const Text('QR-код для клиентов'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => showProviderQrDialog(
+                            context,
+                            name: _nameController.text.trim(),
+                            userId: _cloud.uid ?? '',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   FilledButton.tonalIcon(
                     onPressed: _saving
                         ? null
@@ -1322,6 +1372,16 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
         title: const Text('Заявки клиентов'),
         actions: [
           if (_isSalon)
+            IconButton(
+              tooltip: 'Расписание команды',
+              onPressed: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (context) => const TeamScheduleScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.calendar_view_week_outlined),
+            ),
+          if (_isSalon)
             PopupMenuButton<String>(
               tooltip: 'Назначение записей',
               onSelected: (v) {
@@ -1638,6 +1698,9 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
   bool _prepayRequired = false;
   bool _prepayBusy = false;
 
+  /// Клиент в чёрном списке — запись ему запрещена.
+  bool _blocked = false;
+
   @override
   void initState() {
     super.initState();
@@ -1759,10 +1822,17 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
       _failed = false;
     });
     try {
-      final reviews = await _cloud.clientReviews(widget.clientId);
+      final results = await Future.wait([
+        _cloud.clientReviews(widget.clientId),
+        _cloud
+            .myBlockedClientIds()
+            .then<Set<String>>((v) => v)
+            .catchError((_) => <String>{}),
+      ]);
       if (!mounted) return;
       setState(() {
-        _reviews = reviews;
+        _reviews = results[0] as List<ClientReview>;
+        _blocked = (results[1] as Set<String>).contains(widget.clientId);
         _loading = false;
       });
     } catch (_) {
@@ -1778,6 +1848,52 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     if (widget.clientPhone.isEmpty) return;
     final uri = Uri.parse('tel:${widget.clientPhone}');
     await launchUrl(uri);
+  }
+
+  /// Чёрный список: клиент не сможет записаться ко мне/салону.
+  Future<void> _toggleBlock() async {
+    final name = widget.clientName.isEmpty ? 'Клиента' : widget.clientName;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(_blocked ? 'Разблокировать?' : 'В чёрный список?'),
+        content: Text(
+          _blocked
+              ? '$name снова сможет записываться к вам.'
+              : '$name не сможет записываться к вам — существующие '
+                    'записи останутся.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(_blocked ? 'Разблокировать' : 'Заблокировать'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      if (_blocked) {
+        await _cloud.unblockClient(widget.clientId);
+      } else {
+        await _cloud.blockClient(widget.clientId);
+      }
+      if (!mounted) return;
+      setState(() => _blocked = !_blocked);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_blocked ? 'Клиент в чёрном списке' : 'Разблокирован'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Не удалось сохранить')));
+    }
   }
 
   String _fmt(DateTime dt) =>
@@ -1800,6 +1916,14 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
               onPressed: _call,
               icon: const Icon(Icons.call),
             ),
+          IconButton(
+            tooltip: _blocked ? 'Разблокировать' : 'В чёрный список',
+            onPressed: _toggleBlock,
+            icon: Icon(
+              _blocked ? Icons.block : Icons.block_outlined,
+              color: _blocked ? Theme.of(context).colorScheme.error : null,
+            ),
+          ),
         ],
       ),
       body: _loading
@@ -1828,6 +1952,19 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                           : Text(widget.clientPhone),
                     ),
                   ),
+                  if (_blocked)
+                    Card(
+                      color: Theme.of(context).colorScheme.errorContainer
+                          .withValues(alpha: 0.4),
+                      child: ListTile(
+                        leading: Icon(
+                          Icons.block,
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                        title: const Text('В чёрном списке'),
+                        subtitle: const Text('Запись этому клиенту запрещена'),
+                      ),
+                    ),
                   const SizedBox(height: 8),
                   // Персональная предоплата для этого клиента.
                   Card(
@@ -2060,6 +2197,459 @@ class _RateClientDialogState extends State<RateClientDialog> {
         FilledButton(
           onPressed: _saving ? null : _submit,
           child: const Text('Отправить'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Шторка записи из календаря («Записи»): детали облачной заявки
+/// + завершение, отмена и оценка клиента — те же действия,
+/// что в «Заявках клиентов».
+class CloudBookingSheet extends StatefulWidget {
+  const CloudBookingSheet({super.key, required this.bookingId, this.onChanged});
+
+  final int bookingId;
+
+  /// Дёргается после изменения заявки — родитель перечитывает календарь.
+  final VoidCallback? onChanged;
+
+  @override
+  State<CloudBookingSheet> createState() => _CloudBookingSheetState();
+}
+
+class _CloudBookingSheetState extends State<CloudBookingSheet> {
+  final _cloud = CloudService();
+  CloudBooking? _booking;
+  final _ratedIds = <int>{};
+  bool _loading = true;
+  bool _failed = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    try {
+      final results = await Future.wait([
+        _cloud.bookingById(widget.bookingId),
+        _cloud.myClientReviews().catchError((_) => <ClientReview>[]),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _booking = results[0] as CloudBooking?;
+        _ratedIds
+          ..clear()
+          ..addAll([
+            for (final r in results[1] as List<ClientReview>) r.bookingId,
+          ]);
+        _loading = false;
+      });
+    } catch (e, st) {
+      await SyncLog.write('bookingSheet', '$e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _failed = true;
+        _loading = false;
+      });
+    }
+  }
+
+  String _statusLabel(String status) => switch (status) {
+    'pending' => 'Новая заявка',
+    'confirmed' => 'Подтверждена',
+    'cancelled' => 'Отменена',
+    'completed' => 'Завершена',
+    _ => status,
+  };
+
+  Color _statusColor(String status) => switch (status) {
+    'pending' => Colors.orange,
+    'confirmed' => Colors.green,
+    'cancelled' => Colors.red,
+    'completed' => Colors.blueGrey,
+    _ => Colors.grey,
+  };
+
+  String _fmt(DateTime dt) =>
+      '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year} '
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+  Future<void> _setStatus(CloudBooking b, String status) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await _cloud.setBookingStatus(b.id, status);
+      widget.onChanged?.call();
+      if (b.clientId.isNotEmpty) {
+        final (title, body) = switch (status) {
+          'confirmed' => (
+            'Запись подтверждена',
+            'Мастер принял заявку на ${b.serviceName}',
+          ),
+          'cancelled' => (
+            'Запись отменена',
+            'Мастер отменил заявку на ${b.serviceName}',
+          ),
+          'completed' => (
+            'Запись завершена',
+            'Мастер завершил приём на ${b.serviceName}',
+          ),
+          _ => (null, null),
+        };
+        if (title != null && body != null) {
+          await PushNotificationService.sendPush(
+            toUserId: b.clientId,
+            title: title,
+            body: body,
+            data: {'appointment_id': b.id, 'status': status},
+          );
+        }
+      }
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось обновить статус')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _confirmPrepay(CloudBooking b) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await _cloud.setPrepaymentStatus(b.id, 'confirmed');
+      widget.onChanged?.call();
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось подтвердить оплату')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _rate(CloudBooking b) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => RateClientDialog(booking: b),
+    );
+    if (ok == true) {
+      widget.onChanged?.call();
+      await _load();
+    }
+  }
+
+  /// Перенос записи: день → свободный слот → новое время в облаке.
+  Future<void> _reschedule(CloudBooking b) async {
+    final day = await showDatePicker(
+      context: context,
+      initialDate: b.startsAt.isAfter(DateTime.now())
+          ? b.startsAt
+          : DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (day == null || !mounted) return;
+
+    // Свободные слоты дня — по рабочим часам минус занятые записи.
+    List<DateTime> slots = [];
+    var slotsFailed = false;
+    try {
+      final results = await Future.wait([
+        _cloud.masterBookingsForDay(b.masterId, day),
+        _cloud
+            .workHoursOf(b.masterId)
+            .then<Map<String, dynamic>?>((v) => v)
+            .catchError((_) => null),
+      ]);
+      slots = computeFreeSlots(
+        day: day,
+        durationMinutes: b.durationMinutes,
+        busy: results[0] as List<CloudBooking>,
+        week: WorkWeek.fromJson(results[1] as Map<String, dynamic>?),
+      );
+    } catch (_) {
+      slotsFailed = true;
+    }
+    if (!mounted) return;
+
+    final picked = await showModalBottomSheet<DateTime>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Свободное время',
+                style: Theme.of(ctx).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              if (slotsFailed)
+                const Text('Не удалось загрузить слоты — попробуйте позже')
+              else if (slots.isEmpty)
+                const Text('На этот день свободных окон нет')
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final s in slots)
+                      ActionChip(
+                        label: Text(
+                          '${s.hour.toString().padLeft(2, '0')}:'
+                          '${s.minute.toString().padLeft(2, '0')}',
+                        ),
+                        onPressed: () => Navigator.of(ctx).pop(s),
+                      ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      await _cloud.rescheduleBooking(b.id, picked);
+      widget.onChanged?.call();
+      if (b.clientId.isNotEmpty) {
+        await PushNotificationService.sendPush(
+          toUserId: b.clientId,
+          title: 'Запись перенесена',
+          body: '${b.serviceName} — новое время ${_fmt(picked)}',
+          data: {'appointment_id': b.id, 'status': b.status},
+        );
+      }
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось перенести запись')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _openClient(CloudBooking b) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => ClientDetailScreen(
+          clientId: b.clientId,
+          clientName: b.clientName,
+          clientPhone: b.clientPhone,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _call(String phone) async {
+    if (phone.isEmpty) return;
+    await launchUrl(Uri.parse('tel:$phone'));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final b = _booking;
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 8,
+          bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: _loading
+            ? const SizedBox(
+                height: 180,
+                child: Center(child: CircularProgressIndicator()),
+              )
+            : _failed || b == null
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 24),
+                  const Text('Не удалось загрузить запись'),
+                  const SizedBox(height: 8),
+                  FilledButton.tonal(
+                    onPressed: _load,
+                    child: const Text('Повторить'),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+              )
+            : _buildContent(context, b),
+      ),
+    );
+  }
+
+  Widget _buildContent(BuildContext context, CloudBooking b) {
+    final rated = _ratedIds.contains(b.id);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                b.serviceName.isEmpty ? 'Запись' : b.serviceName,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            Chip(
+              label: Text(_statusLabel(b.status)),
+              backgroundColor: _statusColor(b.status).withValues(alpha: 0.15),
+              side: BorderSide.none,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '${b.clientName.isEmpty ? 'Клиент' : b.clientName}'
+          '${b.clientPhone.isEmpty ? '' : ' • ${b.clientPhone}'}',
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${_fmt(b.startsAt)} • ${b.durationMinutes} мин'
+          '${b.masterName.isEmpty || b.masterName == 'Я' ? '' : ' • ${b.masterName}'}',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        if (b.notes.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(b.notes, style: Theme.of(context).textTheme.bodySmall),
+        ],
+        if (b.prepaymentStatus != 'none') ...[
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(
+                Icons.payments_outlined,
+                size: 16,
+                color: b.prepaymentStatus == 'confirmed'
+                    ? Colors.green
+                    : Colors.orange,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  b.prepaymentStatus == 'confirmed'
+                      ? 'Предоплата получена'
+                      : 'Клиент отметил предоплату — проверьте поступление',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
+        ],
+        const Divider(height: 24),
+        if (b.status == 'pending') ...[
+          FilledButton.icon(
+            onPressed: _busy ? null : () => _setStatus(b, 'confirmed'),
+            icon: const Icon(Icons.check),
+            label: const Text('Подтвердить'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _reschedule(b),
+            icon: const Icon(Icons.schedule),
+            label: const Text('Перенести'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _setStatus(b, 'cancelled'),
+            icon: const Icon(Icons.close),
+            label: const Text('Отклонить'),
+          ),
+        ],
+        if (b.status == 'confirmed') ...[
+          FilledButton.icon(
+            onPressed: _busy ? null : () => _setStatus(b, 'completed'),
+            icon: const Icon(Icons.done_all),
+            label: const Text('Завершить'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _reschedule(b),
+            icon: const Icon(Icons.schedule),
+            label: const Text('Перенести'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _setStatus(b, 'cancelled'),
+            icon: const Icon(Icons.close),
+            label: const Text('Отменить запись'),
+          ),
+        ],
+        if (b.status == 'completed' && b.clientId.isNotEmpty)
+          rated
+              ? Row(
+                  children: [
+                    const Icon(
+                      Icons.check_circle,
+                      size: 18,
+                      color: Colors.green,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Оценка отправлена',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                )
+              : FilledButton.tonalIcon(
+                  onPressed: _busy ? null : () => _rate(b),
+                  icon: const Icon(Icons.star),
+                  label: const Text('Оценить клиента'),
+                ),
+        if (b.prepaymentStatus == 'claimed') ...[
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            onPressed: _busy ? null : () => _confirmPrepay(b),
+            icon: const Icon(Icons.payments_outlined),
+            label: const Text('Оплата получена'),
+          ),
+        ],
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            if (b.clientId.isNotEmpty)
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: () => _openClient(b),
+                  icon: const Icon(Icons.person),
+                  label: const Text('Профиль клиента'),
+                ),
+              ),
+            if (b.clientPhone.isNotEmpty)
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: () => _call(b.clientPhone),
+                  icon: const Icon(Icons.call),
+                  label: const Text('Позвонить'),
+                ),
+              ),
+          ],
         ),
       ],
     );

@@ -56,6 +56,10 @@
 	<true/>
 	<key>NSContactsUsageDescription</key>
 	<string>Приложение импортирует выбранные контакты из телефона в справочник клиентов.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Камера нужна для сканирования QR-кода мастера или салона.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Фото нужны для аватара и портфолио.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Геопозиция нужна, чтобы показывать мастеров и салоны рядом с вами и ставить точку на карте.</string>
 	<key>UILaunchStoryboardName</key>

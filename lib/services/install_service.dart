@@ -10,9 +10,10 @@ class InstallService {
   static Future<ApkInfo?> getApkInfo(String path) async {
     if (!Platform.isAndroid) return null;
     try {
-      final map = await _channel.invokeMapMethod<String, Object?>('getApkInfo', {
-        'path': path,
-      });
+      final map = await _channel.invokeMapMethod<String, Object?>(
+        'getApkInfo',
+        {'path': path},
+      );
       if (map == null) return null;
       return ApkInfo(
         packageName: (map['packageName'] as String?) ?? '',
@@ -28,10 +29,9 @@ class InstallService {
   static Future<String?> getInstalledSignature(String packageName) async {
     if (!Platform.isAndroid) return null;
     try {
-      return await _channel.invokeMethod<String>(
-        'getInstalledSignature',
-        {'packageName': packageName},
-      );
+      return await _channel.invokeMethod<String>('getInstalledSignature', {
+        'packageName': packageName,
+      });
     } catch (e) {
       return null;
     }

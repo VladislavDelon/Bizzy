@@ -264,6 +264,7 @@ class CloudProfile {
     this.lng,
     this.createdAt,
     this.phonePublic = true,
+    this.onboarded = true,
   });
 
   final String id;
@@ -278,6 +279,10 @@ class CloudProfile {
 
   /// Клиент разрешает показывать свой номер мастерам/салонам.
   final bool phonePublic;
+
+  /// Мастер/салон прошёл или пропустил мастер настройки.
+  /// В старой базе колонки нет — считаем «пройдено».
+  final bool onboarded;
 
   bool get isMaster => role == 'master';
   bool get isSalon => role == 'salon';
@@ -295,6 +300,7 @@ class CloudProfile {
     lng: map['lng'] == null ? null : _parseDouble(map['lng']),
     createdAt: _parseDateTime(map['created_at']),
     phonePublic: _parseBool(map['phone_public'], fallback: true),
+    onboarded: _parseBool(map['onboarded'], fallback: true),
   );
 
   Map<String, dynamic> toMap() => {
@@ -536,12 +542,18 @@ class CloudBooking {
     this.servicePrice = 0,
     this.prepaymentStatus = 'none',
     this.createdAt,
+    this.serviceIds = const [],
+    this.salonId = '',
   });
 
   final int id;
   final String clientId;
   final String masterId;
   final int? serviceId;
+
+  /// Несколько услуг за визит — все id выбранных услуг.
+  /// Пусто в старой базе/старой записи — тогда одна услуга.
+  final List<int> serviceIds;
   final String serviceName;
   final DateTime startsAt;
   final int durationMinutes;
@@ -559,6 +571,10 @@ class CloudBooking {
 
   /// 'none' | 'claimed' (клиент отметил оплату) | 'confirmed' (мастер подтвердил).
   final String prepaymentStatus;
+
+  /// Заявка пришла через салон — её владелец для повторной записи
+  /// и для отображения у салона. Пусто — личная заявка мастера.
+  final String salonId;
 
   /// Когда создана заявка — салон показывает мастеру только записи
   /// после его вступления в команду (salon_since).
@@ -582,6 +598,7 @@ class CloudBooking {
     String? masterAddress,
     double? servicePrice,
     String? prepaymentStatus,
+    String? salonId,
   }) => CloudBooking(
     id: id ?? this.id,
     clientId: clientId ?? this.clientId,
@@ -598,6 +615,7 @@ class CloudBooking {
     masterAddress: masterAddress ?? this.masterAddress,
     servicePrice: servicePrice ?? this.servicePrice,
     prepaymentStatus: prepaymentStatus ?? this.prepaymentStatus,
+    salonId: salonId ?? this.salonId,
   );
 
   factory CloudBooking.fromMap(Map<String, dynamic> map) {
@@ -610,6 +628,9 @@ class CloudBooking {
       serviceId: map['service_id'] == null
           ? null
           : _parseInt(map['service_id']),
+      serviceIds: [
+        for (final v in (map['service_ids'] as List? ?? const [])) _parseInt(v),
+      ],
       serviceName: _parseString(map['service_name']),
       startsAt: _parseDateTime(map['starts_at']) ?? DateTime.now(),
       durationMinutes: _parseInt(map['duration_minutes'], fallback: 60),
@@ -623,6 +644,7 @@ class CloudBooking {
         map['prepayment_status'],
         fallback: 'none',
       ),
+      salonId: _parseString(map['salon_id']),
       createdAt: _parseDateTime(map['created_at']),
     );
   }
@@ -688,6 +710,56 @@ class ClientReview {
       createdAt: _parseDateTime(map['created_at']),
     );
   }
+}
+
+/// Отзыв клиента о провайдере (для экрана «Отзывы» у мастера/салона).
+class ProviderRating {
+  const ProviderRating({
+    required this.id,
+    required this.clientId,
+    required this.clientName,
+    required this.appointmentId,
+    required this.rating,
+    required this.comment,
+    this.reply = '',
+    this.createdAt,
+  });
+
+  final int id;
+  final String clientId;
+  final String clientName;
+  final int appointmentId;
+  final int rating;
+  final String comment;
+
+  /// Ответ провайдера на отзыв (пусто — ответа ещё нет).
+  final String reply;
+  final DateTime? createdAt;
+
+  factory ProviderRating.fromMap(
+    Map<String, dynamic> map, {
+    String clientName = '',
+  }) => ProviderRating(
+    id: _parseInt(map['id']),
+    clientId: _parseString(map['client_id']),
+    clientName: clientName,
+    appointmentId: _parseInt(map['appointment_id']),
+    rating: _parseInt(map['rating'], fallback: 0),
+    comment: _parseString(map['comment']),
+    reply: _parseString(map['reply']),
+    createdAt: _parseDateTime(map['created_at']),
+  );
+
+  ProviderRating copyWith({String? reply}) => ProviderRating(
+    id: id,
+    clientId: clientId,
+    clientName: clientName,
+    appointmentId: appointmentId,
+    rating: rating,
+    comment: comment,
+    reply: reply ?? this.reply,
+    createdAt: createdAt,
+  );
 }
 
 /// Облачный сервис: авторизация + данные.
@@ -1053,6 +1125,14 @@ class CloudService {
     );
   }
 
+  /// Точечное обновление master_profiles — только переданные поля.
+  /// Строка уже существует (ensureMasterCard при входе).
+  Future<void> patchMasterProfile(Map<String, dynamic> fields) =>
+      _runWithMissingColumnFallback(
+        Map.of(fields),
+        (p) => supabase.from('master_profiles').update(p).eq('user_id', uid!),
+      );
+
   Future<void> updateAvatarUrl(String url) => supabase
       .from('master_profiles')
       .update({'avatar_url': url})
@@ -1250,11 +1330,14 @@ class CloudService {
     // салон видел её и после назначения мастеру. Для записи
     // напрямую к мастеру — null (личная заявка, салон не видит).
     String? salonId,
+    // Несколько услуг за визит — все id выбранных услуг.
+    List<int>? serviceIds,
   }) async {
     final payload = <String, dynamic>{
       'client_id': uid,
       'master_id': masterId,
       'service_id': serviceId,
+      'service_ids': serviceIds,
       'service_name': serviceName,
       'starts_at': startsAt.toUtc().toIso8601String(),
       'duration_minutes': durationMinutes,
@@ -1292,6 +1375,11 @@ class CloudService {
         if (_isMissingColumn(e, 'salon_id') &&
             payload.containsKey('salon_id')) {
           payload.remove('salon_id');
+          continue;
+        }
+        if (_isMissingColumn(e, 'service_ids') &&
+            payload.containsKey('service_ids')) {
+          payload.remove('service_ids');
           continue;
         }
         rethrow;
@@ -1369,6 +1457,19 @@ class CloudService {
     return [for (final r in rows) CloudBooking.fromMap(r)];
   }
 
+  /// Одна заявка по id — для шторки записи в календаре.
+  /// RLS пропускает только владельца (мастера/салона).
+  Future<CloudBooking?> bookingById(int id) async {
+    final row = await supabase
+        .from('appointments')
+        .select(
+          '*, client:profiles!appointments_client_id_fkey(name, phone), master:profiles!appointments_master_id_fkey(name)',
+        )
+        .eq('id', id)
+        .maybeSingle();
+    return row == null ? null : CloudBooking.fromMap(row);
+  }
+
   Future<void> setBookingStatus(int id, String status) =>
       supabase.from('appointments').update({'status': status}).eq('id', id);
 
@@ -1377,6 +1478,192 @@ class CloudService {
       .from('appointments')
       .update({'prepayment_status': status})
       .eq('id', id);
+
+  /// Перенос записи на новое время — пускают и клиент, и мастер/салон.
+  Future<void> rescheduleBooking(int id, DateTime startsAt) => supabase
+      .from('appointments')
+      .update({'starts_at': startsAt.toUtc().toIso8601String()})
+      .eq('id', id);
+
+  // ---------- Рабочие часы провайдера ----------
+
+  /// Моё расписание из master_profiles.work_hours (jsonb).
+  /// null — расписание не задано/колонки нет в базе.
+  Future<Map<String, dynamic>?> myWorkHours() async {
+    try {
+      final row = await supabase
+          .from('master_profiles')
+          .select('work_hours')
+          .eq('user_id', uid!)
+          .maybeSingle();
+      final wh = row?['work_hours'];
+      return wh is Map ? Map<String, dynamic>.from(wh) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Расписание провайдера для клиентской записи (слоты внутри часов).
+  Future<Map<String, dynamic>?> workHoursOf(String providerId) async {
+    try {
+      final row = await supabase
+          .from('master_profiles')
+          .select('work_hours')
+          .eq('user_id', providerId)
+          .maybeSingle();
+      final wh = row?['work_hours'];
+      return wh is Map ? Map<String, dynamic>.from(wh) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveWorkHours(Map<String, dynamic> hours) =>
+      _runWithMissingColumnFallback({
+        'work_hours': hours,
+      }, (p) => supabase.from('master_profiles').update(p).eq('user_id', uid!));
+
+  // ---------- Чёрный список ----------
+
+  /// id клиентов, которых я заблокировал.
+  Future<Set<String>> myBlockedClientIds() async {
+    try {
+      final rows = await supabase
+          .from('blocked_clients')
+          .select('client_id')
+          .eq('provider_id', uid!);
+      return {for (final r in rows) _parseString(r['client_id'])};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// Заблокированные клиенты с именами (для списка).
+  Future<List<({String clientId, String name})>> myBlockedClients() async {
+    try {
+      final rows = await supabase
+          .from('blocked_clients')
+          .select(
+            'client_id, client:profiles!blocked_clients_client_id_fkey(name)',
+          )
+          .eq('provider_id', uid!);
+      return [
+        for (final r in rows)
+          (
+            clientId: _parseString(r['client_id']),
+            name: _parseString(_pickProfileMap(r['client'])?['name']),
+          ),
+      ];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> blockClient(String clientId) => supabase
+      .from('blocked_clients')
+      .upsert({'provider_id': uid, 'client_id': clientId});
+
+  Future<void> unblockClient(String clientId) => supabase
+      .from('blocked_clients')
+      .delete()
+      .eq('provider_id', uid!)
+      .eq('client_id', clientId);
+
+  /// Клиентская проверка: заблокировал ли меня провайдер.
+  Future<bool> isBlockedBy(String providerId) async {
+    try {
+      final row = await supabase
+          .from('blocked_clients')
+          .select('client_id')
+          .eq('provider_id', providerId)
+          .eq('client_id', uid!)
+          .maybeSingle();
+      return row != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ---------- Отзывы о провайдере + ответ ----------
+
+  /// Отзывы клиентов обо мне/о провайдере (для экрана «Отзывы»).
+  Future<List<ProviderRating>> ratingsAbout(String providerId) async {
+    final rows = await _selectResilient(
+      'ratings',
+      const [
+        'id',
+        'client_id',
+        'master_id',
+        'appointment_id',
+        'rating',
+        'comment',
+        'reply',
+        'created_at',
+      ],
+      eqColumn: 'master_id',
+      eqValue: providerId,
+    );
+    // Имена клиентов отдельным запросом.
+    final clientIds = rows
+        .map((r) => _parseString(r['client_id']))
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    var names = <String, String>{};
+    if (clientIds.isNotEmpty) {
+      try {
+        final pRows = await supabase
+            .from('profiles')
+            .select('id, name')
+            .inFilter('id', clientIds);
+        names = {
+          for (final p in pRows) _parseString(p['id']): _parseString(p['name']),
+        };
+      } catch (_) {}
+    }
+    rows.sort(
+      (a, b) =>
+          _parseString(b['created_at'])
+              .compareTo(_parseString(a['created_at'])),
+    );
+    return [
+      for (final r in rows)
+        ProviderRating.fromMap(
+          r,
+          clientName: names[_parseString(r['client_id'])] ?? '',
+        ),
+    ];
+  }
+
+  /// Ответ мастера/салона на отзыв клиента.
+  Future<void> replyToRating(int ratingId, String reply) =>
+      _runWithMissingColumnFallback({
+        'reply': reply,
+        'replied_at': DateTime.now().toUtc().toIso8601String(),
+      }, (p) => supabase.from('ratings').update(p).eq('id', ratingId));
+
+  /// Ответ провайдера на мою оценку по конкретной записи
+  /// (пустая строка — ответа нет или колонки ещё нет в базе).
+  Future<String> ratingReplyFor(int appointmentId) async {
+    try {
+      final row = await supabase
+          .from('ratings')
+          .select('reply')
+          .eq('appointment_id', appointmentId)
+          .eq('client_id', uid!)
+          .maybeSingle();
+      return _parseString(row?['reply']);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  // ---------- Онбординг ----------
+
+  /// Мастер/салон прошёл или пропустил мастер настройки.
+  Future<void> markOnboarded() => _runWithMissingColumnFallback({
+    'onboarded': true,
+  }, (p) => supabase.from('profiles').update(p).eq('id', uid!));
 
   // ---------- Favorites (избранные мастера/салоны клиента) ----------
 

@@ -13,6 +13,8 @@ create table if not exists public.profiles (
   lng double precision,
   -- Клиент сам решает, виден ли его номер мастерам.
   phone_public boolean not null default true,
+  -- Провайдер прошёл/пропустил мастер настройки (онбординг).
+  onboarded boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -93,6 +95,9 @@ create table if not exists public.master_profiles (
   -- до трудоустройства скрыта. NULL у привязанных до появления
   -- колонки = показывать всё (обратная совместимость).
   salon_since timestamptz,
+  -- Расписание провайдера по дням недели:
+  -- {"1":{"s":"09:00","e":"19:00","off":false,"b":[["13:00","14:00"]]},...}
+  work_hours jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -161,8 +166,20 @@ create table if not exists public.appointments (
   -- салон назначил её мастеру) — салон видит только такие
   -- заявки своих мастеров; личные заявки мастера скрыты.
   salon_id uuid references public.profiles(id),
+  -- Несколько услуг за визит: все выбранные id; service_name хранит
+  -- их через « + », service_price/duration_minutes — суммарные.
+  service_ids bigint[],
   notes text not null default '',
   created_at timestamptz not null default now()
+);
+
+-- ========== ЧЁРНЫЙ СПИСОК ==========
+-- Провайдер блокирует клиента — тот не может записаться к нему.
+create table if not exists public.blocked_clients (
+  provider_id uuid not null references public.profiles(id) on delete cascade,
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (provider_id, client_id)
 );
 
 -- ========== ЗАПИСИ, СОЗДАННЫЕ МАСТЕРОМ ==========
@@ -188,6 +205,9 @@ create table if not exists public.ratings (
   master_id uuid not null references public.profiles(id) on delete cascade,
   rating int not null check (rating between 1 and 5),
   comment text not null default '',
+  -- Ответ провайдера (мастера/салона) на отзыв.
+  reply text not null default '',
+  replied_at timestamptz,
   created_at timestamptz not null default now(),
   unique (appointment_id)
 );
@@ -227,6 +247,14 @@ alter table public.master_profiles enable row level security;
 alter table public.services        enable row level security;
 alter table public.appointments    enable row level security;
 alter table public.ratings         enable row level security;
+alter table public.blocked_clients enable row level security;
+
+drop policy if exists "blocked_select" on public.blocked_clients;
+drop policy if exists "blocked_write"  on public.blocked_clients;
+create policy "blocked_select" on public.blocked_clients
+  for select using (auth.uid() = provider_id or auth.uid() = client_id);
+create policy "blocked_write" on public.blocked_clients
+  for all using (auth.uid() = provider_id) with check (auth.uid() = provider_id);
 
 -- profiles: свой профиль видит владелец; мастера видны всем (для каталога).
 drop policy if exists "profiles_select_own"    on public.profiles;
@@ -295,7 +323,16 @@ drop policy if exists "appt_delete" on public.appointments;
 create policy "appt_select" on public.appointments
   for select using (auth.uid() = client_id or auth.uid() = master_id);
 create policy "appt_insert" on public.appointments
-  for insert with check (auth.uid() = client_id);
+  for insert with check (
+    auth.uid() = client_id
+    -- Заблокированный клиент не может записаться к провайдеру/салону.
+    and not exists (
+      select 1 from public.blocked_clients bc
+      where bc.client_id = auth.uid()
+        and (bc.provider_id = appointments.master_id
+             or bc.provider_id = appointments.salon_id)
+    )
+  );
 create policy "appt_update" on public.appointments
   for update using (auth.uid() = client_id or auth.uid() = master_id);
 create policy "appt_delete" on public.appointments
@@ -331,6 +368,47 @@ create policy "ratings_update" on public.ratings
   for update using (auth.uid() = client_id) with check (auth.uid() = client_id);
 create policy "ratings_delete" on public.ratings
   for delete using (auth.uid() = client_id);
+-- Провайдер (мастер или салон владельца оценки) может ответить.
+drop policy if exists "ratings_update_provider" on public.ratings;
+create policy "ratings_update_provider" on public.ratings
+  for update using (
+    auth.uid() = master_id
+    or exists (
+      select 1 from public.master_profiles mp
+      where mp.user_id = ratings.master_id and mp.salon_id = auth.uid()
+    )
+  ) with check (
+    auth.uid() = master_id
+    or exists (
+      select 1 from public.master_profiles mp
+      where mp.user_id = ratings.master_id and mp.salon_id = auth.uid()
+    )
+  );
+
+-- Провайдер меняет только поля ответа — саму оценку трогать нельзя.
+create or replace function public.guard_rating_update()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if auth.uid() is distinct from new.client_id then
+    if new.rating is distinct from old.rating
+       or new.comment is distinct from old.comment
+       or new.client_id is distinct from old.client_id
+       or new.master_id is distinct from old.master_id
+       or new.appointment_id is distinct from old.appointment_id then
+      raise exception 'only reply fields can be changed by provider';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists ratings_guard on public.ratings;
+create trigger ratings_guard
+  before update on public.ratings
+  for each row execute function public.guard_rating_update();
 
 -- ========== УДАЛЕНИЕ АККАУНТА ==========
 create or replace function public.delete_my_account()

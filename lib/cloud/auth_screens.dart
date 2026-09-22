@@ -7,11 +7,7 @@ import 'cloud_service.dart';
 
 /// Анимированный логотип с масштабом, поворотом, появлением и золотым свечением.
 class AnimatedLogo extends StatelessWidget {
-  const AnimatedLogo({
-    super.key,
-    required this.animation,
-    this.size = 220,
-  });
+  const AnimatedLogo({super.key, required this.animation, this.size = 220});
 
   final Animation<double> animation;
   final double size;
@@ -64,10 +60,7 @@ class AnimatedLogo extends StatelessWidget {
             ),
             child: Opacity(
               opacity: opacity.value,
-              child: Transform.scale(
-                scale: scale.value,
-                child: child,
-              ),
+              child: Transform.scale(scale: scale.value, child: child),
             ),
           ),
         );
@@ -124,15 +117,13 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
         curve: const Interval(0.35, 0.65, curve: Curves.easeOut),
       ),
     );
-    _welcomeSlide = Tween<Offset>(
-      begin: const Offset(0, 0.2),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.35, 0.65, curve: Curves.easeOutCubic),
-      ),
-    );
+    _welcomeSlide = Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _controller,
+            curve: const Interval(0.35, 0.65, curve: Curves.easeOutCubic),
+          ),
+        );
 
     _questionOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
@@ -147,15 +138,13 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
         curve: const Interval(0.65, 0.95, curve: Curves.easeOut),
       ),
     );
-    _cardsSlide = Tween<Offset>(
-      begin: const Offset(0, 0.15),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.65, 0.95, curve: Curves.easeOutCubic),
-      ),
-    );
+    _cardsSlide = Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _controller,
+            curve: const Interval(0.65, 0.95, curve: Curves.easeOutCubic),
+          ),
+        );
 
     _controller.forward();
   }
@@ -164,8 +153,10 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
     try {
       final info = await PackageInfo.fromPlatform();
       if (!mounted) return;
-      setState(() => _appVersion =
-          '${info.version}${info.buildNumber.isNotEmpty ? '+${info.buildNumber}' : ''}');
+      setState(
+        () => _appVersion =
+            '${info.version}${info.buildNumber.isNotEmpty ? '+${info.buildNumber}' : ''}',
+      );
     } catch (_) {
       // В тестах/десктопе PackageInfo недоступен — просто не показываем.
     }
@@ -179,9 +170,7 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
 
   Future<void> _pick(BuildContext context, String role) async {
     await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (context) => CloudAuthScreen(role: role),
-      ),
+      MaterialPageRoute(builder: (context) => CloudAuthScreen(role: role)),
     );
   }
 
@@ -191,10 +180,7 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
     final background = scheme.brightness == Brightness.light
         ? [Colors.white, scheme.primary.withValues(alpha: 0.08)]
         : [Colors.black, scheme.primary.withValues(alpha: 0.12)];
-    final logo = AnimatedLogo(
-      animation: _controller,
-      size: 150,
-    );
+    final logo = AnimatedLogo(animation: _controller, size: 150);
 
     return Scaffold(
       body: Container(
@@ -235,9 +221,7 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
                       Text(
                         'Bizzy',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineLarge
+                        style: Theme.of(context).textTheme.headlineLarge
                             ?.copyWith(
                               fontWeight: FontWeight.bold,
                               color: scheme.primary,
@@ -305,8 +289,8 @@ class _RoleSelectScreenState extends State<RoleSelectScreen>
                     'Версия $_appVersion',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurface.withValues(alpha: 0.5),
-                        ),
+                      color: scheme.onSurface.withValues(alpha: 0.5),
+                    ),
                   ),
               ],
             ),
@@ -405,10 +389,12 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
   String _describeError(Object e) {
     if (e is AuthException) {
       final msg = e.message.toLowerCase();
-      if (msg.contains('invalid login') || msg.contains('invalid credentials')) {
+      if (msg.contains('invalid login') ||
+          msg.contains('invalid credentials')) {
         return 'Неверный логин или пароль';
       }
-      if (msg.contains('already registered') || msg.contains('already in use')) {
+      if (msg.contains('already registered') ||
+          msg.contains('already in use')) {
         return 'Такой логин уже занят';
       }
       if (msg.contains('password')) {
@@ -464,8 +450,7 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
   /// совпадают с локальной базой — регистрируем его в Supabase и входим.
   Future<bool> _migrateLocalAccount(String login, String password) async {
     try {
-      final local =
-          await AppointmentsDatabase().authenticate(login, password);
+      final local = await AppointmentsDatabase().authenticate(login, password);
       if (local == null) return false;
       await _cloud.signUp(
         login: login,
@@ -561,15 +546,13 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
                     labelText: 'Пароль',
                     border: OutlineInputBorder(),
                   ),
-                  validator: (v) => v == null || v.length < 6
-                      ? 'Минимум 6 символов'
-                      : null,
+                  validator: (v) =>
+                      v == null || v.length < 6 ? 'Минимум 6 символов' : null,
                 ),
                 InkWell(
                   onTap: _busy
                       ? null
-                      : () => setState(
-                          () => _showPassword = !_showPassword),
+                      : () => setState(() => _showPassword = !_showPassword),
                   borderRadius: BorderRadius.circular(8),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),
@@ -580,8 +563,8 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
                           value: _showPassword,
                           onChanged: _busy
                               ? null
-                              : (v) => setState(
-                                  () => _showPassword = v ?? false),
+                              : (v) =>
+                                    setState(() => _showPassword = v ?? false),
                           materialTapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
                           visualDensity: VisualDensity.compact,
@@ -640,9 +623,9 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
                   onPressed: _busy
                       ? null
                       : () => setState(() {
-                            _registerMode = !_registerMode;
-                            _error = null;
-                          }),
+                          _registerMode = !_registerMode;
+                          _error = null;
+                        }),
                   child: Text(
                     _registerMode
                         ? 'Уже есть аккаунт? Войти'

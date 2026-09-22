@@ -8,11 +8,7 @@ import 'task_model.dart';
 
 /// Экран личных дел: список + календарь + напоминания.
 class TasksScreen extends StatefulWidget {
-  const TasksScreen({
-    super.key,
-    required this.database,
-    required this.user,
-  });
+  const TasksScreen({super.key, required this.database, required this.user});
 
   final AppointmentsDatabase database;
   final User user;
@@ -42,8 +38,10 @@ class _TasksScreenState extends State<TasksScreen> {
       _failed = false;
     });
     try {
-      final tasks =
-          await widget.database.getTasks(widget.user.id, includeDone: false);
+      final tasks = await widget.database.getTasks(
+        widget.user.id,
+        includeDone: false,
+      );
       if (!mounted) return;
       setState(() => _tasks = tasks);
     } catch (_) {
@@ -95,9 +93,9 @@ class _TasksScreenState extends State<TasksScreen> {
       await _load();
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось обновить дело')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Не удалось обновить дело')));
     }
   }
 
@@ -106,7 +104,8 @@ class _TasksScreenState extends State<TasksScreen> {
     try {
       await widget.database.setTaskDone(task.id!, done);
       if (done) await TaskNotificationService.cancel(task.id!);
-      if (!done) await TaskNotificationService.schedule(task.copyWith(isDone: false));
+      if (!done)
+        await TaskNotificationService.schedule(task.copyWith(isDone: false));
       await _load();
     } catch (_) {
       if (!mounted) return;
@@ -141,9 +140,9 @@ class _TasksScreenState extends State<TasksScreen> {
       await _load();
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось удалить дело')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Не удалось удалить дело')));
     }
   }
 
@@ -159,145 +158,140 @@ class _TasksScreenState extends State<TasksScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _failed
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('Не удалось загрузить дела'),
-                      TextButton(
-                          onPressed: _load, child: const Text('Повторить')),
-                    ],
-                  ),
-                )
-              : Column(
-                  children: [
-                    TableCalendar<TaskItem>(
-                      firstDay: DateTime.now()
-                          .subtract(const Duration(days: 365)),
-                      lastDay:
-                          DateTime.now().add(const Duration(days: 365)),
-                      focusedDay: _focusedDay,
-                      selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-                      onDaySelected: (selected, focused) {
-                        setState(() {
-                          _selectedDay = selected;
-                          _focusedDay = focused;
-                        });
-                      },
-                      onPageChanged: (focused) => _focusedDay = focused,
-                      calendarFormat: _calendarFormat,
-                      onFormatChanged: (format) =>
-                          setState(() => _calendarFormat = format),
-                      eventLoader: _tasksForDay,
-                      calendarStyle: CalendarStyle(
-                        markerSize: 6,
-                        markersMaxCount: 3,
-                        markerDecoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary,
-                          shape: BoxShape.circle,
-                        ),
-                        // Сегодня — жёлтое кольцо без заливки.
-                        todayDecoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: const Color(0xFFFFD600),
-                            width: 1.6,
-                          ),
-                        ),
-                        todayTextStyle: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).brightness ==
-                                  Brightness.light
-                              ? Colors.black
-                              : Colors.white,
-                        ),
-                        // Выбранный день — жёлтый с чёрной цифрой.
-                        selectedDecoration: const BoxDecoration(
-                          color: Color(0xFFFFD600),
-                          shape: BoxShape.circle,
-                        ),
-                        selectedTextStyle: const TextStyle(
-                          color: Colors.black,
-                          fontWeight: FontWeight.w700,
-                        ),
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Не удалось загрузить дела'),
+                  TextButton(onPressed: _load, child: const Text('Повторить')),
+                ],
+              ),
+            )
+          : Column(
+              children: [
+                TableCalendar<TaskItem>(
+                  firstDay: DateTime.now().subtract(const Duration(days: 365)),
+                  lastDay: DateTime.now().add(const Duration(days: 365)),
+                  focusedDay: _focusedDay,
+                  selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                  onDaySelected: (selected, focused) {
+                    setState(() {
+                      _selectedDay = selected;
+                      _focusedDay = focused;
+                    });
+                  },
+                  onPageChanged: (focused) => _focusedDay = focused,
+                  calendarFormat: _calendarFormat,
+                  onFormatChanged: (format) =>
+                      setState(() => _calendarFormat = format),
+                  eventLoader: _tasksForDay,
+                  calendarStyle: CalendarStyle(
+                    markerSize: 6,
+                    markersMaxCount: 3,
+                    markerDecoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    // Сегодня — жёлтое кольцо без заливки.
+                    todayDecoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xFFFFD600),
+                        width: 1.6,
                       ),
                     ),
-                    const Divider(height: 1),
-                    Expanded(
-                      child: dayTasks.isEmpty
-                          ? const Center(
-                              child: Text(
-                                'На этот день дел нет.\nНажмите +, чтобы создать.',
-                                textAlign: TextAlign.center,
-                              ),
-                            )
-                          : ListView.builder(
-                              padding:
-                                  const EdgeInsets.only(bottom: 80),
-                              itemCount: dayTasks.length,
-                              itemBuilder: (context, index) {
-                                final t = dayTasks[index];
-                                final isPast = t.dueAt.isBefore(DateTime.now());
-                                return Card(
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 4,
-                                  ),
-                                  child: ListTile(
-                                    leading: Checkbox(
-                                      value: t.isDone,
-                                      onChanged: (_) => _toggleDone(t),
-                                    ),
-                                    title: Text(
-                                      t.title,
-                                      style: TextStyle(
-                                        decoration: t.isDone
-                                            ? TextDecoration.lineThrough
-                                            : null,
-                                      ),
-                                    ),
-                                    subtitle: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(_time(t.dueAt)),
-                                        if (t.description.isNotEmpty)
-                                          Text(t.description),
-                                        if (t.notifyMinutes > 0)
-                                          Text(
-                                            'Напомнить за ${t.notifyMinutes} мин',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall,
-                                          ),
-                                      ],
-                                    ),
-                                    isThreeLine:
-                                        t.description.isNotEmpty,
-                                    trailing: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        if (isPast && !t.isDone)
-                                          const Icon(Icons.warning,
-                                              color: Colors.orange,
-                                              size: 20),
-                                        IconButton(
-                                          icon: const Icon(Icons.edit),
-                                          onPressed: () => _edit(t),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(Icons.delete),
-                                          onPressed: () => _delete(t),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
+                    todayTextStyle: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).brightness == Brightness.light
+                          ? Colors.black
+                          : Colors.white,
                     ),
-                  ],
+                    // Выбранный день — жёлтый с чёрной цифрой.
+                    selectedDecoration: const BoxDecoration(
+                      color: Color(0xFFFFD600),
+                      shape: BoxShape.circle,
+                    ),
+                    selectedTextStyle: const TextStyle(
+                      color: Colors.black,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
+                const Divider(height: 1),
+                Expanded(
+                  child: dayTasks.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'На этот день дел нет.\nНажмите +, чтобы создать.',
+                            textAlign: TextAlign.center,
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.only(bottom: 80),
+                          itemCount: dayTasks.length,
+                          itemBuilder: (context, index) {
+                            final t = dayTasks[index];
+                            final isPast = t.dueAt.isBefore(DateTime.now());
+                            return Card(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 4,
+                              ),
+                              child: ListTile(
+                                leading: Checkbox(
+                                  value: t.isDone,
+                                  onChanged: (_) => _toggleDone(t),
+                                ),
+                                title: Text(
+                                  t.title,
+                                  style: TextStyle(
+                                    decoration: t.isDone
+                                        ? TextDecoration.lineThrough
+                                        : null,
+                                  ),
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(_time(t.dueAt)),
+                                    if (t.description.isNotEmpty)
+                                      Text(t.description),
+                                    if (t.notifyMinutes > 0)
+                                      Text(
+                                        'Напомнить за ${t.notifyMinutes} мин',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall,
+                                      ),
+                                  ],
+                                ),
+                                isThreeLine: t.description.isNotEmpty,
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (isPast && !t.isDone)
+                                      const Icon(
+                                        Icons.warning,
+                                        color: Colors.orange,
+                                        size: 20,
+                                      ),
+                                    IconButton(
+                                      icon: const Icon(Icons.edit),
+                                      onPressed: () => _edit(t),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete),
+                                      onPressed: () => _delete(t),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
       floatingActionButton: bizzyTabFab(
         context,
         child: FloatingActionButton.extended(
@@ -369,8 +363,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
   }
 
   Future<void> _pickTime() async {
-    final picked =
-        await showTimePicker(context: context, initialTime: _time);
+    final picked = await showTimePicker(context: context, initialTime: _time);
     if (picked != null && mounted) setState(() => _time = picked);
   }
 
@@ -451,8 +444,10 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
               decoration: const InputDecoration(
                 labelText: 'Напомнить',
                 border: OutlineInputBorder(),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
               ),
               isEmpty: false,
               child: DropdownButtonHideUnderline(
@@ -482,10 +477,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Отмена'),
         ),
-        FilledButton(
-          onPressed: _save,
-          child: const Text('Сохранить'),
-        ),
+        FilledButton(onPressed: _save, child: const Text('Сохранить')),
       ],
     );
   }

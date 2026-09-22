@@ -84,8 +84,9 @@ class PushNotificationService {
       }
 
       // Локальные уведомления.
-      const androidSettings =
-          AndroidInitializationSettings('@mipmap/launcher_icon');
+      const androidSettings = AndroidInitializationSettings(
+        '@mipmap/launcher_icon',
+      );
       const iosSettings = DarwinInitializationSettings();
       const initSettings = InitializationSettings(
         android: androidSettings,
@@ -106,11 +107,13 @@ class PushNotificationService {
       );
 
       FirebaseMessaging.onBackgroundMessage(
-          _firebaseMessagingBackgroundHandler);
+        _firebaseMessagingBackgroundHandler,
+      );
 
       FirebaseMessaging.onMessage.listen((message) {
         _showLocalNotification(
-          title: message.notification?.title ?? message.data['title'] ?? 'Bizzy',
+          title:
+              message.notification?.title ?? message.data['title'] ?? 'Bizzy',
           body: message.notification?.body ?? message.data['body'] ?? '',
           payload: jsonEncode(message.data),
         );
@@ -146,15 +149,14 @@ class PushNotificationService {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) return;
-      await Supabase.instance.client.from('fcm_tokens').upsert(
-        {
-          'user_id': user.id,
-          'token': token,
-          'platform': Platform.isAndroid ? 'android' : (Platform.isIOS ? 'ios' : 'other'),
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-        },
-        onConflict: 'user_id,token',
-      );
+      await Supabase.instance.client.from('fcm_tokens').upsert({
+        'user_id': user.id,
+        'token': token,
+        'platform': Platform.isAndroid
+            ? 'android'
+            : (Platform.isIOS ? 'ios' : 'other'),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'user_id,token');
     } catch (_) {}
   }
 
@@ -205,7 +207,9 @@ class PushNotificationService {
     required String service,
   }) async {
     if (id == null || reminderMinutes <= 0) return;
-    final notifyAt = dateTime.toUtc().subtract(Duration(minutes: reminderMinutes));
+    final notifyAt = dateTime.toUtc().subtract(
+      Duration(minutes: reminderMinutes),
+    );
     if (notifyAt.isBefore(DateTime.now().toUtc())) return;
 
     final tzDate = tz.TZDateTime.from(notifyAt, tz.UTC);
@@ -254,7 +258,9 @@ class PushNotificationService {
     required String body,
   }) async {
     if (reminderMinutes <= 0) return;
-    final notifyAt = dateTime.toUtc().subtract(Duration(minutes: reminderMinutes));
+    final notifyAt = dateTime.toUtc().subtract(
+      Duration(minutes: reminderMinutes),
+    );
     if (notifyAt.isBefore(DateTime.now().toUtc())) return;
 
     final tzDate = tz.TZDateTime.from(notifyAt, tz.UTC);
@@ -290,4 +296,11 @@ class PushNotificationService {
       await _local.cancel(id: id + 2000000);
     } catch (_) {}
   }
+
+  /// Мгновенное локальное уведомление (например, «давно не были у мастера»).
+  static Future<void> showLocal({
+    required String title,
+    required String body,
+    String? payload,
+  }) => _showLocalNotification(title: title, body: body, payload: payload);
 }

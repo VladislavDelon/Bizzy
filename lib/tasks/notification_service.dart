@@ -22,8 +22,9 @@ class TaskNotificationService {
     try {
       tz_data.initializeTimeZones();
 
-      const androidSettings =
-          AndroidInitializationSettings('@mipmap/launcher_icon');
+      const androidSettings = AndroidInitializationSettings(
+        '@mipmap/launcher_icon',
+      );
       const iosSettings = DarwinInitializationSettings(
         requestAlertPermission: false,
         requestBadgePermission: false,
@@ -46,7 +47,8 @@ class TaskNotificationService {
       if (defaultTargetPlatform == TargetPlatform.android) {
         final android = _plugin
             .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin>();
+              AndroidFlutterLocalNotificationsPlugin
+            >();
         final granted = await android?.requestNotificationsPermission();
         _canNotify = granted ?? _canNotify;
 
@@ -71,9 +73,9 @@ class TaskNotificationService {
     if (!_canNotify || task.id == null || task.notifyMinutes <= 0) return;
     if (task.isDone) return;
 
-    final notifyAt = task.dueAt
-        .toUtc()
-        .subtract(Duration(minutes: task.notifyMinutes));
+    final notifyAt = task.dueAt.toUtc().subtract(
+      Duration(minutes: task.notifyMinutes),
+    );
     if (notifyAt.isBefore(DateTime.now().toUtc())) return;
 
     final tzDate = tz.TZDateTime.from(notifyAt, tz.UTC);

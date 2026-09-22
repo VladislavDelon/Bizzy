@@ -40,24 +40,28 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         final clientBookings = await _cloud.masterBookings();
         for (final a in masterAppointments) {
           if (a.startsAt.isAfter(now) && a.startsAt.isBefore(end)) {
-            items.add(_NotificationItem(
-              title: a.clientName.isEmpty ? 'Запись' : a.clientName,
-              subtitle: a.serviceName,
-              time: a.startsAt,
-              role: 'master',
-            ));
+            items.add(
+              _NotificationItem(
+                title: a.clientName.isEmpty ? 'Запись' : a.clientName,
+                subtitle: a.serviceName,
+                time: a.startsAt,
+                role: 'master',
+              ),
+            );
           }
         }
         for (final b in clientBookings) {
           if ((b.status == 'confirmed' || b.status == 'pending') &&
               b.startsAt.isAfter(now) &&
               b.startsAt.isBefore(end)) {
-            items.add(_NotificationItem(
-              title: b.clientName.isEmpty ? 'Клиент' : b.clientName,
-              subtitle: b.serviceName,
-              time: b.startsAt,
-              role: 'master',
-            ));
+            items.add(
+              _NotificationItem(
+                title: b.clientName.isEmpty ? 'Клиент' : b.clientName,
+                subtitle: b.serviceName,
+                time: b.startsAt,
+                role: 'master',
+              ),
+            );
           }
         }
       } else {
@@ -66,12 +70,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           if ((b.status == 'confirmed' || b.status == 'pending') &&
               b.startsAt.isAfter(now) &&
               b.startsAt.isBefore(end)) {
-            items.add(_NotificationItem(
-              title: b.masterName.isEmpty ? 'Мастер' : b.masterName,
-              subtitle: b.serviceName,
-              time: b.startsAt,
-              role: 'client',
-            ));
+            items.add(
+              _NotificationItem(
+                title: b.masterName.isEmpty ? 'Мастер' : b.masterName,
+                subtitle: b.serviceName,
+                time: b.startsAt,
+                role: 'client',
+              ),
+            );
           }
         }
       }
@@ -92,8 +98,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   String _fmt(DateTime dt) {
-    final date = '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}';
-    final time = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    final date =
+        '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}';
+    final time =
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     final weekday = DateFormat.E('ru_RU').format(dt);
     return '$date ($weekday) $time';
   }
@@ -101,53 +109,45 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Ближайшие записи'),
-      ),
+      appBar: AppBar(title: const Text('Ближайшие записи')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _failed
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('Не удалось загрузить записи'),
-                      TextButton(
-                        onPressed: _load,
-                        child: const Text('Повторить'),
-                      ),
-                    ],
-                  ),
-                )
-              : _items.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'Ближайших записей нет',
-                        textAlign: TextAlign.center,
-                      ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      child: ListView.builder(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.only(bottom: 24),
-                        itemCount: _items.length,
-                        itemBuilder: (context, index) {
-                          final item = _items[index];
-                          return Card(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 4,
-                            ),
-                            child: ListTile(
-                              leading: const Icon(Icons.event_note),
-                              title: Text(item.title),
-                              subtitle: Text('${item.subtitle} • ${_fmt(item.time)}'),
-                            ),
-                          );
-                        },
-                      ),
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Не удалось загрузить записи'),
+                  TextButton(onPressed: _load, child: const Text('Повторить')),
+                ],
+              ),
+            )
+          : _items.isEmpty
+          ? const Center(
+              child: Text('Ближайших записей нет', textAlign: TextAlign.center),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(bottom: 24),
+                itemCount: _items.length,
+                itemBuilder: (context, index) {
+                  final item = _items[index];
+                  return Card(
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
                     ),
+                    child: ListTile(
+                      leading: const Icon(Icons.event_note),
+                      title: Text(item.title),
+                      subtitle: Text('${item.subtitle} • ${_fmt(item.time)}'),
+                    ),
+                  );
+                },
+              ),
+            ),
     );
   }
 }

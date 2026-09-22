@@ -75,10 +75,7 @@ class MasterPublicProfileView extends StatelessWidget {
   Widget _sectionTitle(BuildContext context, String title) {
     return Padding(
       padding: const EdgeInsets.only(top: 20, bottom: 8),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleMedium,
-      ),
+      child: Text(title, style: Theme.of(context).textTheme.titleMedium),
     );
   }
 
@@ -93,8 +90,9 @@ class MasterPublicProfileView extends StatelessWidget {
             CircleAvatar(
               radius: 40,
               backgroundColor: scheme.primary,
-              backgroundImage:
-                  master.avatarUrl.isNotEmpty ? NetworkImage(master.avatarUrl) : null,
+              backgroundImage: master.avatarUrl.isNotEmpty
+                  ? NetworkImage(master.avatarUrl)
+                  : null,
               child: master.avatarUrl.isEmpty
                   ? Icon(Icons.person, color: scheme.onPrimary, size: 36)
                   : null,
@@ -205,9 +203,7 @@ class MasterPublicProfileView extends StatelessWidget {
                   ],
                 ],
               ),
-              onTap: onBookService == null
-                  ? null
-                  : () => onBookService!(s),
+              onTap: onBookService == null ? null : () => onBookService!(s),
             ),
           ),
         if (offers.isNotEmpty) ...[
@@ -246,16 +242,12 @@ class MasterPublicProfileView extends StatelessWidget {
                           children: [
                             Text(
                               o.title,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleSmall
+                              style: Theme.of(context).textTheme.titleSmall
                                   ?.copyWith(
                                     decoration: o.used
                                         ? TextDecoration.lineThrough
                                         : null,
-                                    color: o.used
-                                        ? scheme.outline
-                                        : null,
+                                    color: o.used ? scheme.outline : null,
                                   ),
                             ),
                             Text(
@@ -264,9 +256,7 @@ class MasterPublicProfileView extends StatelessWidget {
                                 if (o.discountPercent > 0)
                                   '−${o.discountPercent == o.discountPercent.roundToDouble() ? o.discountPercent.toStringAsFixed(0) : o.discountPercent.toStringAsFixed(1)}%',
                               ].join(' · '),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall,
+                              style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ],
                         ),
@@ -274,16 +264,11 @@ class MasterPublicProfileView extends StatelessWidget {
                       if (o.used)
                         Text(
                           'Использовано',
-                          style: Theme.of(context)
-                              .textTheme
-                              .labelSmall
+                          style: Theme.of(context).textTheme.labelSmall
                               ?.copyWith(color: scheme.outline),
                         )
                       else if (onBookOffer != null)
-                        Icon(
-                          Icons.chevron_right,
-                          color: scheme.primary,
-                        ),
+                        Icon(Icons.chevron_right, color: scheme.primary),
                     ],
                   ),
                 ),
@@ -307,14 +292,13 @@ class MasterPublicProfileView extends StatelessWidget {
                     fit: BoxFit.cover,
                     loadingBuilder: (context, child, progress) =>
                         progress == null
-                            ? child
-                            : Container(
-                                color: scheme.surfaceContainerHighest,
-                                child: const Center(
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2),
-                                ),
-                              ),
+                        ? child
+                        : Container(
+                            color: scheme.surfaceContainerHighest,
+                            child: const Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
                     errorBuilder: (context, error, stackTrace) => Container(
                       color: scheme.surfaceContainerHighest,
                       child: const Icon(Icons.broken_image_outlined),
@@ -349,10 +333,7 @@ class MasterPublicProfileView extends StatelessWidget {
       ),
       body: onRefresh == null
           ? content
-          : RefreshIndicator(
-              onRefresh: onRefresh!,
-              child: content,
-            ),
+          : RefreshIndicator(onRefresh: onRefresh!, child: content),
       floatingActionButton: onBook == null
           ? null
           : bizzyFab(

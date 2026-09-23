@@ -182,6 +182,11 @@ class _MastersMapScreenState extends State<MastersMapScreen> {
   double? _myLat;
   double? _myLng;
 
+  /// Фильтры карты: тип провайдера и категория услуг.
+  /// 'all' — и мастера, и салоны.
+  String _roleFilter = 'all';
+  String? _categoryFilter;
+
   @override
   void initState() {
     super.initState();
@@ -312,9 +317,26 @@ class _MastersMapScreenState extends State<MastersMapScreen> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final located = widget.masters.where((m) => m.hasLocation).toList();
+    // Фильтрация: тип (мастер/салон) + категория услуг.
+    final located = widget.masters.where((m) {
+      if (!m.hasLocation) return false;
+      if (_roleFilter != 'all' && m.role != _roleFilter) return false;
+      if (_categoryFilter != null &&
+          !m.categories.contains(_categoryFilter) &&
+          m.category != _categoryFilter) {
+        return false;
+      }
+      return true;
+    }).toList();
+    // Все категории, которые встречаются у мастеров на карте.
+    final allCategories = <String>{
+      for (final m in widget.masters)
+        ...(m.categories.isNotEmpty
+            ? m.categories
+            : [if (m.category.isNotEmpty) m.category]),
+    }.toList();
     return Scaffold(
-      appBar: AppBar(title: const Text('Мастера на карте')),
+      appBar: AppBar(title: const Text('Рядом на карте')),
       body: Stack(
         children: [
           FlutterMap(
@@ -367,12 +389,110 @@ class _MastersMapScreenState extends State<MastersMapScreen> {
                   color: scheme.surface.withValues(alpha: 0.92),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Text(
-                  'Пока ни у одного мастера не указан адрес на карте',
+                child: Text(
+                  widget.masters.any((m) => m.hasLocation)
+                      ? 'По выбранным фильтрам никого нет'
+                      : 'Пока ни у одного мастера не указан адрес на карте',
                   textAlign: TextAlign.center,
                 ),
               ),
             ),
+          // Фильтры: тип провайдера + категория. Плавающая панель
+          // снизу — не мешает тапать по карте.
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              child: Container(
+                margin: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: scheme.surface.withValues(alpha: 0.94),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black12, blurRadius: 8),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      height: 40,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: ChoiceChip(
+                              label: const Text('Все'),
+                              selected: _roleFilter == 'all',
+                              onSelected: (_) =>
+                                  setState(() => _roleFilter = 'all'),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: ChoiceChip(
+                              avatar: const Icon(Icons.person, size: 16),
+                              label: const Text('Мастера'),
+                              selected: _roleFilter == 'master',
+                              onSelected: (_) =>
+                                  setState(() => _roleFilter = 'master'),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: ChoiceChip(
+                              avatar: const Icon(Icons.storefront, size: 16),
+                              label: const Text('Салоны'),
+                              selected: _roleFilter == 'salon',
+                              onSelected: (_) =>
+                                  setState(() => _roleFilter = 'salon'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (allCategories.length > 1)
+                      SizedBox(
+                        height: 40,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              child: ChoiceChip(
+                                label: const Text('Все услуги'),
+                                selected: _categoryFilter == null,
+                                onSelected: (_) =>
+                                    setState(() => _categoryFilter = null),
+                              ),
+                            ),
+                            for (final cat in allCategories)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                child: ChoiceChip(
+                                  label: Text(cat),
+                                  selected: _categoryFilter == cat,
+                                  onSelected: (_) =>
+                                      setState(() => _categoryFilter = cat),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -10,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app_theme.dart';
 import '../currency.dart';
 import '../notifications/push_service.dart';
+import 'certificates_screen.dart';
 import 'cloud_service.dart';
 import 'credentials_dialog.dart';
 import 'geo_service.dart';
@@ -1047,7 +1049,28 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
   /// (сильнее общего prepayEnabled — задаётся конкретному клиенту).
   ({double amount})? _clientPrepay;
 
-  bool get _needsPrepay => _clientPrepay != null || widget.master.prepayEnabled;
+  /// У провайдера включена «предоплата для новых», а у меня ещё
+  /// нет завершённых визитов к нему — запись только по предоплате.
+  bool _newClientPrepay = false;
+
+  /// Я подписан на освобождение окна у этого провайдера.
+  bool _waiting = false;
+
+  /// Действующие сертификаты этого провайдера у меня.
+  List<Certificate> _certs = const [];
+
+  /// Выбранный для оплаты визита сертификат.
+  Certificate? _selectedCert;
+
+  /// Моя реферальная скидка в % (применяется к этой записи).
+  int _refDiscount = 0;
+
+  bool get _needsPrepay =>
+      // Визит по сертификату уже оплачен пакетом — предоплата не нужна.
+      _selectedCert == null &&
+      (_clientPrepay != null ||
+          widget.master.prepayEnabled ||
+          _newClientPrepay);
 
   /// Сумма предоплаты: персональная по клиенту, иначе общая у мастера.
   double get _prepayAmount => _clientPrepay != null && _clientPrepay!.amount > 0
@@ -1094,9 +1117,16 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
 
   /// Сколько останется доплатить на месте после предоплаты (не ниже 0).
   double get _remainingAfterPrepay {
-    final left = _finalPrice - _prepayAmount;
+    final left = _priceAfterRef - _prepayAmount;
     return left < 0 ? 0 : left;
   }
+
+  /// Цена после реферальной скидки «приведи друга».
+  double get _priceAfterRef =>
+      _finalPrice * (100 - _refDiscount.clamp(0, 100)) / 100;
+
+  /// Сумма, которая пойдёт в запись: визит по сертификату — 0.
+  double get _chargePrice => _selectedCert != null ? 0 : _priceAfterRef;
 
   @override
   void initState() {
@@ -1113,6 +1143,39 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
     _loadClientPrepay();
     _loadWorkHours();
     _checkBlocked();
+    _loadExtras();
+  }
+
+  /// Лист ожидания, сертификаты, реферальная скидка и статус
+  /// «проверенный клиент» — всё фоново, без блокировки диалога.
+  Future<void> _loadExtras() async {
+    if (widget.master.userId.isEmpty) return;
+    final pid = widget.master.userId;
+    try {
+      final results = await Future.wait([
+        _cloud.isWaitingFor(pid),
+        _cloud.myCertificates().then<List<Certificate>>((v) => v),
+        _cloud.myProfile(),
+        _cloud.completedVisitsTo(pid),
+      ]);
+      if (!mounted) return;
+      final certs = results[1] as List<Certificate>;
+      final profile = results[2] as CloudProfile?;
+      final visits = results[3] as int;
+      setState(() {
+        _waiting = results[0] as bool;
+        _certs = certs
+            .where(
+              (c) =>
+                  c.providerId == pid &&
+                  !c.exhausted &&
+                  c.covers(_services.map((s) => s.id).toList()),
+            )
+            .toList();
+        _refDiscount = profile?.refDiscount ?? 0;
+        _newClientPrepay = widget.master.prepayNewClients && visits == 0;
+      });
+    } catch (_) {}
   }
 
   /// Расписание мастера/салона: слоты строятся внутри рабочих часов,
@@ -1159,16 +1222,27 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
     if (widget.master.userId.isEmpty) return;
     setState(() => _loadingSlots = true);
     try {
-      final bookings = await _cloud.masterBookingsForDay(
-        widget.master.userId,
-        day,
-      );
+      final results = await Future.wait([
+        _cloud.masterBookingsForDay(widget.master.userId, day),
+        _cloud
+            .scheduleBlocksFor(
+              widget.master.userId,
+              from: day,
+              to: day.add(const Duration(days: 1)),
+            )
+            .then<List<ScheduleBlock>>((v) => v),
+      ]);
+      final bookings = results[0] as List<CloudBooking>;
+      final blocks = results[1] as List<ScheduleBlock>;
       final slots = computeFreeSlots(
         day: day,
         durationMinutes: _totalDuration,
         busy: bookings,
         week: _week,
-        stepMinutes: 30,
+        // Шаг сетки — под длительность выбранных услуг: между
+        // слотами не остаётся дыр, куда запись не помещается.
+        stepMinutes: slotStepFor(_totalDuration),
+        blocked: [for (final b in blocks) (b.startsAt, b.endsAt)],
       );
       if (!mounted) return;
       setState(() {
@@ -1293,6 +1367,16 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
             ? 'По Honey «${offer.title}»'
             : '$notes · По Honey «${offer.title}»';
       }
+      if (_selectedCert != null) {
+        notes = notes.isEmpty
+            ? 'Оплачено сертификатом «${_selectedCert!.title}»'
+            : '$notes · Оплачено сертификатом «${_selectedCert!.title}»';
+      }
+      if (_refDiscount > 0 && _selectedCert == null) {
+        notes = notes.isEmpty
+            ? 'Реферальная скидка $_refDiscount%'
+            : '$notes · Реферальная скидка $_refDiscount%';
+      }
       final booking = await _cloud.bookAppointment(
         masterId: masterId,
         serviceId: _services.isEmpty ? null : _services.first.id,
@@ -1307,8 +1391,9 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
         salonId: widget.master.isSalon ? widget.master.userId : null,
         startsAt: startsAt,
         durationMinutes: _totalDuration,
-        // Цена УЖЕ со скидкой Honey — это и есть сумма записи.
-        servicePrice: _finalPrice,
+        // Цена УЖЕ со скидками (Honey + реферальная); по
+        // сертификату визит оплачен пакетом — сумма 0.
+        servicePrice: _chargePrice,
         offerId: offer?.id,
         notes: notes,
         prepaymentStatus: _needsPrepay ? 'claimed' : 'none',
@@ -1326,6 +1411,23 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
           } catch (_) {}
         }
       }
+      // Списываем визит сертификата и реферальную скидку —
+      // обе «валюты» расходуются в момент успешной записи.
+      final cert = _selectedCert;
+      if (cert != null) {
+        try {
+          await _cloud.spendCertificate(cert);
+        } catch (_) {}
+      }
+      if (_refDiscount > 0) {
+        try {
+          await _cloud.consumeRefDiscount();
+        } catch (_) {}
+      }
+      // Записавшийся клиент больше не ждёт окно у этого провайдера.
+      try {
+        await _cloud.leaveWaitlist(widget.master.userId);
+      } catch (_) {}
       await PushNotificationService.sendPush(
         toUserId: booking.masterId,
         title: 'Новая заявка',
@@ -1451,7 +1553,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                     const Icon(Icons.arrow_forward, size: 16),
                     const SizedBox(width: 8),
                     Text(
-                      formatMoney(_finalPrice),
+                      formatMoney(_priceAfterRef),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: Theme.of(context).colorScheme.primary,
@@ -1461,7 +1563,7 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                 )
               else
                 Text(
-                  'Итого: ${formatMoney(_fullPrice)} • $_totalDuration мин',
+                  'Итого: ${formatMoney(_priceAfterRef)} • $_totalDuration мин',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
             ],
@@ -1503,7 +1605,47 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
             if (_loadingSlots)
               const Center(child: CircularProgressIndicator())
             else if (_slots.isEmpty)
-              const Text('Свободных часов на эту дату нет.')
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Свободных часов на эту дату нет.'),
+                  const SizedBox(height: 8),
+                  // Лист ожидания: провайдер отменит чужую запись —
+                  // клиенту придёт push «освободилось окно».
+                  OutlinedButton.icon(
+                    onPressed: _waiting
+                        ? () async {
+                            await _cloud.leaveWaitlist(widget.master.userId);
+                            if (mounted) {
+                              setState(() => _waiting = false);
+                            }
+                          }
+                        : () async {
+                            await _cloud.joinWaitlist(widget.master.userId);
+                            if (!context.mounted) return;
+                            setState(() => _waiting = true);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Сообщим, когда освободится окно',
+                                ),
+                              ),
+                            );
+                          },
+                    icon: Icon(
+                      _waiting
+                          ? Icons.notifications_active
+                          : Icons.notifications_none,
+                      size: 18,
+                    ),
+                    label: Text(
+                      _waiting
+                          ? 'Вы в листе ожидания — убрать подписку'
+                          : 'Сообщить, когда освободится',
+                    ),
+                  ),
+                ],
+              )
             else
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1539,6 +1681,47 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                 border: OutlineInputBorder(),
               ),
             ),
+            // Сертификаты: визит можно оплатить пакетом — сумма 0.
+            if (_certs.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              for (final c in _certs)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: _selectedCert?.id == c.id,
+                  onChanged: _saving
+                      ? null
+                      : (v) => setState(
+                          () => _selectedCert = v == true ? c : null,
+                        ),
+                  title: Text(c.title),
+                  subtitle: Text(
+                    'Осталось визитов: ${c.remaining} из ${c.totalVisits}'
+                    '${c.providerName.isEmpty ? '' : ' · ${c.providerName}'}',
+                  ),
+                ),
+            ],
+            if (_refDiscount > 0 && _selectedCert == null) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(
+                    Icons.card_giftcard,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Реферальная скидка $_refDiscount%: '
+                      '${formatMoney(_priceAfterRef)} вместо '
+                      '${formatMoney(_finalPrice)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (_needsPrepay) ...[
               const SizedBox(height: 12),
               Container(
@@ -1572,7 +1755,10 @@ class _BookAppointmentDialogState extends State<BookAppointmentDialog> {
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Text(
-                        'Предоплата засчитывается в стоимость услуги.',
+                        _newClientPrepay
+                            ? 'Предоплата нужна только на первый визит '
+                                  '— дальше запись без неё.'
+                            : 'Предоплата засчитывается в стоимость услуги.',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -1810,6 +1996,12 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
   Future<void> _cancel(CloudBooking b) async {
     try {
       await _cloud.setBookingStatus(b.id, 'cancelled');
+      // Освободилось окно — уведомляем лист ожидания провайдера
+      // (и салона, если запись проходила через него).
+      await _cloud.notifyWaitlist(b.masterId);
+      if (b.salonId.isNotEmpty && b.salonId != b.masterId) {
+        await _cloud.notifyWaitlist(b.salonId);
+      }
       await _load();
     } catch (_) {
       if (!mounted) return;
@@ -1928,7 +2120,16 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
             .workHoursOf(b.masterId)
             .then<Map<String, dynamic>?>((v) => v)
             .catchError((_) => null),
+        _cloud
+            .scheduleBlocksFor(
+              b.masterId,
+              from: day,
+              to: day.add(const Duration(days: 1)),
+            )
+            .then<List<ScheduleBlock>>((v) => v)
+            .catchError((_) => <ScheduleBlock>[]),
       ]);
+      final blocks = results[2] as List<ScheduleBlock>;
       slots = computeFreeSlots(
         day: day,
         durationMinutes: b.durationMinutes,
@@ -1936,7 +2137,8 @@ class _ClientBookingsTabState extends State<ClientBookingsTab> {
             .where((x) => x.id != b.id)
             .toList(),
         week: WorkWeek.fromJson(results[1] as Map<String, dynamic>?),
-        stepMinutes: 30,
+        stepMinutes: slotStepFor(b.durationMinutes),
+        blocked: [for (final bl in blocks) (bl.startsAt, bl.endsAt)],
       );
     } catch (_) {
       failed = true;
@@ -2399,38 +2601,33 @@ class _RateBookingDialogState extends State<RateBookingDialog> {
   bool _saving = false;
   String? _error;
 
-  /// Кому уходит оценка: «salon» — если запись делал исполнитель
-  /// из команды салона, иначе конкретному мастеру.
-  bool _targetIsSalon = false;
+  /// Оценка идёт конкретному исполнителю; если запись прошла
+  /// через салон — отзыв учитывается и в рейтинге салона.
+  bool _countsForSalon = false;
   String _targetName = '';
 
   @override
   void initState() {
     super.initState();
+    _targetName = widget.booking.masterName;
     _resolveTarget();
   }
 
-  /// Определяем адресата оценки: у мастера с salon_id оценка
-  /// прикрепляется салону, у самозанятого — мастеру.
   Future<void> _resolveTarget() async {
+    if (widget.booking.salonId.isNotEmpty) {
+      if (mounted) setState(() => _countsForSalon = true);
+      return;
+    }
     try {
       final card = await _cloud.masterCard(widget.booking.masterId);
-      final salonId = card?.salonId;
-      var isSalon = false;
-      var name = widget.booking.masterName;
-      if (salonId != null && salonId.isNotEmpty) {
-        isSalon = true;
-        final salon = await _cloud.masterCard(salonId);
-        if (salon != null && salon.name.isNotEmpty) name = salon.name;
-      } else if (card != null && card.isSalon) {
-        isSalon = true;
-        if (card.name.isNotEmpty) name = card.name;
+      if (card != null && card.name.isNotEmpty) {
+        _targetName = card.name;
       }
+      final salonId = card?.salonId;
+      final hasSalon =
+          (salonId != null && salonId.isNotEmpty) || (card?.isSalon ?? false);
       if (!mounted) return;
-      setState(() {
-        _targetIsSalon = isSalon;
-        _targetName = name;
-      });
+      setState(() => _countsForSalon = hasSalon);
     } catch (_) {}
   }
 
@@ -2452,6 +2649,11 @@ class _RateBookingDialogState extends State<RateBookingDialog> {
         masterId: widget.booking.masterId,
         rating: _rating,
         comment: _comment.text.trim(),
+        // Отзыв привязан к услуге; для салонной записи — и к салону.
+        serviceId: widget.booking.serviceIds.isNotEmpty
+            ? widget.booking.serviceIds.first
+            : widget.booking.serviceId,
+        salonId: widget.booking.salonId.isEmpty ? null : widget.booking.salonId,
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -2467,7 +2669,7 @@ class _RateBookingDialogState extends State<RateBookingDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(_targetIsSalon ? 'Оцените салон' : 'Оцените мастера'),
+      title: const Text('Оцените работу'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -2477,6 +2679,15 @@ class _RateBookingDialogState extends State<RateBookingDialog> {
                 : widget.booking.serviceName,
             textAlign: TextAlign.center,
           ),
+          if (_countsForSalon)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Отзыв учтётся и в рейтинге салона',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -2645,6 +2856,26 @@ class _ClientProfileTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
+          // «Приведи друга»: личный код, скидка обоим после первого
+          // завершённого визита приглашённого.
+          const _ReferralCard(),
+          const SizedBox(height: 12),
+          // Сертификаты на пакеты визитов, выданные мастерами/салонами.
+          Card(
+            child: ListTile(
+              leading: Icon(
+                Icons.confirmation_number_outlined,
+                color: scheme.primary,
+              ),
+              title: const Text('Мои сертификаты'),
+              subtitle: const Text('Пакеты визитов и остаток'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(builder: (_) => const MyCertificatesScreen()),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           OutlinedButton.icon(
             onPressed: () => _edit(context),
             icon: const Icon(Icons.edit),
@@ -2690,6 +2921,108 @@ class _ClientProfileTab extends StatelessWidget {
             },
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Карточка «Приведи друга» в профиле клиента: реферальный код,
+/// накопленная скидка, копирование для отправки другу.
+class _ReferralCard extends StatelessWidget {
+  const _ReferralCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: FutureBuilder<(String, CloudProfile?)>(
+          future: () async {
+            final cloud = CloudService();
+            final code = await cloud.myRefCode();
+            final profile = await cloud.myProfile();
+            return (code, profile);
+          }(),
+          builder: (context, snap) {
+            final code = snap.data?.$1 ?? '';
+            final discount = snap.data?.$2?.refDiscount ?? 0;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.card_giftcard, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Приведи друга',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Друг вводит ваш код при регистрации — после его '
+                  'первого визита вы оба получаете скидку 10% '
+                  'на следующую запись.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer.withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          code.isEmpty ? 'Загружаю код…' : code,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Скопировать код',
+                      onPressed: code.isEmpty
+                          ? null
+                          : () async {
+                              await Clipboard.setData(
+                                ClipboardData(text: code),
+                              );
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Код скопирован'),
+                                  ),
+                                );
+                              }
+                            },
+                      icon: const Icon(Icons.copy, size: 20),
+                    ),
+                  ],
+                ),
+                if (discount > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Ваша скидка: $discount% на следующую запись',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

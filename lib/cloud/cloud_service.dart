@@ -265,6 +265,9 @@ class CloudProfile {
     this.createdAt,
     this.phonePublic = true,
     this.onboarded = true,
+    this.refCode = '',
+    this.referredBy,
+    this.refDiscount = 0,
   });
 
   final String id;
@@ -284,6 +287,15 @@ class CloudProfile {
   /// В старой базе колонки нет — считаем «пройдено».
   final bool onboarded;
 
+  /// Личный реферальный код «приведи друга» (BZ-XXXXXX).
+  final String refCode;
+
+  /// Кто пригласил этого пользователя (uuid профиля).
+  final String? referredBy;
+
+  /// Накопленная реферальная скидка в % на следующую запись.
+  final int refDiscount;
+
   bool get isMaster => role == 'master';
   bool get isSalon => role == 'salon';
   bool get isClient => role == 'client';
@@ -301,6 +313,11 @@ class CloudProfile {
     createdAt: _parseDateTime(map['created_at']),
     phonePublic: _parseBool(map['phone_public'], fallback: true),
     onboarded: _parseBool(map['onboarded'], fallback: true),
+    refCode: _parseString(map['ref_code']),
+    referredBy: map['referred_by'] == null
+        ? null
+        : _parseString(map['referred_by']),
+    refDiscount: _parseInt(map['ref_discount']),
   );
 
   Map<String, dynamic> toMap() => {
@@ -337,6 +354,7 @@ class MasterCard {
     this.prepayEnabled = false,
     this.prepayAmount = 0,
     this.prepayLink = '',
+    this.prepayNewClients = false,
     this.createdAt,
     this.salonId,
     this.salonKey = '',
@@ -373,6 +391,10 @@ class MasterCard {
 
   /// Pay-ссылка банка мастера (Kaspi, Halyk и т.п.).
   final String prepayLink;
+
+  /// Новые клиенты записываются только по предоплате;
+  /// «проверенные» (была завершённая запись) — без неё.
+  final bool prepayNewClients;
 
   /// Дата регистрации профиля — «на Bizzy с …».
   final DateTime? createdAt;
@@ -432,6 +454,7 @@ class MasterCard {
       prepayEnabled: _parseBool(map['prepay_enabled'], fallback: false),
       prepayAmount: _parseDouble(map['prepay_amount']),
       prepayLink: _parseString(map['prepay_link']),
+      prepayNewClients: _parseBool(map['prepay_new_clients'], fallback: false),
       createdAt: _parseDateTime(profile?['created_at']),
       salonId: map['salon_id'] == null ? null : _parseString(map['salon_id']),
       salonKey: _parseString(map['salon_key']),
@@ -459,6 +482,7 @@ class MasterCard {
     bool? prepayEnabled,
     double? prepayAmount,
     String? prepayLink,
+    bool? prepayNewClients,
     List<String>? categories,
   }) => MasterCard(
     userId: userId ?? this.userId,
@@ -479,6 +503,7 @@ class MasterCard {
     prepayEnabled: prepayEnabled ?? this.prepayEnabled,
     prepayAmount: prepayAmount ?? this.prepayAmount,
     prepayLink: prepayLink ?? this.prepayLink,
+    prepayNewClients: prepayNewClients ?? this.prepayNewClients,
   );
 }
 
@@ -722,6 +747,9 @@ class ProviderRating {
     required this.rating,
     required this.comment,
     this.reply = '',
+    this.serviceId,
+    this.serviceName = '',
+    this.salonId,
     this.createdAt,
   });
 
@@ -734,11 +762,19 @@ class ProviderRating {
 
   /// Ответ провайдера на отзыв (пусто — ответа ещё нет).
   final String reply;
+
+  /// За какую услугу оценка (null — вся запись / старый отзыв).
+  final int? serviceId;
+  final String serviceName;
+
+  /// Запись прошла через салон — отзыв виден и в карточке салона.
+  final String? salonId;
   final DateTime? createdAt;
 
   factory ProviderRating.fromMap(
     Map<String, dynamic> map, {
     String clientName = '',
+    String serviceName = '',
   }) => ProviderRating(
     id: _parseInt(map['id']),
     clientId: _parseString(map['client_id']),
@@ -747,6 +783,9 @@ class ProviderRating {
     rating: _parseInt(map['rating'], fallback: 0),
     comment: _parseString(map['comment']),
     reply: _parseString(map['reply']),
+    serviceId: map['service_id'] == null ? null : _parseInt(map['service_id']),
+    serviceName: serviceName,
+    salonId: map['salon_id'] == null ? null : _parseString(map['salon_id']),
     createdAt: _parseDateTime(map['created_at']),
   );
 
@@ -758,7 +797,94 @@ class ProviderRating {
     rating: rating,
     comment: comment,
     reply: reply ?? this.reply,
+    serviceId: serviceId,
+    serviceName: serviceName,
+    salonId: salonId,
     createdAt: createdAt,
+  );
+}
+
+/// Ручная блокировка времени провайдера: закрытый день, отпуск,
+/// личные часы — слоты клиентов вычитают эти интервалы.
+class ScheduleBlock {
+  const ScheduleBlock({
+    required this.id,
+    required this.providerId,
+    required this.startsAt,
+    required this.endsAt,
+    this.reason = '',
+  });
+
+  final int id;
+  final String providerId;
+  final DateTime startsAt;
+  final DateTime endsAt;
+  final String reason;
+
+  factory ScheduleBlock.fromMap(Map<String, dynamic> map) => ScheduleBlock(
+    id: _parseInt(map['id']),
+    providerId: _parseString(map['provider_id']),
+    startsAt:
+        _parseDateTime(map['starts_at'])?.toLocal() ??
+        DateTime.fromMillisecondsSinceEpoch(0),
+    endsAt:
+        _parseDateTime(map['ends_at'])?.toLocal() ??
+        DateTime.fromMillisecondsSinceEpoch(0),
+    reason: _parseString(map['reason']),
+  );
+}
+
+/// Сертификат на N визитов: провайдер «продаёт» пакет клиенту,
+/// при записи визит списывается из сертификата.
+class Certificate {
+  const Certificate({
+    required this.id,
+    required this.providerId,
+    required this.clientId,
+    required this.title,
+    required this.totalVisits,
+    required this.usedVisits,
+    this.price = 0,
+    this.serviceIds = const [],
+    this.active = true,
+    this.clientName = '',
+    this.providerName = '',
+  });
+
+  final int id;
+  final String providerId;
+  final String clientId;
+  final String title;
+  final int totalVisits;
+  final int usedVisits;
+  final double price;
+  final List<int> serviceIds;
+  final bool active;
+
+  /// Подписи для UI (заполняются отдельным запросом к profiles).
+  final String clientName;
+  final String providerName;
+
+  int get remaining => totalVisits - usedVisits;
+  bool get exhausted => !active || remaining <= 0;
+
+  /// Покрывает ли сертификат набор услуг записи
+  /// (пустой serviceIds — любые услуги провайдера).
+  bool covers(List<int> serviceIds) =>
+      this.serviceIds.isEmpty || serviceIds.every(this.serviceIds.contains);
+
+  factory Certificate.fromMap(Map<String, dynamic> map) => Certificate(
+    id: _parseInt(map['id']),
+    providerId: _parseString(map['provider_id']),
+    clientId: _parseString(map['client_id']),
+    title: _parseString(map['title'], fallback: 'Сертификат'),
+    totalVisits: _parseInt(map['total_visits']),
+    usedVisits: _parseInt(map['used_visits']),
+    price: _parseDouble(map['price']),
+    serviceIds: [
+      for (final s in (map['service_ids'] as List? ?? const [])) _parseInt(s),
+    ],
+    active: _parseBool(map['active'], fallback: true),
   );
 }
 
@@ -936,6 +1062,7 @@ class CloudService {
       'prepay_enabled',
       'prepay_amount',
       'prepay_link',
+      'prepay_new_clients',
       'salon_id',
       'salon_key',
       'auto_assign',
@@ -1032,6 +1159,7 @@ class CloudService {
       'prepay_enabled',
       'prepay_amount',
       'prepay_link',
+      'prepay_new_clients',
       'salon_id',
       'salon_key',
       'auto_assign',
@@ -1100,6 +1228,7 @@ class CloudService {
     bool prepayEnabled = false,
     double prepayAmount = 0,
     String prepayLink = '',
+    bool prepayNewClients = false,
     List<String>? categories,
   }) async {
     final payload = <String, dynamic>{
@@ -1117,6 +1246,7 @@ class CloudService {
       'prepay_enabled': prepayEnabled,
       'prepay_amount': prepayAmount,
       'prepay_link': prepayLink,
+      'prepay_new_clients': prepayNewClients,
     };
     // Старая база без свежих миграций — сохраняем без отсутствующих полей.
     await _runWithMissingColumnFallback(
@@ -1587,23 +1717,38 @@ class CloudService {
   // ---------- Отзывы о провайдере + ответ ----------
 
   /// Отзывы клиентов обо мне/о провайдере (для экрана «Отзывы»).
+  /// Для салона включает отзывы, оставленные его мастерам через
+  /// салонные записи (ratings.salon_id).
   Future<List<ProviderRating>> ratingsAbout(String providerId) async {
-    final rows = await _selectResilient(
-      'ratings',
-      const [
-        'id',
-        'client_id',
-        'master_id',
-        'appointment_id',
-        'rating',
-        'comment',
-        'reply',
-        'created_at',
-      ],
-      eqColumn: 'master_id',
-      eqValue: providerId,
-    );
-    // Имена клиентов отдельным запросом.
+    final cols = const [
+      'id',
+      'client_id',
+      'master_id',
+      'salon_id',
+      'appointment_id',
+      'rating',
+      'comment',
+      'reply',
+      'service_id',
+      'created_at',
+    ];
+    List<dynamic> rows;
+    try {
+      rows = await supabase
+          .from('ratings')
+          .select(cols.join(','))
+          .or('master_id.eq.$providerId,salon_id.eq.$providerId')
+          .order('created_at', ascending: false);
+    } catch (_) {
+      // Старой базе без salon_id — прежняя выборка по master_id.
+      rows = await _selectResilient(
+        'ratings',
+        cols,
+        eqColumn: 'master_id',
+        eqValue: providerId,
+      );
+    }
+    // Имена клиентов и названия услуг отдельными запросами.
     final clientIds = rows
         .map((r) => _parseString(r['client_id']))
         .where((id) => id.isNotEmpty)
@@ -1621,6 +1766,23 @@ class CloudService {
         };
       } catch (_) {}
     }
+    final serviceIds = rows
+        .map((r) => _parseInt(r['service_id']))
+        .where((id) => id > 0)
+        .toSet()
+        .toList();
+    var serviceNames = <int, String>{};
+    if (serviceIds.isNotEmpty) {
+      try {
+        final sRows = await supabase
+            .from('services')
+            .select('id, name')
+            .inFilter('id', serviceIds);
+        serviceNames = {
+          for (final s in sRows) _parseInt(s['id']): _parseString(s['name']),
+        };
+      } catch (_) {}
+    }
     rows.sort(
       (a, b) =>
           _parseString(b['created_at'])
@@ -1631,6 +1793,7 @@ class CloudService {
         ProviderRating.fromMap(
           r,
           clientName: names[_parseString(r['client_id'])] ?? '',
+          serviceName: serviceNames[_parseInt(r['service_id'])] ?? '',
         ),
     ];
   }
@@ -1665,6 +1828,339 @@ class CloudService {
     'onboarded': true,
   }, (p) => supabase.from('profiles').update(p).eq('id', uid!));
 
+  // ---------- Блокировки времени ----------
+
+  /// Ручные блокировки провайдера за период (по умолчанию — 60 дней
+  /// вперёд): закрытые дни/часы вычитаются из слотов клиентов.
+  Future<List<ScheduleBlock>> scheduleBlocksFor(
+    String providerId, {
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    try {
+      var q = supabase
+          .from('schedule_blocks')
+          .select()
+          .eq('provider_id', providerId);
+      if (from != null) {
+        q = q.lt(
+          'starts_at',
+          (to ?? from.add(const Duration(days: 61))).toUtc().toIso8601String(),
+        );
+        q = q.gt('ends_at', from.toUtc().toIso8601String());
+      }
+      final rows = await q.order('starts_at');
+      return [for (final r in rows) ScheduleBlock.fromMap(r)];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Закрыть интервал времени. По умолчанию — своё; салон может
+  /// закрыть время мастеру ([providerId] = uid мастера).
+  Future<ScheduleBlock?> addScheduleBlock({
+    String? providerId,
+    required DateTime start,
+    required DateTime end,
+    String reason = '',
+  }) async {
+    try {
+      final row = await supabase
+          .from('schedule_blocks')
+          .insert({
+            'provider_id': providerId ?? uid,
+            'starts_at': start.toUtc().toIso8601String(),
+            'ends_at': end.toUtc().toIso8601String(),
+            'reason': reason,
+          })
+          .select()
+          .single();
+      return ScheduleBlock.fromMap(row);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> deleteScheduleBlock(int id) =>
+      supabase.from('schedule_blocks').delete().eq('id', id);
+
+  // ---------- Лист ожидания ----------
+
+  /// Жду ли я уже свободное окно у этого провайдера.
+  Future<bool> isWaitingFor(String providerId) async {
+    try {
+      final row = await supabase
+          .from('waitlist')
+          .select('id')
+          .eq('provider_id', providerId)
+          .eq('client_id', uid!)
+          .maybeSingle();
+      return row != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// «Сообщите, когда освободится» — подписка клиента на окно.
+  Future<void> joinWaitlist(String providerId) async {
+    try {
+      await supabase.from('waitlist').upsert({
+        'provider_id': providerId,
+        'client_id': uid,
+      });
+    } catch (_) {}
+  }
+
+  /// Отписка; также вызывается после успешной записи —
+  /// записавшийся клиент больше не ждёт окно.
+  Future<void> leaveWaitlist(String providerId) async {
+    try {
+      await supabase
+          .from('waitlist')
+          .delete()
+          .eq('provider_id', providerId)
+          .eq('client_id', uid!);
+    } catch (_) {}
+  }
+
+  /// Окно освободилось (кто-то отменил запись): push всем ждущим,
+  /// не чаще раза в сутки на клиента. Список ждущих и отметку
+  /// notified_at делает RPC — по RLS отменяющий клиент сам чужие
+  /// строки не видит. Возвращает число уведомлённых.
+  Future<int> notifyWaitlist(String providerId) async {
+    try {
+      final res = await supabase.rpc(
+        'due_waitlist_notifications',
+        params: {'p_provider_id': providerId},
+      );
+      final clientIds = [
+        for (final r in (res as List? ?? const [])) _parseString(r),
+      ].where((id) => id.isNotEmpty).toList();
+      if (clientIds.isEmpty) return 0;
+      final me = await myProfile();
+      final name = me?.name.isNotEmpty == true ? me!.name : 'провайдера';
+      var sent = 0;
+      for (final clientId in clientIds) {
+        try {
+          await supabase.functions.invoke(
+            'send-push',
+            body: {
+              'to_user_id': clientId,
+              'title': 'Освободилось окно',
+              'body': 'У $name появилось свободное время — успейте записаться',
+              'data': {'type': 'waitlist', 'provider_id': providerId},
+            },
+          );
+          sent++;
+        } catch (_) {}
+      }
+      return sent;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  // ---------- Предоплата новых клиентов ----------
+
+  /// Сколько завершённых визитов у меня к этому провайдеру
+  /// (мастеру лично или через его салон). >0 — «проверенный».
+  Future<int> completedVisitsTo(String providerId) async {
+    try {
+      final rows = await supabase
+          .from('appointments')
+          .select('id')
+          .eq('client_id', uid!)
+          .eq('status', 'completed')
+          .or('master_id.eq.$providerId,salon_id.eq.$providerId');
+      return rows.length;
+    } catch (_) {
+      // Старой базе без salon_id не помешает — считаем по master_id.
+      try {
+        final rows = await supabase
+            .from('appointments')
+            .select('id')
+            .eq('client_id', uid!)
+            .eq('status', 'completed')
+            .eq('master_id', providerId);
+        return rows.length;
+      } catch (_) {
+        return 0;
+      }
+    }
+  }
+
+  // ---------- Сертификаты на N визитов ----------
+
+  /// Сертификаты, выданные мной как провайдером (с именами клиентов).
+  Future<List<Certificate>> certificatesIssued() async {
+    try {
+      final rows = await supabase
+          .from('certificates')
+          .select()
+          .eq('provider_id', uid!)
+          .order('created_at', ascending: false);
+      return await _withClientNames(rows);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Мои сертификаты как клиента (чем можно платить визиты).
+  Future<List<Certificate>> myCertificates() async {
+    try {
+      final rows = await supabase
+          .from('certificates')
+          .select()
+          .eq('client_id', uid!)
+          .order('created_at', ascending: false);
+      // Подписи провайдеров отдельным запросом.
+      final ids = rows
+          .map((r) => _parseString(r['provider_id']))
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .toList();
+      var names = <String, String>{};
+      if (ids.isNotEmpty) {
+        try {
+          final pRows = await supabase
+              .from('profiles')
+              .select('id, name')
+              .inFilter('id', ids);
+          names = {
+            for (final p in pRows)
+              _parseString(p['id']): _parseString(p['name']),
+          };
+        } catch (_) {}
+      }
+      return [for (final r in rows) _certWithName(r, providerName: names)];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Certificate _certWithName(
+    Map<String, dynamic> r, {
+    Map<String, String> providerName = const {},
+    Map<String, String> clientName = const {},
+  }) {
+    final c = Certificate.fromMap(r);
+    return Certificate(
+      id: c.id,
+      providerId: c.providerId,
+      clientId: c.clientId,
+      title: c.title,
+      totalVisits: c.totalVisits,
+      usedVisits: c.usedVisits,
+      price: c.price,
+      serviceIds: c.serviceIds,
+      active: c.active,
+      providerName: providerName[c.providerId] ?? '',
+      clientName: clientName[c.clientId] ?? '',
+    );
+  }
+
+  Future<List<Certificate>> _withClientNames(List<dynamic> rows) async {
+    final ids = rows
+        .map((r) => _parseString(r['client_id']))
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    var names = <String, String>{};
+    if (ids.isNotEmpty) {
+      try {
+        final pRows = await supabase
+            .from('profiles')
+            .select('id, name')
+            .inFilter('id', ids);
+        names = {
+          for (final p in pRows) _parseString(p['id']): _parseString(p['name']),
+        };
+      } catch (_) {}
+    }
+    return [for (final r in rows) _certWithName(r, clientName: names)];
+  }
+
+  /// Провайдер выдаёт сертификат клиенту (пакет визитов).
+  Future<void> createCertificate({
+    required String clientId,
+    required String title,
+    required int totalVisits,
+    double price = 0,
+    List<int> serviceIds = const [],
+  }) => _runWithMissingColumnFallback(<String, dynamic>{
+    'provider_id': uid,
+    'client_id': clientId,
+    'title': title,
+    'total_visits': totalVisits,
+    'price': price,
+    'service_ids': serviceIds.isEmpty ? null : serviceIds,
+    'active': true,
+  }, (p) => supabase.from('certificates').insert(p));
+
+  /// Клиент оплачивает визит сертификатом: used_visits + 1.
+  /// Триггер guard_certificate_update не даёт изменить остальное.
+  Future<void> spendCertificate(Certificate cert) => supabase
+      .from('certificates')
+      .update({'used_visits': cert.usedVisits + 1})
+      .eq('id', cert.id);
+
+  Future<void> setCertificateActive(int id, bool active) =>
+      supabase.from('certificates').update({'active': active}).eq('id', id);
+
+  Future<void> deleteCertificate(int id) =>
+      supabase.from('certificates').delete().eq('id', id);
+
+  // ---------- Реферальная программа ----------
+
+  /// Мой реферальный код; при первом обращении генерируется
+  /// и сохраняется в profiles.ref_code.
+  Future<String> myRefCode() async {
+    final p = await myProfile();
+    if (p == null) return '';
+    if (p.refCode.isNotEmpty) return p.refCode;
+    // Код из хвоста uid — стабилен и читаем: BZ-A1B2C3.
+    var code = 'BZ-${p.id.replaceAll('-', '').substring(0, 6).toUpperCase()}';
+    for (var extra = 8; extra <= 12; extra += 2) {
+      try {
+        await supabase
+            .from('profiles')
+            .update({'ref_code': code})
+            .eq('id', p.id);
+        return code;
+      } catch (_) {
+        // Редкая коллизия уникального индекса — длиннее код.
+        code =
+            'BZ-${p.id.replaceAll('-', '').substring(0, extra).toUpperCase()}';
+      }
+    }
+    return '';
+  }
+
+  /// Введённый при регистрации код друга → привязка referred_by.
+  /// false — код не найден или уже привязан.
+  Future<bool> applyReferralCode(String code) async {
+    if (code.trim().isEmpty) return false;
+    try {
+      final res = await supabase.rpc(
+        'apply_referral',
+        params: {'p_code': code.trim()},
+      );
+      return res == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Реферальная скидка расходуется при создании записи.
+  Future<void> consumeRefDiscount() async {
+    try {
+      await supabase
+          .from('profiles')
+          .update({'ref_discount': 0})
+          .eq('id', uid!);
+    } catch (_) {}
+  }
+
   // ---------- Favorites (избранные мастера/салоны клиента) ----------
 
   /// id мастеров/салонов, которых клиент добавил в избранное.
@@ -1698,6 +2194,7 @@ class CloudService {
         'prepay_enabled',
         'prepay_amount',
         'prepay_link',
+        'prepay_new_clients',
         'salon_id',
         'salon_key',
         'auto_assign',
@@ -1781,31 +2278,38 @@ class CloudService {
   }
 
   // ---------- Ratings ----------
-  /// Оценка записи. Если исполнитель — мастер салона, оценка
-  /// прикрепляется к САЛОНУ (клиент записывался в заведение).
+  /// Оценка записи. Отзыв идёт конкретному исполнителю (мастеру),
+  /// а если запись прошла через салон — помечается salon_id и
+  /// учитывается в рейтинге салона тоже.
   Future<void> rateBooking({
     required int appointmentId,
     required String masterId,
     required int rating,
     String comment = '',
+    int? serviceId,
+    String? salonId,
   }) async {
-    var targetId = masterId;
-    try {
-      final mp = await supabase
-          .from('master_profiles')
-          .select('salon_id')
-          .eq('user_id', masterId)
-          .maybeSingle();
-      final salonId = _parseString(mp?['salon_id']);
-      if (salonId.isNotEmpty) targetId = salonId;
-    } catch (_) {}
-    await supabase.from('ratings').insert({
+    var salon = salonId;
+    if (salon == null || salon.isEmpty) {
+      try {
+        final mp = await supabase
+            .from('master_profiles')
+            .select('salon_id')
+            .eq('user_id', masterId)
+            .maybeSingle();
+        final s = _parseString(mp?['salon_id']);
+        if (s.isNotEmpty) salon = s;
+      } catch (_) {}
+    }
+    await _runWithMissingColumnFallback(<String, dynamic>{
       'appointment_id': appointmentId,
       'client_id': uid,
-      'master_id': targetId,
+      'master_id': masterId,
       'rating': rating,
       'comment': comment,
-    });
+      'service_id': serviceId,
+      'salon_id': salon,
+    }, (p) => supabase.from('ratings').insert(p));
   }
 
   /// Мои оценки одним запросом: appointment_id → звёзды.
@@ -2045,6 +2549,7 @@ class CloudService {
         'prepay_enabled',
         'prepay_amount',
         'prepay_link',
+        'prepay_new_clients',
         'salon_id',
         'salon_key',
         'auto_assign',
@@ -2250,6 +2755,7 @@ class CloudService {
         'prepay_enabled',
         'prepay_amount',
         'prepay_link',
+        'prepay_new_clients',
         'salon_id',
         'salon_key',
         'auto_assign',

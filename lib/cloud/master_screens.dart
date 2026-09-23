@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../app_theme.dart';
 import '../notifications/push_service.dart';
+import 'certificates_screen.dart';
 import 'cloud_service.dart';
 import 'credentials_dialog.dart';
 import 'fan_push.dart';
@@ -77,6 +78,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
   List<PortfolioPhoto> _portfolio = [];
   bool _uploadingPhoto = false;
   bool _prepayEnabled = false;
+  bool _prepayNewClients = false;
   final _prepayAmountController = TextEditingController();
   final _prepayLinkController = TextEditingController();
 
@@ -166,6 +168,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         _lng = card?.lng;
         _portfolio = portfolio;
         _prepayEnabled = card?.prepayEnabled ?? false;
+        _prepayNewClients = card?.prepayNewClients ?? false;
         _prepayAmountController.text = (card != null && card.prepayAmount > 0)
             ? card.prepayAmount.toStringAsFixed(0)
             : '';
@@ -411,6 +414,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
           double.tryParse(_prepayAmountController.text.replaceAll(',', '.')) ??
           0,
       prepayLink: _prepayLinkController.text.trim(),
+      prepayNewClients: _prepayNewClients,
       ratingAvg: _ratingAvg,
       ratingCount: _ratingCount,
     );
@@ -542,6 +546,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
         prepayEnabled: _prepayEnabled,
         prepayAmount: prepayAmount,
         prepayLink: _prepayLinkController.text.trim(),
+        prepayNewClients: _prepayNewClients,
         social: _socialController.text.trim(),
         phonePublic: _phonePublic,
         avatarUrl: _avatarUrl,
@@ -839,6 +844,18 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
                     'Клиент нажмёт «Оплатить» при записи — '
                     'откроется эта ссылка в его банковском приложении',
                     style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Предоплата только для новых'),
+                    subtitle: const Text(
+                      'Первый визит клиента — по предоплате; после '
+                      'завершённой записи он считается проверенным',
+                    ),
+                    value: _prepayNewClients,
+                    onChanged: _saving
+                        ? null
+                        : (v) => setState(() => _prepayNewClients = v),
                   ),
                 ],
                 const SizedBox(height: 20),
@@ -1290,6 +1307,14 @@ class _MasterBookingsScreenState extends State<MasterBookingsScreen> {
             body: body,
             data: {'appointment_id': b.id, 'status': status},
           );
+        }
+      }
+      if (status == 'cancelled') {
+        // Освободилось окно — пушим подписчиков листа ожидания
+        // (провайдера записи и салона, если заявка салонная).
+        await _cloud.notifyWaitlist(b.masterId);
+        if (b.salonId.isNotEmpty && b.salonId != b.masterId) {
+          await _cloud.notifyWaitlist(b.salonId);
         }
       }
       await _load();
@@ -2027,6 +2052,34 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                       onTap: _giftHoney,
                     ),
                   ),
+                  // Сертификат на N визитов — пакетом дешевле,
+                  // клиент возвращается за списанием визитов.
+                  if (widget.clientId.isNotEmpty)
+                    Card(
+                      child: ListTile(
+                        leading: Icon(
+                          Icons.confirmation_number_outlined,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        title: const Text('Выдать сертификат'),
+                        subtitle: const Text(
+                          'Пакет визитов — клиент оплатит ими записи',
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () async {
+                          final ok = await showIssueCertificateDialog(
+                            context,
+                            clientId: widget.clientId,
+                            clientName: name,
+                          );
+                          if (ok == true && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Сертификат выдан')),
+                            );
+                          }
+                        },
+                      ),
+                    ),
                   if (_reviews.isNotEmpty) ...[
                     const SizedBox(height: 16),
                     Row(
@@ -2313,6 +2366,12 @@ class _CloudBookingSheetState extends State<CloudBookingSheet> {
           );
         }
       }
+      if (status == 'cancelled') {
+        await _cloud.notifyWaitlist(b.masterId);
+        if (b.salonId.isNotEmpty && b.salonId != b.masterId) {
+          await _cloud.notifyWaitlist(b.salonId);
+        }
+      }
       await _load();
     } catch (_) {
       if (!mounted) return;
@@ -2374,12 +2433,23 @@ class _CloudBookingSheetState extends State<CloudBookingSheet> {
             .workHoursOf(b.masterId)
             .then<Map<String, dynamic>?>((v) => v)
             .catchError((_) => null),
+        _cloud
+            .scheduleBlocksFor(
+              b.masterId,
+              from: day,
+              to: day.add(const Duration(days: 1)),
+            )
+            .then<List<ScheduleBlock>>((v) => v)
+            .catchError((_) => <ScheduleBlock>[]),
       ]);
+      final blocks = results[2] as List<ScheduleBlock>;
       slots = computeFreeSlots(
         day: day,
         durationMinutes: b.durationMinutes,
         busy: results[0] as List<CloudBooking>,
         week: WorkWeek.fromJson(results[1] as Map<String, dynamic>?),
+        stepMinutes: slotStepFor(b.durationMinutes),
+        blocked: [for (final bl in blocks) (bl.startsAt, bl.endsAt)],
       );
     } catch (_) {
       slotsFailed = true;

@@ -371,6 +371,7 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
   final _salonKeyController = TextEditingController();
+  final _refCodeController = TextEditingController();
   final _cloud = CloudService();
   bool _registerMode = false;
   bool _busy = false;
@@ -383,6 +384,7 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
     _passwordController.dispose();
     _nameController.dispose();
     _salonKeyController.dispose();
+    _refCodeController.dispose();
     super.dispose();
   }
 
@@ -425,6 +427,14 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
           name: _nameController.text.trim(),
           salonKey: _salonKeyController.text.trim(),
         );
+        // Код друга → referred_by; бонусы начислятся триггером
+        // после первого завершённого визита приглашённого.
+        final code = _refCodeController.text.trim();
+        if (code.isNotEmpty) {
+          try {
+            await _cloud.applyReferralCode(code);
+          } catch (_) {}
+        }
       } else {
         await _cloud.signIn(login, password);
       }
@@ -577,6 +587,21 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
                     ),
                   ),
                 ),
+                // «Приведи друга»: клиент может ввести код пригласившего.
+                if (_registerMode && widget.role == 'client') ...[
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _refCodeController,
+                    enabled: !_busy,
+                    autocorrect: false,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Код друга (необязательно)',
+                      hintText: 'BZ-XXXXXX — скидка вам и другу',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
                 if (_registerMode && widget.role == 'master') ...[
                   const SizedBox(height: 12),
                   TextFormField(

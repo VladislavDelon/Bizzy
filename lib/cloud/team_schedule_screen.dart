@@ -1,4 +1,5 @@
 import 'package:bizzy_app/cloud/cloud_service.dart';
+import 'package:bizzy_app/cloud/work_hours.dart';
 import 'package:flutter/material.dart';
 
 /// «Расписание команды» у салона: все салонные заявки выбранного
@@ -168,27 +169,57 @@ class _TeamScheduleScreenState extends State<TeamScheduleScreen> {
                                   top: 8,
                                   bottom: 4,
                                 ),
-                                child: Text(
-                                  mid.isEmpty
-                                      ? 'Без мастера'
-                                      : (_masterNames[mid]?.isNotEmpty == true
-                                            ? _masterNames[mid]!
-                                            : (groups[mid]!
-                                                          .first
-                                                          .masterName
-                                                          .isNotEmpty ==
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        mid.isEmpty
+                                            ? 'Без мастера'
+                                            : (_masterNames[mid]?.isNotEmpty ==
                                                       true
-                                                  ? groups[mid]!
-                                                        .first
-                                                        .masterName
-                                                  : 'Мастер')),
-                                  style: Theme.of(context).textTheme.titleSmall
-                                      ?.copyWith(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                        fontWeight: FontWeight.bold,
+                                                  ? _masterNames[mid]!
+                                                  : (groups[mid]!
+                                                                .first
+                                                                .masterName
+                                                                .isNotEmpty ==
+                                                            true
+                                                        ? groups[mid]!
+                                                              .first
+                                                              .masterName
+                                                        : 'Мастер')),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleSmall
+                                            ?.copyWith(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary,
+                                              fontWeight: FontWeight.bold,
+                                            ),
                                       ),
+                                    ),
+                                    // Салон закрывает время конкретному
+                                    // мастеру — слоты пропадут у клиентов.
+                                    if (mid.isNotEmpty)
+                                      IconButton(
+                                        tooltip: 'Закрыть время этому мастеру',
+                                        icon: const Icon(
+                                          Icons.event_busy,
+                                          size: 20,
+                                        ),
+                                        onPressed: () =>
+                                            Navigator.of(context).push<void>(
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    ScheduleBlocksScreen(
+                                                      providerId: mid,
+                                                      providerName:
+                                                          _masterNames[mid],
+                                                    ),
+                                              ),
+                                            ),
+                                      ),
+                                  ],
                                 ),
                               ),
                               for (final b in groups[mid]!)

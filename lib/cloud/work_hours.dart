@@ -104,14 +104,22 @@ class WorkWeek {
   WorkWeek copy() => WorkWeek.fromJson(toJson());
 }
 
+/// Шаг сетки слотов под длительность визита: услуги по 90 минут
+/// дают слоты через 90 минут — между ними не остаётся мёртвых дыр,
+/// в которые другая запись не помещается. Меньше 15 мин — полчаса.
+int slotStepFor(int durationMinutes) =>
+    durationMinutes >= 15 ? durationMinutes.clamp(15, 240) : 30;
+
 /// Свободные слоты дня по расписанию: рабочие часы минус занятые
-/// записи и перерывы. [week] == null → дефолт 9:00–18:00 без выходных.
+/// записи, перерывы и ручные блокировки ([blocked] — отпуск,
+/// закрытые часы). [week] == null → дефолт 9:00–18:00 без выходных.
 List<DateTime> computeFreeSlots({
   required DateTime day,
   required int durationMinutes,
   required List<CloudBooking> busy,
   WorkWeek? week,
   int stepMinutes = 30,
+  List<(DateTime, DateTime)> blocked = const [],
 }) {
   final w = week ?? WorkWeek();
   final wd = w.dayOf(day);
@@ -140,7 +148,10 @@ List<DateTime> computeFreeSlots({
       );
       return slot.isBefore(be) && bs.isBefore(slotEnd);
     });
-    if (!overlapsBusy && !overlapsBreak) slots.add(slot);
+    final overlapsBlock = blocked.any(
+      (bl) => slot.isBefore(bl.$2) && bl.$1.isBefore(slotEnd),
+    );
+    if (!overlapsBusy && !overlapsBreak && !overlapsBlock) slots.add(slot);
   }
   return slots;
 }
@@ -291,6 +302,309 @@ class _WorkHoursEditorState extends State<WorkHoursEditor> {
   }
 }
 
+/// Экран «Закрытые дни и часы»: ручные блокировки поверх
+/// рабочего расписания — отпуск, личное, больничный.
+/// Салон может открыть его за конкретного мастера ([providerId]).
+class ScheduleBlocksScreen extends StatefulWidget {
+  const ScheduleBlocksScreen({super.key, this.providerId, this.providerName});
+
+  /// Чьё время закрываем; null — текущий пользователь.
+  final String? providerId;
+  final String? providerName;
+
+  @override
+  State<ScheduleBlocksScreen> createState() => _ScheduleBlocksScreenState();
+}
+
+class _ScheduleBlocksScreenState extends State<ScheduleBlocksScreen> {
+  final _cloud = CloudService();
+  List<ScheduleBlock> _blocks = const [];
+  bool _loading = true;
+  bool _failed = false;
+
+  String get _pid => widget.providerId ?? _cloud.uid ?? '';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    try {
+      final blocks = await _cloud.scheduleBlocksFor(
+        _pid,
+        from: DateTime.now().subtract(const Duration(days: 1)),
+        to: DateTime.now().add(const Duration(days: 400)),
+      );
+      if (!mounted) return;
+      setState(() {
+        _blocks = blocks;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _failed = true;
+        _loading = false;
+      });
+    }
+  }
+
+  String _fmt(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
+
+  String _fmtT(DateTime d) =>
+      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+  Future<void> _add() async {
+    var day = DateTime.now();
+    final pickedDay = await showDatePicker(
+      context: context,
+      initialDate: day,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (pickedDay == null || !mounted) return;
+    day = pickedDay;
+
+    // «Весь день» или конкретный диапазон часов.
+    final span = await showModalBottomSheet<(TimeOfDay, TimeOfDay)>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => _BlockSpanPicker(day: day),
+    );
+    if (span == null || !mounted) return;
+    final start = DateTime(
+      day.year,
+      day.month,
+      day.day,
+      span.$1.hour,
+      span.$1.minute,
+    );
+    final end = DateTime(
+      day.year,
+      day.month,
+      day.day,
+      span.$2.hour,
+      span.$2.minute,
+    );
+    final reason = await _askReason();
+    if (reason == null || !mounted) return;
+    final created = await _cloud.addScheduleBlock(
+      providerId: _pid,
+      start: start,
+      end: end,
+      reason: reason,
+    );
+    if (!mounted) return;
+    if (created == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Не удалось закрыть время')));
+      return;
+    }
+    await _load();
+  }
+
+  Future<String?> _askReason() {
+    final c = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Причина (необязательно)'),
+        content: TextField(
+          controller: c,
+          decoration: const InputDecoration(
+            hintText: 'Отпуск, личное, больничный…',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(c.text.trim()),
+            child: const Text('Закрыть'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _remove(ScheduleBlock b) async {
+    try {
+      await _cloud.deleteScheduleBlock(b.id);
+      await _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось убрать блокировку')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final who = widget.providerName;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          who == null ? 'Закрытые дни и часы' : 'Закрытое время · $who',
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _add,
+        icon: const Icon(Icons.block),
+        label: const Text('Закрыть время'),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _failed
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Не удалось загрузить'),
+                  TextButton(onPressed: _load, child: const Text('Повторить')),
+                ],
+              ),
+            )
+          : _blocks.isEmpty
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'Нет закрытых дат.\nЗакройте день или часы — клиенты '
+                  'не смогут записаться на это время.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+              itemCount: _blocks.length,
+              itemBuilder: (context, i) {
+                final b = _blocks[i];
+                final wholeDay =
+                    b.startsAt.hour == 0 &&
+                    b.startsAt.minute == 0 &&
+                    b.endsAt.hour == 23 &&
+                    b.endsAt.minute == 59;
+                return Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.event_busy),
+                    title: Text(
+                      wholeDay
+                          ? '${_fmt(b.startsAt)} — весь день'
+                          : '${_fmt(b.startsAt)} · ${_fmtT(b.startsAt)}–${_fmtT(b.endsAt)}',
+                    ),
+                    subtitle: b.reason.isEmpty ? null : Text(b.reason),
+                    trailing: IconButton(
+                      tooltip: 'Открыть снова',
+                      icon: const Icon(Icons.close),
+                      onPressed: () => _remove(b),
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+/// Выбор диапазона блокировки: «весь день» или часы начала/конца.
+class _BlockSpanPicker extends StatefulWidget {
+  const _BlockSpanPicker({required this.day});
+
+  final DateTime day;
+
+  @override
+  State<_BlockSpanPicker> createState() => _BlockSpanPickerState();
+}
+
+class _BlockSpanPickerState extends State<_BlockSpanPicker> {
+  bool _wholeDay = true;
+  TimeOfDay _from = const TimeOfDay(hour: 12, minute: 0);
+  TimeOfDay _to = const TimeOfDay(hour: 15, minute: 0);
+
+  String _hm(TimeOfDay t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Закрыть время',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Весь день'),
+              value: _wholeDay,
+              onChanged: (v) => setState(() => _wholeDay = v),
+            ),
+            if (!_wholeDay)
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        final t = await showTimePicker(
+                          context: context,
+                          initialTime: _from,
+                        );
+                        if (t != null) setState(() => _from = t);
+                      },
+                      child: Text('с ${_hm(_from)}'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        final t = await showTimePicker(
+                          context: context,
+                          initialTime: _to,
+                        );
+                        if (t != null) setState(() => _to = t);
+                      },
+                      child: Text('до ${_hm(_to)}'),
+                    ),
+                  ),
+                ],
+              ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(
+                _wholeDay
+                    ? (
+                        const TimeOfDay(hour: 0, minute: 0),
+                        const TimeOfDay(hour: 23, minute: 59),
+                      )
+                    : (_from, _to),
+              ),
+              child: const Text('Далее'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Экран «Рабочие часы» у мастера/салона.
 class WorkHoursScreen extends StatefulWidget {
   const WorkHoursScreen({super.key});
@@ -357,6 +671,13 @@ class _WorkHoursScreenState extends State<WorkHoursScreen> {
       appBar: AppBar(
         title: const Text('Рабочие часы'),
         actions: [
+          IconButton(
+            tooltip: 'Закрытые дни и часы',
+            icon: const Icon(Icons.event_busy),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const ScheduleBlocksScreen()),
+            ),
+          ),
           TextButton(
             onPressed: _saving || _loading ? null : _save,
             child: Text(_saving ? 'Сохраняю…' : 'Сохранить'),

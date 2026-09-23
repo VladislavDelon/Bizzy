@@ -11,11 +11,13 @@ import 'package:bizzy_app/cloud/credentials_dialog.dart';
 import 'package:bizzy_app/cloud/fan_push.dart';
 import 'package:bizzy_app/cloud/master_screens.dart';
 import 'package:bizzy_app/cloud/blacklist_screen.dart';
+import 'package:bizzy_app/cloud/certificates_screen.dart';
 import 'package:bizzy_app/cloud/offers_screens.dart';
 import 'package:bizzy_app/cloud/onboarding_screen.dart';
 import 'package:bizzy_app/cloud/provider_stats_screen.dart';
 import 'package:bizzy_app/cloud/team_schedule_screen.dart';
 import 'package:bizzy_app/cloud/supabase_config.dart';
+import 'package:bizzy_app/cloud/work_hours.dart';
 import 'package:bizzy_app/currency.dart';
 import 'package:bizzy_app/notifications/notifications_screen.dart';
 import 'package:bizzy_app/notifications/push_service.dart';
@@ -5652,6 +5654,26 @@ class _MoreTabState extends State<MoreTab> {
             subtitle: const Text('Клиенты без права записи'),
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute(builder: (context) => const BlacklistScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.event_busy),
+            title: const Text('Закрытые дни и часы'),
+            subtitle: const Text('Отпуск, личное — слоты закрываются'),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (context) => const ScheduleBlocksScreen(),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.confirmation_number_outlined),
+            title: const Text('Сертификаты'),
+            subtitle: const Text('Пакеты визитов, выданные клиентам'),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (context) => const ProviderCertificatesScreen(),
+              ),
             ),
           ),
         ],

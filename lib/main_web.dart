@@ -97,36 +97,44 @@ class _BizzyWebAppState extends State<BizzyWebApp> {
           ],
           supportedLocales: const [Locale('ru'), Locale('en')],
           locale: const Locale('ru'),
-          // Десктопный браузер: контент по центру, не растягиваем
-          // телефонные экраны на весь монитор.
-          builder: (context, child) => Container(
-            color: Theme.of(context).colorScheme.surfaceContainerLowest,
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1100),
-                child: ClipRect(child: child),
-              ),
-            ),
-          ),
           home: _loading
               ? const Scaffold(
                   body: Center(child: CircularProgressIndicator()),
                 )
               : _profile == null
+              // Экран входа — на весь экран со своим градиентом.
               ? WebAuthScreen(onSignedIn: _resolveSession)
-              : _profile!.role == 'client'
-              ? ClientHome(
-                  profile: _profile!,
-                  onSignOut: _signOut,
-                  onDeleteAccount: () async {
-                    await _cloud.deleteMyAccount();
-                    await _resolveSession();
+              // Внутренние экраны: на широком окне не растягиваем
+              // телефонную разметку на весь монитор — по центру.
+              : LayoutBuilder(
+                  builder: (context, c) {
+                    final Widget home = _profile!.role == 'client'
+                        ? ClientHome(
+                            profile: _profile!,
+                            onSignOut: _signOut,
+                            onDeleteAccount: () async {
+                              await _cloud.deleteMyAccount();
+                              await _resolveSession();
+                            },
+                            onProfileUpdated: _resolveSession,
+                          )
+                        : ProviderHomeWeb(
+                            profile: _profile!,
+                            onSignOut: _signOut,
+                          );
+                    if (c.maxWidth <= 760) return home;
+                    return ColoredBox(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerLowest,
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1000),
+                          child: ClipRect(child: home),
+                        ),
+                      ),
+                    );
                   },
-                  onProfileUpdated: _resolveSession,
-                )
-              : ProviderHomeWeb(
-                  profile: _profile!,
-                  onSignOut: _signOut,
                 ),
         );
       },

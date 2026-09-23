@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -5,8 +7,8 @@ import '../cloud/animated_logo.dart';
 import '../cloud/cloud_service.dart';
 
 /// Веб-вход и регистрация: клиент, мастер или салон.
-/// Тот же визуал, что у мобильного входа: анимированный логотип
-/// со свечением, затем плавно выезжает карточка с формой.
+/// Интро: логотип появляется по центру экрана, затем поднимается
+/// наверх, под ним плавно выезжает карточка с формой.
 /// Карточка адаптивна: на десктопе — по центру ~440px, на
 /// мобильном браузере — почти во всю ширину.
 class WebAuthScreen extends StatefulWidget {
@@ -29,6 +31,7 @@ class _WebAuthScreenState extends State<WebAuthScreen>
   final _salonKey = TextEditingController();
 
   late final AnimationController _controller;
+  late final Animation<double> _lift;
   late final Animation<double> _titleOpacity;
   late final Animation<double> _cardOpacity;
   late final Animation<Offset> _cardSlide;
@@ -44,25 +47,32 @@ class _WebAuthScreenState extends State<WebAuthScreen>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1400),
+      duration: const Duration(milliseconds: 2300),
+    );
+    // Логотип появляется по центру экрана, затем поднимается наверх.
+    _lift = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.32, 0.62, curve: Curves.easeInOutCubic),
+      ),
     );
     _titleOpacity = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const Interval(0.3, 0.6, curve: Curves.easeOut),
+        curve: const Interval(0.48, 0.72, curve: Curves.easeOut),
       ),
     );
     _cardOpacity = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const Interval(0.45, 0.85, curve: Curves.easeOut),
+        curve: const Interval(0.58, 0.92, curve: Curves.easeOut),
       ),
     );
-    _cardSlide =
-        Tween<Offset>(begin: const Offset(0, 0.12), end: Offset.zero).animate(
+    _cardSlide = Tween<Offset>(begin: const Offset(0, 0.14), end: Offset.zero)
+        .animate(
           CurvedAnimation(
             parent: _controller,
-            curve: const Interval(0.45, 0.9, curve: Curves.easeOutCubic),
+            curve: const Interval(0.58, 0.95, curve: Curves.easeOutCubic),
           ),
         );
     _controller.forward();
@@ -153,268 +163,364 @@ class _WebAuthScreenState extends State<WebAuthScreen>
           ),
         ),
         child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AnimatedLogo(animation: _controller, size: 120),
-                  const SizedBox(height: 16),
-                  FadeTransition(
-                    opacity: _titleOpacity,
-                    child: Column(
-                      children: [
-                        Text(
-                          'Добро пожаловать в',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Text(
-                          'Bizzy',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.headlineLarge
-                              ?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: scheme.primary,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  // Карточка входа — выезжает снизу после логотипа.
-                  AnimatedBuilder(
-                    animation: _controller,
-                    builder: (context, child) => Opacity(
-                      opacity: _cardOpacity.value,
-                      child: FractionalTranslation(
-                        translation: _cardSlide.value,
-                        child: child,
-                      ),
-                    ),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 440),
-                      child: Card(
-                        elevation: 10,
-                        shadowColor: scheme.primary.withValues(alpha: 0.25),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Form(
-                            key: _formKey,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.stretch,
-                              children: [
-                                Text(
-                                  _register
-                                      ? 'Регистрация — $roleName'
-                                      : 'Вход — $roleName',
-                                  textAlign: TextAlign.center,
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleLarge,
-                                ),
-                                const SizedBox(height: 16),
-                                SegmentedButton<String>(
-                                  segments: const [
-                                    ButtonSegment(
-                                      value: 'client',
-                                      icon: Icon(Icons.person_outline),
-                                      label: Text('Клиент'),
+          child: LayoutBuilder(
+            builder: (context, c) {
+              final logoSize = c.maxWidth > 760 ? 112.0 : 96.0;
+              final startSize = logoSize * 1.7;
+              final endTop = (c.maxHeight * 0.06).clamp(14.0, 56.0);
+              // Стартовая позиция — центр экрана, конечная — верх.
+              final startTop = math.max(
+                c.maxHeight / 2 - startSize / 2,
+                endTop,
+              );
+              return AnimatedBuilder(
+                animation: _controller,
+                builder: (context, _) {
+                  final lift = _lift.value;
+                  final logoTop = startTop + (endTop - startTop) * lift;
+                  final curSize = startSize + (logoSize - startSize) * lift;
+
+                  return Stack(
+                    children: [
+                      // Заголовок и карточка — под конечной позицией логотипа.
+                      // На десктопе всё помещается без прокрутки; скролл —
+                      // только запасной вариант для низких окон.
+                      Positioned.fill(
+                        top: endTop + logoSize + 8,
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              FadeTransition(
+                                opacity: _titleOpacity,
+                                child: Column(
+                                  children: [
+                                    Text(
+                                      'Добро пожаловать в',
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium,
                                     ),
-                                    ButtonSegment(
-                                      value: 'master',
-                                      icon: Icon(Icons.content_cut),
-                                      label: Text('Мастер'),
-                                    ),
-                                    ButtonSegment(
-                                      value: 'salon',
-                                      icon: Icon(Icons.storefront_outlined),
-                                      label: Text('Салон'),
+                                    Text(
+                                      'Bizzy',
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .headlineLarge
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                            color: scheme.primary,
+                                          ),
                                     ),
                                   ],
-                                  selected: {_role},
-                                  onSelectionChanged: _busy
-                                      ? null
-                                      : (s) =>
-                                            setState(() => _role = s.first),
                                 ),
-                                const SizedBox(height: 16),
-                                if (_register) ...[
-                                  TextFormField(
-                                    controller: _name,
-                                    enabled: !_busy,
-                                    textCapitalization:
-                                        TextCapitalization.words,
-                                    decoration: InputDecoration(
-                                      labelText: _role == 'salon'
-                                          ? 'Название салона'
-                                          : 'Ваше имя',
-                                      border: const OutlineInputBorder(),
-                                    ),
-                                    validator: (v) =>
-                                        (v?.trim().length ?? 0) < 2
-                                        ? 'Минимум 2 символа'
-                                        : null,
-                                  ),
-                                  const SizedBox(height: 12),
-                                ],
-                                TextFormField(
-                                  controller: _login,
-                                  enabled: !_busy,
-                                  autocorrect: false,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Логин',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  validator: (v) {
-                                    final s = v?.trim() ?? '';
-                                    if (s.length < 3) {
-                                      return 'Минимум 3 символа';
-                                    }
-                                    if (s.contains(' ')) return 'Без пробелов';
-                                    return null;
-                                  },
-                                ),
-                                const SizedBox(height: 12),
-                                TextFormField(
-                                  controller: _password,
-                                  enabled: !_busy,
-                                  obscureText: !_showPassword,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Пароль',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  onFieldSubmitted: (_) => _submit(),
-                                  validator: (v) => v == null || v.length < 6
-                                      ? 'Минимум 6 символов'
-                                      : null,
-                                ),
-                                InkWell(
-                                  onTap: _busy
-                                      ? null
-                                      : () => setState(
-                                          () =>
-                                              _showPassword = !_showPassword,
-                                        ),
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 4,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Checkbox(
-                                          value: _showPassword,
-                                          onChanged: _busy
-                                              ? null
-                                              : (v) => setState(
-                                                  () =>
-                                                      _showPassword =
-                                                          v ?? false,
-                                                ),
-                                          materialTapTargetSize:
-                                              MaterialTapTargetSize
-                                                  .shrinkWrap,
-                                          visualDensity:
-                                              VisualDensity.compact,
-                                        ),
-                                        Text(
-                                          'Показать пароль',
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.bodySmall,
-                                        ),
-                                      ],
-                                    ),
+                              ),
+                              const SizedBox(height: 18),
+                              // Карточка входа — выезжает снизу после логотипа.
+                              AnimatedBuilder(
+                                animation: _controller,
+                                builder: (context, child) => Opacity(
+                                  opacity: _cardOpacity.value,
+                                  child: FractionalTranslation(
+                                    translation: _cardSlide.value,
+                                    child: child,
                                   ),
                                 ),
-                                if (_register && _role == 'client') ...[
-                                  TextFormField(
-                                    controller: _refCode,
-                                    enabled: !_busy,
-                                    autocorrect: false,
-                                    textCapitalization:
-                                        TextCapitalization.characters,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Код друга (необязательно)',
-                                      hintText:
-                                          'BZ-XXXXXX — скидка вам и другу',
-                                      border: OutlineInputBorder(),
-                                    ),
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 440,
                                   ),
-                                  const SizedBox(height: 12),
-                                ],
-                                if (_register && _role == 'master') ...[
-                                  TextFormField(
-                                    controller: _salonKey,
-                                    enabled: !_busy,
-                                    autocorrect: false,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Ключ салона (необязательно)',
-                                      hintText:
-                                          'BZ-XXXXXX — если вы сотрудник салона',
-                                      border: OutlineInputBorder(),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                ],
-                                if (_error != null) ...[
-                                  Text(
-                                    _error!,
-                                    style: TextStyle(color: scheme.error),
-                                  ),
-                                  const SizedBox(height: 8),
-                                ],
-                                const SizedBox(height: 4),
-                                FilledButton(
-                                  onPressed: _busy ? null : _submit,
-                                  style: FilledButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 14,
+                                  child: Card(
+                                    elevation: 10,
+                                    shadowColor: scheme.primary.withValues(
+                                      alpha: 0.25,
                                     ),
                                     shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14),
+                                      borderRadius: BorderRadius.circular(24),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(24),
+                                      child: Form(
+                                        key: _formKey,
+                                        child: AutofillGroup(
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              Text(
+                                                _register
+                                                    ? 'Регистрация — $roleName'
+                                                    : 'Вход — $roleName',
+                                                textAlign: TextAlign.center,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .titleLarge,
+                                              ),
+                                              const SizedBox(height: 16),
+                                              SegmentedButton<String>(
+                                                segments: const [
+                                                  ButtonSegment(
+                                                    value: 'client',
+                                                    icon: Icon(
+                                                      Icons.person_outline,
+                                                    ),
+                                                    label: Text('Клиент'),
+                                                  ),
+                                                  ButtonSegment(
+                                                    value: 'master',
+                                                    icon: Icon(
+                                                      Icons.content_cut,
+                                                    ),
+                                                    label: Text('Мастер'),
+                                                  ),
+                                                  ButtonSegment(
+                                                    value: 'salon',
+                                                    icon: Icon(
+                                                      Icons.storefront_outlined,
+                                                    ),
+                                                    label: Text('Салон'),
+                                                  ),
+                                                ],
+                                                selected: {_role},
+                                                onSelectionChanged: _busy
+                                                    ? null
+                                                    : (s) => setState(
+                                                        () => _role = s.first,
+                                                      ),
+                                              ),
+                                              const SizedBox(height: 16),
+                                              if (_register) ...[
+                                                TextFormField(
+                                                  controller: _name,
+                                                  enabled: !_busy,
+                                                  textCapitalization:
+                                                      TextCapitalization.words,
+                                                  decoration: InputDecoration(
+                                                    labelText: _role == 'salon'
+                                                        ? 'Название салона'
+                                                        : 'Ваше имя',
+                                                    border:
+                                                        const OutlineInputBorder(),
+                                                  ),
+                                                  validator: (v) =>
+                                                      (v?.trim().length ?? 0) <
+                                                          2
+                                                      ? 'Минимум 2 символа'
+                                                      : null,
+                                                ),
+                                                const SizedBox(height: 12),
+                                              ],
+                                              TextFormField(
+                                                controller: _login,
+                                                enabled: !_busy,
+                                                autocorrect: false,
+                                                autofillHints: const [
+                                                  AutofillHints.username,
+                                                ],
+                                                decoration:
+                                                    const InputDecoration(
+                                                      labelText: 'Логин',
+                                                      border:
+                                                          OutlineInputBorder(),
+                                                    ),
+                                                validator: (v) {
+                                                  final s = v?.trim() ?? '';
+                                                  if (s.length < 3) {
+                                                    return 'Минимум 3 символа';
+                                                  }
+                                                  if (s.contains(' ')) {
+                                                    return 'Без пробелов';
+                                                  }
+                                                  return null;
+                                                },
+                                              ),
+                                              const SizedBox(height: 12),
+                                              TextFormField(
+                                                controller: _password,
+                                                enabled: !_busy,
+                                                obscureText: !_showPassword,
+                                                autofillHints: [
+                                                  if (_register)
+                                                    AutofillHints.newPassword
+                                                  else
+                                                    AutofillHints.password,
+                                                ],
+                                                decoration:
+                                                    const InputDecoration(
+                                                      labelText: 'Пароль',
+                                                      border:
+                                                          OutlineInputBorder(),
+                                                    ),
+                                                onFieldSubmitted: (_) =>
+                                                    _submit(),
+                                                validator: (v) =>
+                                                    v == null || v.length < 6
+                                                    ? 'Минимум 6 символов'
+                                                    : null,
+                                              ),
+                                              InkWell(
+                                                onTap: _busy
+                                                    ? null
+                                                    : () => setState(
+                                                        () => _showPassword =
+                                                            !_showPassword,
+                                                      ),
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        vertical: 4,
+                                                      ),
+                                                  child: Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Checkbox(
+                                                        value: _showPassword,
+                                                        onChanged: _busy
+                                                            ? null
+                                                            : (v) => setState(
+                                                                () =>
+                                                                    _showPassword =
+                                                                        v ??
+                                                                        false,
+                                                              ),
+                                                        materialTapTargetSize:
+                                                            MaterialTapTargetSize
+                                                                .shrinkWrap,
+                                                        visualDensity:
+                                                            VisualDensity
+                                                                .compact,
+                                                      ),
+                                                      Text(
+                                                        'Показать пароль',
+                                                        style: Theme.of(context)
+                                                            .textTheme
+                                                            .bodySmall,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                              if (_register &&
+                                                  _role == 'client') ...[
+                                                TextFormField(
+                                                  controller: _refCode,
+                                                  enabled: !_busy,
+                                                  autocorrect: false,
+                                                  textCapitalization:
+                                                      TextCapitalization
+                                                          .characters,
+                                                  decoration:
+                                                      const InputDecoration(
+                                                        labelText: 'Код друга (необязательно)',
+                                                        hintText: 'BZ-XXXXXX — скидка вам и другу',
+                                                        border:
+                                                            OutlineInputBorder(),
+                                                      ),
+                                                ),
+                                                const SizedBox(height: 12),
+                                              ],
+                                              if (_register &&
+                                                  _role == 'master') ...[
+                                                TextFormField(
+                                                  controller: _salonKey,
+                                                  enabled: !_busy,
+                                                  autocorrect: false,
+                                                  decoration:
+                                                      const InputDecoration(
+                                                        labelText: 'Ключ салона (необязательно)',
+                                                        hintText: 'BZ-XXXXXX — если вы сотрудник салона',
+                                                        border:
+                                                            OutlineInputBorder(),
+                                                      ),
+                                                ),
+                                                const SizedBox(height: 12),
+                                              ],
+                                              if (_error != null) ...[
+                                                Text(
+                                                  _error!,
+                                                  style: TextStyle(
+                                                    color: scheme.error,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 8),
+                                              ],
+                                              const SizedBox(height: 4),
+                                              FilledButton(
+                                                onPressed: _busy
+                                                    ? null
+                                                    : _submit,
+                                                style: FilledButton.styleFrom(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        vertical: 14,
+                                                      ),
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          14,
+                                                        ),
+                                                  ),
+                                                ),
+                                                child: Text(
+                                                  _busy
+                                                      ? 'Подождите…'
+                                                      : (_register
+                                                            ? 'Создать аккаунт'
+                                                            : 'Войти'),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              TextButton(
+                                                onPressed: _busy
+                                                    ? null
+                                                    : () => setState(() {
+                                                        _register = !_register;
+                                                        _error = null;
+                                                      }),
+                                                child: Text(
+                                                  _register
+                                                      ? 'Уже есть аккаунт — войти'
+                                                      : 'Нет аккаунта — зарегистрироваться',
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                  child: Text(
-                                    _busy
-                                        ? 'Подождите…'
-                                        : (_register
-                                              ? 'Создать аккаунт'
-                                              : 'Войти'),
-                                  ),
                                 ),
-                                const SizedBox(height: 4),
-                                TextButton(
-                                  onPressed: _busy
-                                      ? null
-                                      : () => setState(() {
-                                          _register = !_register;
-                                          _error = null;
-                                        }),
-                                  child: Text(
-                                    _register
-                                        ? 'Уже есть аккаунт — войти'
-                                        : 'Нет аккаунта — зарегистрироваться',
-                                  ),
-                                ),
-                              ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // Логотип: появляется по центру экрана,
+                      // затем поднимается наверх и уменьшается.
+                      Positioned(
+                        top: logoTop,
+                        left: 0,
+                        right: 0,
+                        child: IgnorePointer(
+                          child: Center(
+                            child: AnimatedLogo(
+                              animation: _controller,
+                              size: curSize,
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                    ],
+                  );
+                },
+              );
+            },
           ),
         ),
       ),

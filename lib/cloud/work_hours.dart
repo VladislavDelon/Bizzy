@@ -1,5 +1,6 @@
 import 'package:bizzy_app/cloud/cloud_service.dart';
 import 'package:flutter/material.dart';
+import 'package:table_calendar/table_calendar.dart';
 
 /// Рабочие часы одного дня недели.
 class WorkDay {
@@ -304,11 +305,14 @@ class _WorkHoursEditorState extends State<WorkHoursEditor> {
 
 /// Экран «Закрытые дни и часы»: ручные блокировки поверх
 /// рабочего расписания — отпуск, личное, больничный.
-/// Салон может открыть его за конкретного мастера ([providerId]).
+/// Салон может открыть его за конкретного мастера ([providerId])
+/// или выбрать мастера чипами сверху — тогда заявки к нему
+/// на закрытые даты не приходят.
 class ScheduleBlocksScreen extends StatefulWidget {
   const ScheduleBlocksScreen({super.key, this.providerId, this.providerName});
 
-  /// Чьё время закрываем; null — текущий пользователь.
+  /// Чьё время закрываем; null — текущий пользователь, а у салона
+  /// появляется выбор: салон целиком или конкретный мастер.
   final String? providerId;
   final String? providerName;
 
@@ -322,12 +326,34 @@ class _ScheduleBlocksScreenState extends State<ScheduleBlocksScreen> {
   bool _loading = true;
   bool _failed = false;
 
-  String get _pid => widget.providerId ?? _cloud.uid ?? '';
+  /// Салон: список «кого закрываем» — сам салон + его мастера.
+  List<MasterCard> _masters = const [];
+  String? _selectedId; // null — ещё не определено (грузим роль)
+
+  bool get _isSalonPicker =>
+      widget.providerId == null && _masters.isNotEmpty;
+
+  String get _pid =>
+      widget.providerId ?? _selectedId ?? _cloud.uid ?? '';
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _initTargets();
+  }
+
+  /// У салона подгружаем команду — появляется выбор мастера.
+  Future<void> _initTargets() async {
+    if (widget.providerId == null) {
+      try {
+        final p = await _cloud.myProfile();
+        if (p?.role == 'salon') {
+          final masters = await _cloud.salonMasters();
+          if (mounted) setState(() => _masters = masters);
+        }
+      } catch (_) {}
+    }
+    await _load();
   }
 
   Future<void> _load() async {
@@ -362,47 +388,54 @@ class _ScheduleBlocksScreenState extends State<ScheduleBlocksScreen> {
       '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
   Future<void> _add() async {
-    var day = DateTime.now();
-    final pickedDay = await showDatePicker(
+    // Мультивыбор дней: тапаем несколько дат на календаре —
+    // закроются все выбранные (отпуск на неделю = одно действие).
+    final days = await showModalBottomSheet<List<DateTime>>(
       context: context,
-      initialDate: day,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => const _BlockDaysPicker(),
     );
-    if (pickedDay == null || !mounted) return;
-    day = pickedDay;
+    if (days == null || days.isEmpty || !mounted) return;
 
-    // «Весь день» или конкретный диапазон часов.
+    // «Весь день» или конкретный диапазон часов — одинаково
+    // для каждого выбранного дня.
     final span = await showModalBottomSheet<(TimeOfDay, TimeOfDay)>(
       context: context,
       showDragHandle: true,
-      builder: (ctx) => _BlockSpanPicker(day: day),
+      builder: (ctx) => _BlockSpanPicker(day: days.first),
     );
     if (span == null || !mounted) return;
-    final start = DateTime(
-      day.year,
-      day.month,
-      day.day,
-      span.$1.hour,
-      span.$1.minute,
-    );
-    final end = DateTime(
-      day.year,
-      day.month,
-      day.day,
-      span.$2.hour,
-      span.$2.minute,
-    );
+
     final reason = await _askReason();
     if (reason == null || !mounted) return;
-    final created = await _cloud.addScheduleBlock(
-      providerId: _pid,
-      start: start,
-      end: end,
-      reason: reason,
-    );
+
+    var created = 0;
+    for (final day in days) {
+      final start = DateTime(
+        day.year,
+        day.month,
+        day.day,
+        span.$1.hour,
+        span.$1.minute,
+      );
+      final end = DateTime(
+        day.year,
+        day.month,
+        day.day,
+        span.$2.hour,
+        span.$2.minute,
+      );
+      final ok = await _cloud.addScheduleBlock(
+        providerId: _pid,
+        start: start,
+        end: end,
+        reason: reason,
+      );
+      if (ok != null) created++;
+    }
     if (!mounted) return;
-    if (created == null) {
+    if (created == 0) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Не удалось закрыть время')));
@@ -453,6 +486,57 @@ class _ScheduleBlocksScreenState extends State<ScheduleBlocksScreen> {
   @override
   Widget build(BuildContext context) {
     final who = widget.providerName;
+    final body = _loading
+        ? const Center(child: CircularProgressIndicator())
+        : _failed
+        ? Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Не удалось загрузить'),
+                TextButton(onPressed: _load, child: const Text('Повторить')),
+              ],
+            ),
+          )
+        : _blocks.isEmpty
+        ? const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Нет закрытых дат.\nЗакройте день или часы — клиенты '
+                'не смогут записаться на это время.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          )
+        : ListView.builder(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+            itemCount: _blocks.length,
+            itemBuilder: (context, i) {
+              final b = _blocks[i];
+              final wholeDay =
+                  b.startsAt.hour == 0 &&
+                  b.startsAt.minute == 0 &&
+                  b.endsAt.hour == 23 &&
+                  b.endsAt.minute == 59;
+              return Card(
+                child: ListTile(
+                  leading: const Icon(Icons.event_busy),
+                  title: Text(
+                    wholeDay
+                        ? '${_fmt(b.startsAt)} — весь день'
+                        : '${_fmt(b.startsAt)} · ${_fmtT(b.startsAt)}–${_fmtT(b.endsAt)}',
+                  ),
+                  subtitle: b.reason.isEmpty ? null : Text(b.reason),
+                  trailing: IconButton(
+                    tooltip: 'Открыть снова',
+                    icon: const Icon(Icons.close),
+                    onPressed: () => _remove(b),
+                  ),
+                ),
+              );
+            },
+          );
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -464,57 +548,121 @@ class _ScheduleBlocksScreenState extends State<ScheduleBlocksScreen> {
         icon: const Icon(Icons.block),
         label: const Text('Закрыть время'),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _failed
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('Не удалось загрузить'),
-                  TextButton(onPressed: _load, child: const Text('Повторить')),
-                ],
-              ),
-            )
-          : _blocks.isEmpty
-          ? const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'Нет закрытых дат.\nЗакройте день или часы — клиенты '
-                  'не смогут записаться на это время.',
-                  textAlign: TextAlign.center,
+      body: Column(
+        children: [
+          // Салон: выбираем, кому закрываем время — всему салону
+          // или конкретному мастеру (отпуск, больничный).
+          if (_isSalonPicker)
+            SizedBox(
+              height: 52,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
                 ),
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
-              itemCount: _blocks.length,
-              itemBuilder: (context, i) {
-                final b = _blocks[i];
-                final wholeDay =
-                    b.startsAt.hour == 0 &&
-                    b.startsAt.minute == 0 &&
-                    b.endsAt.hour == 23 &&
-                    b.endsAt.minute == 59;
-                return Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.event_busy),
-                    title: Text(
-                      wholeDay
-                          ? '${_fmt(b.startsAt)} — весь день'
-                          : '${_fmt(b.startsAt)} · ${_fmtT(b.startsAt)}–${_fmtT(b.endsAt)}',
-                    ),
-                    subtitle: b.reason.isEmpty ? null : Text(b.reason),
-                    trailing: IconButton(
-                      tooltip: 'Открыть снова',
-                      icon: const Icon(Icons.close),
-                      onPressed: () => _remove(b),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: const Text('Весь салон'),
+                      selected:
+                          _selectedId == null || _selectedId == _cloud.uid,
+                      onSelected: (_) {
+                        setState(() => _selectedId = _cloud.uid);
+                        _load();
+                      },
                     ),
                   ),
-                );
-              },
+                  for (final m in _masters)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ChoiceChip(
+                        label: Text(m.name.isEmpty ? 'Мастер' : m.name),
+                        selected: _selectedId == m.userId,
+                        onSelected: (_) {
+                          setState(() => _selectedId = m.userId);
+                          _load();
+                        },
+                      ),
+                    ),
+                ],
+              ),
             ),
+          Expanded(child: body),
+        ],
+      ),
+    );
+  }
+}
+
+/// Мультивыбор дней для блокировки: тап по дате добавляет/снимает
+/// её, «Закрыть» возвращает список выбранных дней.
+class _BlockDaysPicker extends StatefulWidget {
+  const _BlockDaysPicker();
+
+  @override
+  State<_BlockDaysPicker> createState() => _BlockDaysPickerState();
+}
+
+class _BlockDaysPickerState extends State<_BlockDaysPicker> {
+  final Set<DateTime> _days = {};
+  DateTime _focused = DateTime.now();
+
+  DateTime _d(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  @override
+  Widget build(BuildContext context) {
+    final today = _d(DateTime.now());
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Выберите дни',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _days.isEmpty
+                  ? 'Тапайте по датам — можно несколько'
+                  : 'Выбрано: ${_days.length}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            TableCalendar<void>(
+              locale: 'ru_RU',
+              firstDay: today,
+              lastDay: today.add(const Duration(days: 365)),
+              focusedDay: _focused,
+              calendarFormat: CalendarFormat.month,
+              startingDayOfWeek: StartingDayOfWeek.monday,
+              headerStyle: const HeaderStyle(formatButtonVisible: false),
+              selectedDayPredicate: (d) => _days.contains(_d(d)),
+              onDaySelected: (selected, focused) {
+                final d = _d(selected);
+                setState(() {
+                  _focused = focused;
+                  if (!_days.remove(d)) _days.add(d);
+                });
+              },
+              onPageChanged: (f) => _focused = f,
+            ),
+            const SizedBox(height: 8),
+            FilledButton(
+              onPressed: _days.isEmpty
+                  ? null
+                  : () {
+                      final list = _days.toList()..sort();
+                      Navigator.of(context).pop(list);
+                    },
+              child: const Text('Далее'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

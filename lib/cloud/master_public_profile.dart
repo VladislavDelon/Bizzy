@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../app_theme.dart';
 import 'cloud_service.dart';
+import 'work_hours.dart';
 
 /// Вид публичного профиля мастера: аватар, рейтинг, описание,
 /// адрес, соцсети, телефон и список услуг.
@@ -21,10 +22,19 @@ class MasterPublicProfileView extends StatelessWidget {
     this.onRefresh,
     this.isFavorite,
     this.onToggleFavorite,
+    this.week,
+    this.ratings = const [],
   });
 
   final MasterCard master;
   final List<CloudServiceItem> services;
+
+  /// Расписание провайдера — секция «Часы работы» в профиле.
+  /// null — расписание не загружено/не задано, секцию не показываем.
+  final WorkWeek? week;
+
+  /// Отзывы о провайдере — секция «Отзывы» с последними оценками.
+  final List<ProviderRating> ratings;
 
   /// Фото работ мастера — сетка в разделе «Работы мастера».
   final List<PortfolioPhoto> portfolio;
@@ -179,6 +189,57 @@ class MasterPublicProfileView extends StatelessWidget {
           _sectionTitle(context, 'О себе'),
           Text(master.description),
         ],
+        // Часы работы — клиент видит, когда провайдер принимает,
+        // до того как откроет запись.
+        if (week != null) ...[
+          _sectionTitle(context, 'Часы работы'),
+          Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 10,
+              ),
+              child: Column(
+                children: [
+                  for (var d = 1; d <= 7; d++)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 34,
+                            child: Text(
+                              WorkWeek.dayNames[d - 1],
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: week!.days[d]!.off
+                                        ? scheme.outline
+                                        : null,
+                                  ),
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            week!.days[d]!.off
+                                ? 'Выходной'
+                                : '${fmtHm(week!.days[d]!.start)}'
+                                      '–${fmtHm(week!.days[d]!.end)}',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: week!.days[d]!.off
+                                      ? scheme.outline
+                                      : null,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
         _sectionTitle(context, 'Услуги'),
         if (services.isEmpty)
           const Text('Услуги ещё не добавлены или не опубликованы'),
@@ -271,6 +332,64 @@ class MasterPublicProfileView extends StatelessWidget {
                         Icon(Icons.chevron_right, color: scheme.primary),
                     ],
                   ),
+                ),
+              ),
+            ),
+        ],
+        if (ratings.isNotEmpty) ...[
+          _sectionTitle(context, 'Отзывы'),
+          for (final r in ratings.take(5))
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            r.clientName.isEmpty ? 'Клиент' : r.clientName,
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ),
+                        // Звёзды оценки.
+                        for (var i = 1; i <= 5; i++)
+                          Icon(
+                            i <= r.rating ? Icons.star : Icons.star_border,
+                            size: 14,
+                            color: Colors.amber,
+                          ),
+                      ],
+                    ),
+                    if (r.serviceName.isNotEmpty)
+                      Text(
+                        r.serviceName,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.outline,
+                        ),
+                      ),
+                    if (r.comment.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(r.comment),
+                    ],
+                    if (r.reply.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Ответ: ${r.reply}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),

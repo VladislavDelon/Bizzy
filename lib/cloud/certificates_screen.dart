@@ -95,11 +95,35 @@ class _ProviderCertificatesScreenState
     }
   }
 
+  /// Выдать сертификат прямо с экрана: выбираем клиента
+  /// из тех, кто уже записывался к нам (мастеру — свои заявки,
+  /// салону — салонные).
+  Future<void> _issue() async {
+    final client = await showModalBottomSheet<({String id, String name})>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => const _CertClientPicker(),
+    );
+    if (client == null || !mounted) return;
+    final issued = await showIssueCertificateDialog(
+      context,
+      clientId: client.id,
+      clientName: client.name,
+    );
+    if (issued == true) await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('Сертификаты')),
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
+        onPressed: _issue,
+        icon: const Icon(Icons.card_giftcard),
+        label: const Text('Выдать'),
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _failed
@@ -117,14 +141,14 @@ class _ProviderCertificatesScreenState
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: Text(
-                  'Сертификатов пока нет.\nВыдать пакет визитов можно '
-                  'в карточке клиента.',
+                  'Сертификатов пока нет.\nНажмите «Выдать» и выберите '
+                  'клиента — он получит пакет визитов.',
                   textAlign: TextAlign.center,
                 ),
               ),
             )
           : ListView.builder(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
               itemCount: _certs.length,
               itemBuilder: (context, i) {
                 final c = _certs[i];
@@ -303,6 +327,101 @@ class _IssueCertificateDialogState extends State<_IssueCertificateDialog> {
           child: Text(_saving ? 'Выдаю…' : 'Выдать'),
         ),
       ],
+    );
+  }
+}
+
+/// Выбор клиента для выдачи сертификата: уникальные клиенты
+/// из облачных записей провайдера (мастер — свои, салон — салонные).
+class _CertClientPicker extends StatefulWidget {
+  const _CertClientPicker();
+
+  @override
+  State<_CertClientPicker> createState() => _CertClientPickerState();
+}
+
+class _CertClientPickerState extends State<_CertClientPicker> {
+  final _cloud = CloudService();
+  List<({String id, String name})> _clients = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final profile = await _cloud.myProfile();
+      final bookings = profile?.role == 'salon'
+          ? await _cloud.salonBookings()
+          : await _cloud.masterBookings();
+      // Уникальные клиенты с аккаунтом — сертификат привязан к user id.
+      final seen = <String, String>{};
+      for (final b in bookings) {
+        if (b.clientId.isNotEmpty) {
+          seen[b.clientId] = b.clientName.isEmpty ? 'Клиент' : b.clientName;
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _clients = [
+          for (final e in seen.entries) (id: e.key, name: e.value),
+        ]..sort((a, b) => a.name.compareTo(b.name));
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: _loading
+          ? const Padding(
+              padding: EdgeInsets.all(48),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          : _clients.isEmpty
+          ? const Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Пока нет клиентов с аккаунтом.\nСертификат можно '
+                'выдать тому, кто уже записывался к вам.',
+                textAlign: TextAlign.center,
+              ),
+            )
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    'Кому выдать сертификат',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final c in _clients)
+                        ListTile(
+                          leading: const CircleAvatar(
+                            child: Icon(Icons.person_outline),
+                          ),
+                          title: Text(c.name),
+                          onTap: () => Navigator.of(context).pop(c),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }

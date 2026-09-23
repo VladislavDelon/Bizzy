@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -14,7 +13,6 @@ import '../currency.dart';
 // sendPush внутри неё настоящий (Supabase Edge Function).
 import '../notifications/push_stub.dart'
     if (dart.library.io) '../notifications/push_service.dart';
-import 'certificates_screen.dart';
 import 'cloud_service.dart';
 import 'credentials_dialog.dart';
 import 'geo_service.dart';
@@ -856,6 +854,8 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
   List<PortfolioPhoto> _portfolio = [];
   List<SalonOffer> _offers = [];
   Set<String> _favoriteIds = {};
+  WorkWeek? _week;
+  List<ProviderRating> _ratings = const [];
   bool _loading = true;
   String? _error;
 
@@ -908,6 +908,12 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
             .myRedeemedOfferIds()
             .then<Set<int>>((v) => v)
             .catchError((_) => <int>{}),
+        // Часы работы и отзывы — секции публичного профиля.
+        _cloud.workHoursOf(pid).catchError((_) => null),
+        _cloud
+            .ratingsAbout(pid)
+            .then<List<ProviderRating>>((v) => v)
+            .catchError((_) => <ProviderRating>[]),
       ]);
       final rawServices = results[1] as List<CloudServiceItem>;
       final portfolio = results[2] as List<PortfolioPhoto>;
@@ -924,6 +930,9 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
         _portfolio = portfolio;
         _favoriteIds = favs;
         _offers = offers;
+        final wh = results[6] as Map<String, dynamic>?;
+        _week = wh == null ? null : WorkWeek.fromJson(wh);
+        _ratings = results[7] as List<ProviderRating>;
         _loading = false;
       });
       // «Записаться снова» — открываем диалог с услугами прошлого визита.
@@ -985,6 +994,8 @@ class _MasterDetailScreenState extends State<MasterDetailScreen> {
       services: _services,
       portfolio: _portfolio,
       offers: _offers,
+      week: _week,
+      ratings: _ratings,
       onBook: () => _book(),
       // Тап по услуге — запись сразу с выбранной услугой.
       onBookService: _book,
@@ -2859,26 +2870,6 @@ class _ClientProfileTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          // «Приведи друга»: личный код, скидка обоим после первого
-          // завершённого визита приглашённого.
-          const _ReferralCard(),
-          const SizedBox(height: 12),
-          // Сертификаты на пакеты визитов, выданные мастерами/салонами.
-          Card(
-            child: ListTile(
-              leading: Icon(
-                Icons.confirmation_number_outlined,
-                color: scheme.primary,
-              ),
-              title: const Text('Мои сертификаты'),
-              subtitle: const Text('Пакеты визитов и остаток'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push<void>(
-                MaterialPageRoute(builder: (_) => const MyCertificatesScreen()),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
           OutlinedButton.icon(
             onPressed: () => _edit(context),
             icon: const Icon(Icons.edit),
@@ -2924,108 +2915,6 @@ class _ClientProfileTab extends StatelessWidget {
             },
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Карточка «Приведи друга» в профиле клиента: реферальный код,
-/// накопленная скидка, копирование для отправки другу.
-class _ReferralCard extends StatelessWidget {
-  const _ReferralCard();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: FutureBuilder<(String, CloudProfile?)>(
-          future: () async {
-            final cloud = CloudService();
-            final code = await cloud.myRefCode();
-            final profile = await cloud.myProfile();
-            return (code, profile);
-          }(),
-          builder: (context, snap) {
-            final code = snap.data?.$1 ?? '';
-            final discount = snap.data?.$2?.refDiscount ?? 0;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.card_giftcard, color: scheme.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Приведи друга',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Друг вводит ваш код при регистрации — после его '
-                  'первого визита вы оба получаете скидку 10% '
-                  'на следующую запись.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: scheme.primaryContainer.withValues(alpha: 0.4),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          code.isEmpty ? 'Загружаю код…' : code,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      tooltip: 'Скопировать код',
-                      onPressed: code.isEmpty
-                          ? null
-                          : () async {
-                              await Clipboard.setData(
-                                ClipboardData(text: code),
-                              );
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Код скопирован'),
-                                  ),
-                                );
-                              }
-                            },
-                      icon: const Icon(Icons.copy, size: 20),
-                    ),
-                  ],
-                ),
-                if (discount > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      'Ваша скидка: $discount% на следующую запись',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: scheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-              ],
-            );
-          },
-        ),
       ),
     );
   }

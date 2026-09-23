@@ -432,6 +432,15 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
     } catch (_) {
       // Если нет сети — предпросмотр без услуг.
     }
+    // Часы и отзывы — чтобы предпросмотр совпадал с тем,
+    // что реально видит клиент.
+    WorkWeek? week;
+    List<ProviderRating> ratings = const [];
+    try {
+      final wh = await _cloud.workHoursOf(_cloud.uid!);
+      if (wh != null) week = WorkWeek.fromJson(wh);
+      ratings = await _cloud.ratingsAbout(_cloud.uid!);
+    } catch (_) {}
     if (!mounted) return;
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
@@ -439,6 +448,8 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
           master: previewCard,
           services: services,
           portfolio: _portfolio,
+          week: week,
+          ratings: ratings,
           isPreview: true,
         ),
       ),

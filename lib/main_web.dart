@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_theme.dart';
@@ -26,6 +27,8 @@ Future<void> main() async {
   }
   await loadAppTheme();
   await loadBizzyLook();
+  // Русские месяцы/дни в TableCalendar («Закрытые дни и часы»).
+  await initializeDateFormatting('ru_RU', null);
   runApp(const BizzyWebApp());
 }
 

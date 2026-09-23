@@ -9,13 +9,12 @@ import 'geo_service.dart';
 /// координат нет.
 const LatLng kDefaultMapCenter = LatLng(55.751244, 37.618423);
 
-/// Тайлы CARTO Voyager — чистая быстрая карта с подписями на
-/// языке региона (в РУ/КЗ — на русском). Работает без ключа,
-/// тайлы отдаются с CDN — грузится быстрее Wikimedia/OSM.
+/// Тайлы OpenStreetMap: CARTO Voyager теперь требует apikey
+/// (на тайлах писал «apikey required»), стандартный OSM-рендер
+/// бесплатный и с русскими подписями. userAgentPackageName нужен
+/// по полиси OSM — без нормального UA тайлы отдают с ошибкой.
 TileLayer osmTileLayer() => TileLayer(
-  urlTemplate:
-      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-  subdomains: const ['a', 'b', 'c', 'd'],
+  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   userAgentPackageName: 'com.example.bizzy_app',
   maxZoom: 19,
 );

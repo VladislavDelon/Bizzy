@@ -1,12 +1,115 @@
-import 'package:flutter/foundation.dart' show Uint8List;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app_theme.dart';
 import '../currency.dart';
+import 'certificates_screen.dart';
 import 'cloud_service.dart';
 import 'fan_push.dart';
+
+/// Карточка «Приведи друга»: реферальный код клиента, накопленная
+/// скидка, копирование. Живёт во вкладке «Honey» — все бонусы там.
+class ReferralCard extends StatelessWidget {
+  const ReferralCard({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: FutureBuilder<(String, CloudProfile?)>(
+          future: () async {
+            final cloud = CloudService();
+            final code = await cloud.myRefCode();
+            final profile = await cloud.myProfile();
+            return (code, profile);
+          }(),
+          builder: (context, snap) {
+            final code = snap.data?.$1 ?? '';
+            final discount = snap.data?.$2?.refDiscount ?? 0;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.group_add_outlined, color: scheme.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Приведи друга',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Друг вводит ваш код при регистрации — после его '
+                  'первого визита вы оба получаете скидку 10% '
+                  'на следующую запись.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer.withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          code.isEmpty ? 'Загружаю код…' : code,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Скопировать код',
+                      onPressed: code.isEmpty
+                          ? null
+                          : () async {
+                              await Clipboard.setData(
+                                ClipboardData(text: code),
+                              );
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Код скопирован'),
+                                  ),
+                                );
+                              }
+                            },
+                      icon: const Icon(Icons.copy, size: 20),
+                    ),
+                  ],
+                ),
+                if (discount > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Ваша скидка: $discount% на следующую запись',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
 
 /// Управление «Honey» у салона/мастера: список своих предложений,
 /// создание, включение/выключение, удаление.
@@ -153,6 +256,42 @@ class _SalonOffersScreenState extends State<SalonOffersScreen> {
                       'видят во вкладке «Honey».',
                     ),
                   ),
+                  // Механики Honey: пакеты визитов и реферальная
+                  // программа — тоже «плюшки», живут здесь же.
+                  Card(
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.confirmation_number_outlined,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      title: const Text('Сертификаты на визиты'),
+                      subtitle: const Text(
+                        'Выдать клиенту пакет визитов, остаток, '
+                        'отключение',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          builder: (_) => const ProviderCertificatesScreen(),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Card(
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.group_add_outlined,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      title: const Text('Приведи друга'),
+                      subtitle: const Text(
+                        'Работает автоматически: клиенты делятся '
+                        'своим кодом, после первого визита друга '
+                        'оба получают скидку 10%',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   if (_offers.isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 48),
@@ -537,6 +676,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
   final _cloud = CloudService();
   List<SalonOffer> _offers = [];
   List<SalonOffer> _gifts = [];
+  List<Certificate> _certs = const [];
   bool _loading = true;
   String? _error;
 
@@ -548,8 +688,8 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
 
   Future<void> _load() async {
     try {
-      // Витрина, подарки и «уже использованные» — параллельно:
-      // вкладка открывается за один раунд-трип, а не за три.
+      // Витрина, подарки, «уже использованные» и мои сертификаты —
+      // параллельно: вкладка открывается за один раунд-трип.
       final results = await Future.wait([
         _cloud.activeOffers(),
         _cloud
@@ -560,6 +700,10 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
             .myRedeemedOfferIds()
             .then<Set<int>>((v) => v)
             .catchError((_) => <int>{}),
+        _cloud
+            .myCertificates()
+            .then<List<Certificate>>((v) => v)
+            .catchError((_) => <Certificate>[]),
       ]);
       final usedIds = results[2] as Set<int>;
       var offers = results[0] as List<SalonOffer>;
@@ -574,6 +718,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
       setState(() {
         _offers = mark(offers);
         _gifts = mark(gifts);
+        _certs = results[3] as List<Certificate>;
         _loading = false;
         _error = null;
       });
@@ -918,6 +1063,7 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
   @override
   Widget build(BuildContext context) {
     final empty = _offers.isEmpty && _gifts.isEmpty;
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('Honey')),
       body: _loading
@@ -949,43 +1095,78 @@ class _ClientHoneyTabState extends State<ClientHoneyTab> {
             )
           : RefreshIndicator(
               onRefresh: _load,
-              child: empty
-                  ? ListView(
-                      padding: const EdgeInsets.all(32),
-                      children: const [
-                        SizedBox(height: 80),
-                        Icon(Icons.card_giftcard_outlined, size: 56),
-                        SizedBox(height: 16),
-                        Text(
-                          'Здесь будут плюшки от салонов:\n'
-                          'скидки на первое посещение, сертификаты, '
-                          'бонусы.',
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    )
-                  : ListView(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
-                      children: [
-                        if (_gifts.isNotEmpty) ...[
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
-                            child: Text(
-                              'Подарено вам',
-                              style: Theme.of(context).textTheme.titleSmall
-                                  ?.copyWith(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primary,
-                                  ),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
+                children: [
+                  // Все личные плюшки клиента — здесь, во вкладке Honey.
+                  const ReferralCard(),
+                  const SizedBox(height: 8),
+                  if (_certs.isNotEmpty) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+                      child: Text(
+                        'Мои сертификаты',
+                        style: Theme.of(context).textTheme.titleSmall
+                            ?.copyWith(color: scheme.primary),
+                      ),
+                    ),
+                    for (final c in _certs)
+                      Card(
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: c.exhausted
+                                ? scheme.surfaceContainerHighest
+                                : scheme.primaryContainer,
+                            child: Icon(
+                              Icons.card_giftcard,
+                              color: c.exhausted
+                                  ? scheme.outline
+                                  : scheme.onPrimaryContainer,
                             ),
                           ),
-                          for (final o in _gifts) _offerCard(o),
-                          const Divider(height: 24),
-                        ],
-                        for (final o in _offers) _offerCard(o),
-                      ],
+                          title: Text(c.title),
+                          subtitle: Text(
+                            '${c.providerName.isEmpty ? 'Провайдер' : c.providerName}'
+                            ' · осталось ${c.remaining} из ${c.totalVisits}'
+                            '${c.active ? '' : ' · отключён'}',
+                          ),
+                          trailing: c.exhausted
+                              ? const Text('использован')
+                              : null,
+                        ),
+                      ),
+                  ],
+                  if (_gifts.isNotEmpty) ...[
+                    const Divider(height: 24),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+                      child: Text(
+                        'Подарено вам',
+                        style: Theme.of(context).textTheme.titleSmall
+                            ?.copyWith(color: scheme.primary),
+                      ),
                     ),
+                    for (final o in _gifts) _offerCard(o),
+                  ],
+                  if (_offers.isNotEmpty) const Divider(height: 24),
+                  for (final o in _offers) _offerCard(o),
+                  if (empty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 48),
+                      child: Column(
+                        children: [
+                          Icon(Icons.card_giftcard_outlined, size: 48),
+                          SizedBox(height: 12),
+                          Text(
+                            'Акций от салонов пока нет —\n'
+                            'а ваша реферальная ссылка уже работает.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
             ),
     );
   }

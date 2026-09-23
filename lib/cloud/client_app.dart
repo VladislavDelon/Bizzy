@@ -10,7 +10,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../app_theme.dart';
 import '../currency.dart';
-import '../notifications/push_service.dart';
+// На вебе dart:io/FCM недоступны — заглушка с тем же API,
+// sendPush внутри неё настоящий (Supabase Edge Function).
+import '../notifications/push_stub.dart'
+    if (dart.library.io) '../notifications/push_service.dart';
 import 'certificates_screen.dart';
 import 'cloud_service.dart';
 import 'credentials_dialog.dart';
@@ -3132,7 +3135,7 @@ class _ClientProfileEditScreenState extends State<ClientProfileEditScreen> {
       );
       if (file == null || !mounted) return;
       setState(() => _pickingAvatar = true);
-      final url = await _cloud.uploadAvatar(file.path);
+      final url = await _cloud.uploadAvatar(file);
       await _cloud.updateMyProfile(avatarUrl: url);
       if (!mounted) return;
       setState(() => _avatarUrl = url);

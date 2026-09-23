@@ -284,7 +284,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       );
       if (file == null || !mounted) return;
       setState(() => _pickingAvatar = true);
-      final url = await _cloud.uploadAvatar(file.path);
+      final url = await _cloud.uploadAvatar(file);
       await _cloud.updateAvatarUrl(url);
       if (!mounted) return;
       setState(() => _avatarUrl = url);
@@ -308,7 +308,7 @@ class _MasterProfileScreenState extends State<MasterProfileScreen> {
       );
       if (file == null || !mounted) return;
       setState(() => _uploadingPhoto = true);
-      final photo = await _cloud.uploadPortfolioPhoto(file.path);
+      final photo = await _cloud.uploadPortfolioPhoto(file);
       if (!mounted) return;
       setState(() => _portfolio = [..._portfolio, photo]);
       // Фанам — пуш о новой работе в портфолио.

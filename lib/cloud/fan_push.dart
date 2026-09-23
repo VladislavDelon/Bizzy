@@ -1,4 +1,5 @@
-import '../notifications/push_service.dart';
+import '../notifications/push_stub.dart'
+    if (dart.library.io) '../notifications/push_service.dart';
 import 'cloud_service.dart';
 
 /// Push всем клиентам, у которых этот мастер/салон в избранном.

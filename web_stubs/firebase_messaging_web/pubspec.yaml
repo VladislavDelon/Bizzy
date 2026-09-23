@@ -1,0 +1,18 @@
+name: firebase_messaging_web
+description: >-
+  Веб-стаб firebase_messaging_web: настоящий плагин тянет dart:html и
+  старый interop, несовместимый с текущим firebase_core_web. На вебе
+  Firebase Messaging всё равно не используется (push только в мобильном
+  приложении), поэтому плагин регистрируется пустым классом.
+version: 3.5.18
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_web_plugins:
+    sdk: flutter

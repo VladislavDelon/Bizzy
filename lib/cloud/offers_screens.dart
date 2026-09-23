@@ -1,5 +1,4 @@
-import 'dart:io';
-
+import 'package:flutter/foundation.dart' show Uint8List;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -232,7 +231,10 @@ class _OfferEditDialogState extends State<_OfferEditDialog> {
   List<CloudServiceItem> _services = [];
   DateTime? _validFrom;
   DateTime? _validUntil;
-  String? _imagePath;
+  // XFile + байты вместо dart:io File — превью и загрузка
+  // работают и на вебе.
+  XFile? _imageFile;
+  Uint8List? _imageBytes;
   String? _imageUrl;
 
   @override
@@ -266,7 +268,12 @@ class _OfferEditDialogState extends State<_OfferEditDialog> {
       imageQuality: 80,
     );
     if (file == null || !mounted) return;
-    setState(() => _imagePath = file.path);
+    final bytes = await file.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      _imageFile = file;
+      _imageBytes = bytes;
+    });
   }
 
   Future<void> _pickDate(bool isFrom) async {
@@ -310,8 +317,8 @@ class _OfferEditDialogState extends State<_OfferEditDialog> {
     try {
       // Картинка-фон — заливаем в storage до создания записи.
       var imageUrl = _imageUrl ?? '';
-      if (_imagePath != null) {
-        imageUrl = await _cloud.uploadOfferImage(_imagePath!);
+      if (_imageFile != null) {
+        imageUrl = await _cloud.uploadOfferImage(_imageFile!);
       }
       await _cloud.createOffer(
         title: title,
@@ -403,17 +410,17 @@ class _OfferEditDialogState extends State<_OfferEditDialog> {
               onPressed: _pickImage,
               icon: const Icon(Icons.image_outlined),
               label: Text(
-                _imagePath == null
+                _imageFile == null
                     ? 'Фото-фон (необязательно)'
                     : 'Заменить фото',
               ),
             ),
-            if (_imagePath != null) ...[
+            if (_imageBytes != null) ...[
               const SizedBox(height: 8),
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: Image.file(
-                  File(_imagePath!),
+                child: Image.memory(
+                  _imageBytes!,
                   height: 110,
                   width: double.infinity,
                   fit: BoxFit.cover,

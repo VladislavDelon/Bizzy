@@ -1,11 +1,16 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:crypto/crypto.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'supabase_config.dart';
+import 'sync_log.dart';
+
+// Файловый лог синхронизации: на мобильных — documents, на вебе —
+// консоль. Re-export, чтобы существующие `SyncLog.write(...)`
+// продолжали работать без правки импортов.
+export 'sync_log.dart' show SyncLog;
 
 /// Точка доступа к Supabase-клиенту.
 SupabaseClient get supabase => Supabase.instance.client;
@@ -211,44 +216,6 @@ Map<String, dynamic>? _pickProfileMap(dynamic value) {
     if (first is Map<String, dynamic>) return first;
   }
   return null;
-}
-
-/// Файловый лог для диагностики облачной синхронизации.
-class SyncLog {
-  static const _fileName = 'bizzy_sync.log';
-
-  static Future<String> _path() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return '${dir.path}/$_fileName';
-  }
-
-  static Future<String> read() async {
-    try {
-      final file = File(await _path());
-      if (!await file.exists()) return '';
-      return await file.readAsString();
-    } catch (_) {
-      return '';
-    }
-  }
-
-  static Future<void> clear() async {
-    try {
-      final file = File(await _path());
-      if (await file.exists()) await file.delete();
-    } catch (_) {}
-  }
-
-  static Future<void> write(String tag, String message) async {
-    try {
-      final file = File(await _path());
-      final now = DateTime.now().toLocal().toIso8601String();
-      final line = '[$now] [$tag] $message\n';
-      await file.writeAsString(line, mode: FileMode.append, flush: true);
-    } catch (_) {
-      // Не блокируем работу при ошибке записи лога.
-    }
-  }
 }
 
 /// Профиль пользователя из облачной таблицы `profiles`.
@@ -1268,17 +1235,18 @@ class CloudService {
       .update({'avatar_url': url})
       .eq('user_id', uid as Object);
 
-  /// Загружает файл в публичный bucket `avatars/<user_id>/avatar.jpg`.
+  /// Загружает фото в публичный bucket `avatars/<user_id>/avatar.jpg`.
+  /// Байты вместо dart:io File — работает и на вебе.
   /// Возвращает публичный URL.
-  Future<String> uploadAvatar(String filePath) async {
+  Future<String> uploadAvatar(XFile file) async {
     final userId = uid;
     if (userId == null) throw Exception('Не авторизован');
     final dest = '$userId/avatar.jpg';
     await supabase.storage
         .from('avatars')
-        .upload(
+        .uploadBinary(
           dest,
-          File(filePath),
+          await file.readAsBytes(),
           fileOptions: const FileOptions(upsert: true),
         );
     return supabase.storage.from('avatars').getPublicUrl(dest);
@@ -1393,12 +1361,14 @@ class CloudService {
   /// Загружает фото работы в bucket `avatars/<uid>/portfolio/…`
   /// (политики bucket уже разрешают владельцу писать в свою папку)
   /// и создаёт запись в master_portfolio.
-  Future<PortfolioPhoto> uploadPortfolioPhoto(String filePath) async {
+  Future<PortfolioPhoto> uploadPortfolioPhoto(XFile file) async {
     final userId = uid;
     if (userId == null) throw Exception('Не авторизован');
     final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
     final dest = '$userId/portfolio/$fileName';
-    await supabase.storage.from('avatars').upload(dest, File(filePath));
+    await supabase.storage
+        .from('avatars')
+        .uploadBinary(dest, await file.readAsBytes());
     final url = supabase.storage.from('avatars').getPublicUrl(dest);
     final row = await supabase
         .from('master_portfolio')
@@ -2891,11 +2861,13 @@ class CloudService {
   // ---------- «Honey» — предложения салонов ----------
 
   /// Картинка-фон для Honey → avatars/[uid]/offers/[ts].jpg.
-  Future<String> uploadOfferImage(String filePath) async {
+  Future<String> uploadOfferImage(XFile file) async {
     final userId = uid;
     if (userId == null) throw Exception('Не авторизован');
     final dest = '$userId/offers/${DateTime.now().millisecondsSinceEpoch}.jpg';
-    await supabase.storage.from('avatars').upload(dest, File(filePath));
+    await supabase.storage
+        .from('avatars')
+        .uploadBinary(dest, await file.readAsBytes());
     return supabase.storage.from('avatars').getPublicUrl(dest);
   }
 

@@ -633,9 +633,12 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
       bottomNavigationBar: bizzyNavBar(
         context,
         bizzy: false,
-        child: NavigationBar(
+        // Своя панель вместо NavigationBar: у стандартной лейбл
+        // переносится посреди слова на узких экранах, а softWrap
+        // там не выключить. Здесь текст всегда в одну строку.
+        child: _WebNavBar(
           selectedIndex: _tab,
-          onDestinationSelected: (index) {
+          onSelected: (index) {
             setState(() => _tab = index);
             // Салон открыл «Мастера» — ответы считаются просмотренными.
             if (index == 1 && _isSalon) {
@@ -645,33 +648,22 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
                   .whenComplete(_loadTeamBadge);
             }
           },
-          destinations: [
-            NavigationDestination(
-              icon: Badge.count(
-                count: _pending.length,
-                isLabelVisible: _pending.isNotEmpty,
-                child: const Icon(Icons.event_note),
-              ),
+          items: [
+            _WebNavItem(
+              icon: Icons.event_note,
               label: 'Записи',
+              badgeCount: _pending.length,
             ),
-            NavigationDestination(
-              icon: Badge(
-                isLabelVisible: _teamBadge > 0,
-                label: Text('$_teamBadge'),
-                child: Icon(
-                  _isSalon
-                      ? Icons.content_cut
-                      : Icons.mark_email_unread_outlined,
-                ),
-              ),
+            _WebNavItem(
+              icon: _isSalon
+                  ? Icons.content_cut
+                  : Icons.mark_email_unread_outlined,
               label: _isSalon ? 'Мастера' : 'Салоны',
+              badgeCount: _teamBadge,
             ),
-            const NavigationDestination(
-              icon: Icon(Icons.people_outline),
-              label: 'Клиенты',
-            ),
-            const NavigationDestination(icon: Icon(Icons.spa), label: 'Услуги'),
-            const NavigationDestination(icon: Icon(Icons.menu), label: 'Ещё'),
+            const _WebNavItem(icon: Icons.people_outline, label: 'Клиенты'),
+            const _WebNavItem(icon: Icons.spa, label: 'Услуги'),
+            const _WebNavItem(icon: Icons.menu, label: 'Ещё'),
           ],
         ),
       ),
@@ -683,6 +675,109 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
               label: const Text('Новая запись'),
             )
           : null,
+    );
+  }
+}
+
+/// Один пункт нижней навигации веб-кабинета.
+class _WebNavItem {
+  const _WebNavItem({
+    required this.icon,
+    required this.label,
+    this.badgeCount = 0,
+  });
+
+  final IconData icon;
+  final String label;
+  final int badgeCount;
+}
+
+/// Нижняя навигация веб-кабинета: подписи строго в одну строку
+/// (softWrap off + ellipsis) — на узком телефоне слова не рвутся.
+class _WebNavBar extends StatelessWidget {
+  const _WebNavBar({
+    required this.items,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final List<_WebNavItem> items;
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: SizedBox(
+        height: 64,
+        child: Row(
+          children: [
+            for (var i = 0; i < items.length; i++)
+              Expanded(
+                child: _WebNavTile(
+                  item: items[i],
+                  selected: i == selectedIndex,
+                  onTap: () => onSelected(i),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WebNavTile extends StatelessWidget {
+  const _WebNavTile({
+    required this.item,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _WebNavItem item;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = selected ? scheme.primary : scheme.onSurfaceVariant;
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Badge(
+            isLabelVisible: item.badgeCount > 0,
+            label: Text('${item.badgeCount}'),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+              decoration: BoxDecoration(
+                color: selected
+                    ? scheme.secondaryContainer
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(item.icon, size: 22, color: color),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            item.label,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 11,
+              height: 1.1,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

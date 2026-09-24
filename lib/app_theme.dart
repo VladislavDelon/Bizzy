@@ -176,22 +176,26 @@ Widget bizzyNavBar(
   if (!bizzyGlassActive(context)) {
     // В тёмной теме стекла нет, но лейблы всё равно жмём до 11pt —
     // иначе длинные подписи («Приглашения», «Избранное»)
-    // переносятся посреди слова на узких экранах.
-    return Theme(
-      data: Theme.of(context).copyWith(
-        navigationBarTheme: Theme.of(context).navigationBarTheme.copyWith(
-          labelTextStyle: WidgetStateProperty.resolveWith(
-            (states) => TextStyle(
-              fontSize: 11,
-              height: 1.1,
-              fontWeight: states.contains(WidgetState.selected)
-                  ? FontWeight.w600
-                  : FontWeight.w500,
+    // переносятся посреди слова на узких экранах. Системный
+    // масштаб шрифта зажимаем: увеличенный шрифт в настройках
+    // телефона тоже рвал слова на две строки.
+    return MediaQuery.withNoTextScaling(
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          navigationBarTheme: Theme.of(context).navigationBarTheme.copyWith(
+            labelTextStyle: WidgetStateProperty.resolveWith(
+              (states) => TextStyle(
+                fontSize: 11,
+                height: 1.1,
+                fontWeight: states.contains(WidgetState.selected)
+                    ? FontWeight.w600
+                    : FontWeight.w500,
+              ),
             ),
           ),
         ),
+        child: child,
       ),
-      child: child,
     );
   }
   const radius = 30.0;
@@ -270,7 +274,7 @@ Widget bizzyNavBar(
                           ),
                         ),
                   ),
-                  child: child,
+                  child: MediaQuery.withNoTextScaling(child: child),
                 ),
               );
             },

@@ -100,9 +100,7 @@ class _BizzyWebAppState extends State<BizzyWebApp> {
           supportedLocales: const [Locale('ru'), Locale('en')],
           locale: const Locale('ru'),
           home: _loading
-              ? const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                )
+              ? const Scaffold(body: Center(child: CircularProgressIndicator()))
               : _profile == null
               // Экран входа — на весь экран со своим градиентом.
               ? WebAuthScreen(onSignedIn: _resolveSession)
@@ -124,15 +122,57 @@ class _BizzyWebAppState extends State<BizzyWebApp> {
                             profile: _profile!,
                             onSignOut: _signOut,
                           );
-                    if (c.maxWidth <= 760) return home;
-                    return ColoredBox(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerLowest,
+                    if (c.maxWidth <= 720) return home;
+                    // Десктоп: приложение выглядит как телефонная версия —
+                    // узкая колонка 430px в скруглённой рамке с тенью
+                    // на фирменном градиенте, по центру экрана.
+                    final scheme = Theme.of(context).colorScheme;
+                    final dark = scheme.brightness == Brightness.dark;
+                    return DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: dark
+                              ? [
+                                  Colors.black,
+                                  scheme.primary.withValues(alpha: 0.12),
+                                ]
+                              : [
+                                  Colors.white,
+                                  scheme.primary.withValues(alpha: 0.08),
+                                ],
+                        ),
+                      ),
                       child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 1000),
-                          child: ClipRect(child: home),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 430),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(30),
+                                border: Border.all(
+                                  color: dark
+                                      ? Colors.white.withValues(alpha: 0.14)
+                                      : Colors.black.withValues(alpha: 0.10),
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(
+                                      alpha: dark ? 0.6 : 0.18,
+                                    ),
+                                    blurRadius: 48,
+                                    offset: const Offset(0, 18),
+                                  ),
+                                ],
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(30),
+                                child: home,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     );

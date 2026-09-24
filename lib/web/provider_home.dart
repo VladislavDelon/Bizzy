@@ -462,10 +462,10 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
             segments: [
               ButtonSegment(
                 value: 0,
-                label: Text('Заявки (${_pending.length})'),
+                label: _ShrinkLabel('Заявки (${_pending.length})'),
               ),
-              const ButtonSegment(value: 1, label: Text('Грядущие')),
-              const ButtonSegment(value: 2, label: Text('История')),
+              const ButtonSegment(value: 1, label: _ShrinkLabel('Грядущие')),
+              const ButtonSegment(value: 2, label: _ShrinkLabel('История')),
             ],
             selected: {_segment},
             onSelectionChanged: (s) => setState(() => _segment = s.first),
@@ -675,6 +675,22 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
               label: const Text('Новая запись'),
             )
           : null,
+    );
+  }
+}
+
+/// Подпись, которая не переносится посреди слова: при нехватке
+/// места текст ужимается по ширине, но остаётся в одну строку.
+class _ShrinkLabel extends StatelessWidget {
+  const _ShrinkLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text(text, maxLines: 1, softWrap: false),
     );
   }
 }

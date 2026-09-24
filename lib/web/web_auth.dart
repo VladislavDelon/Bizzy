@@ -254,25 +254,42 @@ class _WebAuthScreenState extends State<WebAuthScreen>
                                             ),
                                             const SizedBox(height: 16),
                                             SegmentedButton<String>(
+                                              style: const ButtonStyle(
+                                                // Узкий экран телефона:
+                                                // компактнее, лейбл жмётся,
+                                                // слово не рвётся пополам.
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                                padding: WidgetStatePropertyAll(
+                                                  EdgeInsets.symmetric(
+                                                    horizontal: 6,
+                                                  ),
+                                                ),
+                                              ),
                                               segments: const [
                                                 ButtonSegment(
                                                   value: 'client',
                                                   icon: Icon(
                                                     Icons.person_outline,
+                                                    size: 18,
                                                   ),
-                                                  label: Text('Клиент'),
+                                                  label: _NoWrapLabel('Клиент'),
                                                 ),
                                                 ButtonSegment(
                                                   value: 'master',
-                                                  icon: Icon(Icons.content_cut),
-                                                  label: Text('Мастер'),
+                                                  icon: Icon(
+                                                    Icons.content_cut,
+                                                    size: 18,
+                                                  ),
+                                                  label: _NoWrapLabel('Мастер'),
                                                 ),
                                                 ButtonSegment(
                                                   value: 'salon',
                                                   icon: Icon(
                                                     Icons.storefront_outlined,
+                                                    size: 18,
                                                   ),
-                                                  label: Text('Салон'),
+                                                  label: _NoWrapLabel('Салон'),
                                                 ),
                                               ],
                                               selected: {_role},
@@ -497,6 +514,23 @@ class _WebAuthScreenState extends State<WebAuthScreen>
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Подпись сегмента выбора роли: на узком экране ужимается
+/// по ширине (FittedBox), но никогда не переносит слово
+/// посередине — «Клиент» остаётся «Клиент» в одну строку.
+class _NoWrapLabel extends StatelessWidget {
+  const _NoWrapLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text(text, maxLines: 1, softWrap: false),
     );
   }
 }

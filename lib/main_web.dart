@@ -28,6 +28,7 @@ Future<void> main() async {
   }
   await loadAppTheme();
   await loadBizzyLook();
+  await loadWebViewMode();
   // Русские месяцы/дни в TableCalendar («Закрытые дни и часы»).
   await initializeDateFormatting('ru_RU', null);
   runApp(const BizzyWebApp());
@@ -123,58 +124,69 @@ class _BizzyWebAppState extends State<BizzyWebApp> {
                             onSignOut: _signOut,
                           );
                     if (c.maxWidth <= 720) return home;
-                    // Десктоп: приложение выглядит как телефонная версия —
-                    // узкая колонка 430px в скруглённой рамке с тенью
-                    // на фирменном градиенте, по центру экрана.
-                    final scheme = Theme.of(context).colorScheme;
-                    final dark = scheme.brightness == Brightness.dark;
-                    return DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: dark
-                              ? [
-                                  Colors.black,
-                                  scheme.primary.withValues(alpha: 0.12),
-                                ]
-                              : [
-                                  Colors.white,
-                                  scheme.primary.withValues(alpha: 0.08),
-                                ],
-                        ),
-                      ),
-                      child: Center(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 20),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 430),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(30),
-                                border: Border.all(
-                                  color: dark
-                                      ? Colors.white.withValues(alpha: 0.14)
-                                      : Colors.black.withValues(alpha: 0.10),
+                    return ValueListenableBuilder<WebViewMode>(
+                      valueListenable: webViewMode,
+                      builder: (context, mode, _) {
+                        // Режим «Полный сайт»: контент на всю ширину,
+                        // навигация сбоку — внутри самих экранов.
+                        if (mode == WebViewMode.site) return home;
+                        // Режим «Как приложение»: телефонная колонка
+                        // 430px в скруглённой рамке с тенью по центру.
+                        final scheme = Theme.of(context).colorScheme;
+                        final dark = scheme.brightness == Brightness.dark;
+                        return DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: dark
+                                  ? [
+                                      Colors.black,
+                                      scheme.primary.withValues(alpha: 0.12),
+                                    ]
+                                  : [
+                                      Colors.white,
+                                      scheme.primary.withValues(alpha: 0.08),
+                                    ],
+                            ),
+                          ),
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 20),
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 430,
                                 ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(
-                                      alpha: dark ? 0.6 : 0.18,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(30),
+                                    border: Border.all(
+                                      color: dark
+                                          ? Colors.white.withValues(alpha: 0.14)
+                                          : Colors.black.withValues(
+                                              alpha: 0.10,
+                                            ),
                                     ),
-                                    blurRadius: 48,
-                                    offset: const Offset(0, 18),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: dark ? 0.6 : 0.18,
+                                        ),
+                                        blurRadius: 48,
+                                        offset: const Offset(0, 18),
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(30),
-                                child: home,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(30),
+                                    child: home,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
+                        );
+                      },
                     );
                   },
                 ),

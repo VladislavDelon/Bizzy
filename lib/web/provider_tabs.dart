@@ -182,6 +182,65 @@ class _ProviderServicesTabState extends State<ProviderServicesTab> {
     }
   }
 
+  Widget _serviceCard(CloudServiceItem s) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: scheme.primaryContainer,
+          child: const Icon(Icons.spa_outlined),
+        ),
+        title: Text(s.name),
+        subtitle: Text(
+          '${formatMoney(s.price)} · ${s.durationMinutes} мин · '
+          '${s.published ? 'видна клиентам' : 'скрыта'}',
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Свитч публикации: «Видна» — услуга в каталоге клиентов,
+            // «Скрыта» — клиенты её не видят и записаться не могут.
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Tooltip(
+                  message: s.published
+                      ? 'Скрыть от клиентов'
+                      : 'Показывать клиентам в каталоге',
+                  child: Switch(
+                    value: s.published,
+                    onChanged: (v) => _toggle(s, v),
+                  ),
+                ),
+                Text(
+                  s.published ? 'Видна' : 'Скрыта',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: s.published
+                        ? Colors.green.shade700
+                        : scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'edit') _edit(s);
+                if (v == 'del') _delete(s);
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'edit', child: Text('Изменить')),
+                PopupMenuItem(value: 'del', child: Text('Удалить')),
+              ],
+            ),
+          ],
+        ),
+        onTap: () => _edit(s),
+      ),
+    );
+  }
+
   Future<void> _delete(CloudServiceItem item) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -248,50 +307,33 @@ class _ProviderServicesTabState extends State<ProviderServicesTab> {
                         ),
                       ],
                     )
-                  : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-                      itemCount: _items.length,
-                      itemBuilder: (context, i) {
-                        final s = _items[i];
-                        return Card(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: Theme.of(context)
-                                  .colorScheme
-                                  .primaryContainer,
-                              child: const Icon(Icons.spa_outlined),
-                            ),
-                            title: Text(s.name),
-                            subtitle: Text(
-                              '${formatMoney(s.price)} · ${s.durationMinutes} мин',
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Switch(
-                                  value: s.published,
-                                  onChanged: (v) => _toggle(s, v),
-                                ),
-                                PopupMenuButton<String>(
-                                  onSelected: (v) {
-                                    if (v == 'edit') _edit(s);
-                                    if (v == 'del') _delete(s);
-                                  },
-                                  itemBuilder: (context) => const [
-                                    PopupMenuItem(
-                                      value: 'edit',
-                                      child: Text('Изменить'),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'del',
-                                      child: Text('Удалить'),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            onTap: () => _edit(s),
+                  : LayoutBuilder(
+                      builder: (context, bc) {
+                        // Широкий экран (режим сайта) — услуги
+                        // сеткой в 2–3 колонки, а не одной лентой.
+                        final cols = bc.maxWidth > 1500
+                            ? 3
+                            : bc.maxWidth > 860
+                            ? 2
+                            : 1;
+                        if (cols == 1) {
+                          return ListView.builder(
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
+                            itemCount: _items.length,
+                            itemBuilder: (context, i) =>
+                                _serviceCard(_items[i]),
+                          );
+                        }
+                        final w = (bc.maxWidth - 24 - (cols - 1) * 12) / cols;
+                        return SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
+                          child: Wrap(
+                            spacing: 12,
+                            children: [
+                              for (final s in _items)
+                                SizedBox(width: w, child: _serviceCard(s)),
+                            ],
                           ),
                         );
                       },
@@ -462,6 +504,41 @@ class _ProviderClientsTabState extends State<ProviderClientsTab> {
     await launchUrl(Uri.parse('tel:${c.phone}'));
   }
 
+  Widget _clientCard(CloudClient c) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          child: Text(c.name.isEmpty ? '?' : c.name[0].toUpperCase()),
+        ),
+        title: Text(c.name.isEmpty ? 'Клиент' : c.name),
+        subtitle: c.phone.isEmpty ? null : Text(c.phone),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (c.phone.isNotEmpty)
+              IconButton(
+                tooltip: 'Позвонить',
+                icon: const Icon(Icons.call_outlined),
+                onPressed: () => _call(c),
+              ),
+            PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'edit') _edit(c);
+                if (v == 'del') _delete(c);
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'edit', child: Text('Изменить')),
+                PopupMenuItem(value: 'del', child: Text('Удалить')),
+              ],
+            ),
+          ],
+        ),
+        onTap: () => _edit(c),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final query = _searchCtrl.text.trim().toLowerCase();
@@ -528,55 +605,44 @@ class _ProviderClientsTabState extends State<ProviderClientsTab> {
                               ),
                             ],
                           )
-                        : ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
-                            itemCount: filtered.length,
-                            itemBuilder: (context, i) {
-                              final c = filtered[i];
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    child: Text(
-                                      c.name.isEmpty
-                                          ? '?'
-                                          : c.name[0].toUpperCase(),
-                                    ),
+                        : LayoutBuilder(
+                            builder: (context, bc) {
+                              // Широкий экран (режим сайта) —
+                              // сетка в 2–3 колонки.
+                              final cols = bc.maxWidth > 1500
+                                  ? 3
+                                  : bc.maxWidth > 860
+                                  ? 2
+                                  : 1;
+                              if (cols == 1) {
+                                return ListView.builder(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    4,
+                                    12,
+                                    88,
                                   ),
-                                  title: Text(
-                                    c.name.isEmpty ? 'Клиент' : c.name,
-                                  ),
-                                  subtitle: c.phone.isEmpty
-                                      ? null
-                                      : Text(c.phone),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (c.phone.isNotEmpty)
-                                        IconButton(
-                                          tooltip: 'Позвонить',
-                                          icon: const Icon(Icons.call_outlined),
-                                          onPressed: () => _call(c),
-                                        ),
-                                      PopupMenuButton<String>(
-                                        onSelected: (v) {
-                                          if (v == 'edit') _edit(c);
-                                          if (v == 'del') _delete(c);
-                                        },
-                                        itemBuilder: (context) => const [
-                                          PopupMenuItem(
-                                            value: 'edit',
-                                            child: Text('Изменить'),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'del',
-                                            child: Text('Удалить'),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  onTap: () => _edit(c),
+                                  itemCount: filtered.length,
+                                  itemBuilder: (context, i) =>
+                                      _clientCard(filtered[i]),
+                                );
+                              }
+                              final w =
+                                  (bc.maxWidth - 24 - (cols - 1) * 12) / cols;
+                              return SingleChildScrollView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  4,
+                                  12,
+                                  88,
+                                ),
+                                child: Wrap(
+                                  spacing: 12,
+                                  children: [
+                                    for (final c in filtered)
+                                      SizedBox(width: w, child: _clientCard(c)),
+                                  ],
                                 ),
                               );
                             },

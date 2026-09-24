@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
@@ -13,6 +14,7 @@ import '../currency.dart';
 // sendPush внутри неё настоящий (Supabase Edge Function).
 import '../notifications/push_stub.dart'
     if (dart.library.io) '../notifications/push_service.dart';
+import '../web/web_layout.dart';
 import 'cloud_service.dart';
 import 'credentials_dialog.dart';
 import 'geo_service.dart';
@@ -84,56 +86,136 @@ class _ClientHomeState extends State<ClientHome> {
         onProfileUpdated: widget.onProfileUpdated,
       ),
     ];
-    return ValueListenableBuilder<bool>(
-      valueListenable: appBizzyLook,
-      builder: (context, look, _) {
-        // «Вид Bizzy» — жёлтые акценты клиентского приложения
-        // уходят в оранжевый; кнопки сами становятся градиентными
-        // через bizzyFilledButton/bizzyFab.
-        final scaffold = Scaffold(
-          // Стеклянная тема: контент заходит под полупрозрачную
-          // навигацию с блюром.
-          extendBody: bizzyGlassActive(context),
-          body: pages[_tab],
-          bottomNavigationBar: bizzyNavBar(
-            context,
-            child: NavigationBar(
-              selectedIndex: _tab,
-              onDestinationSelected: (i) => setState(() => _tab = i),
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.room_service_outlined),
-                  selectedIcon: Icon(Icons.room_service),
-                  label: 'Услуги',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.favorite_outline),
-                  selectedIcon: Icon(Icons.favorite),
-                  label: 'Избранное',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.card_giftcard_outlined),
-                  selectedIcon: Icon(Icons.card_giftcard),
-                  label: 'Honey',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.event_note_outlined),
-                  selectedIcon: Icon(Icons.event_note),
-                  label: 'Записи',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.person_outline),
-                  selectedIcon: Icon(Icons.person),
-                  label: 'Профиль',
-                ),
-              ],
-            ),
-          ),
-        );
-        if (!look) return scaffold;
-        return Theme(
-          data: bizzyClientTheme(Theme.of(context)),
-          child: scaffold,
+    return ValueListenableBuilder<WebViewMode>(
+      valueListenable: webViewMode,
+      builder: (context, mode, _) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: appBizzyLook,
+          builder: (context, look, _) {
+            // «Вид Bizzy» — жёлтые акценты клиентского приложения
+            // уходят в оранжевый; кнопки сами становятся градиентными
+            // через bizzyFilledButton/bizzyFab.
+            final site = webSiteLayout(context);
+            final scaffold = Scaffold(
+              // Стеклянная тема: контент заходит под полупрозрачную
+              // навигацию с блюром.
+              extendBody: bizzyGlassActive(context),
+              // Режим «Полный сайт» (веб на широком экране): боковой
+              // rail слева, контент — колонкой до 1200px по центру.
+              body: site
+                  ? Row(
+                      children: [
+                        NavigationRail(
+                          selectedIndex: _tab,
+                          onDestinationSelected: (i) =>
+                              setState(() => _tab = i),
+                          labelType: NavigationRailLabelType.all,
+                          leading: Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.spa,
+                                  color: Theme.of(context).colorScheme.primary,
+                                  size: 30,
+                                ),
+                                Text(
+                                  'Bizzy',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          destinations: const [
+                            NavigationRailDestination(
+                              icon: Icon(Icons.room_service_outlined),
+                              selectedIcon: Icon(Icons.room_service),
+                              label: Text('Услуги'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.favorite_outline),
+                              selectedIcon: Icon(Icons.favorite),
+                              label: Text('Избранное'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.card_giftcard_outlined),
+                              selectedIcon: Icon(Icons.card_giftcard),
+                              label: Text('Honey'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.event_note_outlined),
+                              selectedIcon: Icon(Icons.event_note),
+                              label: Text('Записи'),
+                            ),
+                            NavigationRailDestination(
+                              icon: Icon(Icons.person_outline),
+                              selectedIcon: Icon(Icons.person),
+                              label: Text('Профиль'),
+                            ),
+                          ],
+                        ),
+                        const VerticalDivider(width: 1),
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 1200),
+                              child: pages[_tab],
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : pages[_tab],
+              bottomNavigationBar: site
+                  ? null
+                  : bizzyNavBar(
+                      context,
+                      child: NavigationBar(
+                        selectedIndex: _tab,
+                        onDestinationSelected: (i) => setState(() => _tab = i),
+                        destinations: const [
+                          NavigationDestination(
+                            icon: Icon(Icons.room_service_outlined),
+                            selectedIcon: Icon(Icons.room_service),
+                            label: 'Услуги',
+                          ),
+                          NavigationDestination(
+                            icon: Icon(Icons.favorite_outline),
+                            selectedIcon: Icon(Icons.favorite),
+                            label: 'Избранное',
+                          ),
+                          NavigationDestination(
+                            icon: Icon(Icons.card_giftcard_outlined),
+                            selectedIcon: Icon(Icons.card_giftcard),
+                            label: 'Honey',
+                          ),
+                          NavigationDestination(
+                            icon: Icon(Icons.event_note_outlined),
+                            selectedIcon: Icon(Icons.event_note),
+                            label: 'Записи',
+                          ),
+                          NavigationDestination(
+                            icon: Icon(Icons.person_outline),
+                            selectedIcon: Icon(Icons.person),
+                            label: 'Профиль',
+                          ),
+                        ],
+                      ),
+                    ),
+            );
+            if (!look) return scaffold;
+            return Theme(
+              data: bizzyClientTheme(Theme.of(context)),
+              child: scaffold,
+            );
+          },
         );
       },
     );
@@ -2887,6 +2969,8 @@ class _ClientProfileTab extends StatelessWidget {
             icon: const Icon(Icons.palette_outlined),
             label: Text('Внешний вид · ${themeModeLabel(appThemeMode.value)}'),
           ),
+          // Вид веб-версии: полный сайт / как приложение.
+          if (kIsWeb) const WebViewModeTile(),
           const SizedBox(height: 24),
           FilledButton.tonalIcon(
             onPressed: () => onSignOut(),

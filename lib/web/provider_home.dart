@@ -16,6 +16,7 @@ import '../currency.dart';
 // напоминания не нужны — это браузер.
 import '../notifications/push_stub.dart';
 import 'provider_tabs.dart';
+import 'web_layout.dart';
 
 /// Веб-кабинет мастера/салона — те же 5 разделов, что в мобильном
 /// приложении: Записи, Мастера/Приглашения, Клиенты, Услуги, Ещё.
@@ -451,24 +452,41 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-          child: SegmentedButton<int>(
-            style: const ButtonStyle(
-              // Узкий экран — иначе «Предстоящие» переносится
-              // посреди слова.
-              textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 11)),
-              padding: WidgetStatePropertyAll(EdgeInsets.zero),
-              visualDensity: VisualDensity.compact,
-            ),
-            segments: [
-              ButtonSegment(
-                value: 0,
-                label: _ShrinkLabel('Заявки (${_pending.length})'),
+          // На широком сайте переключатель не растягиваем
+          // на всю колонку — держим компактным по центру.
+          child: Align(
+            alignment: Alignment.center,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<int>(
+                  style: const ButtonStyle(
+                    // Узкий экран — иначе «Предстоящие» переносится
+                    // посреди слова.
+                    textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 11)),
+                    padding: WidgetStatePropertyAll(EdgeInsets.zero),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  segments: [
+                    ButtonSegment(
+                      value: 0,
+                      label: _ShrinkLabel('Заявки (${_pending.length})'),
+                    ),
+                    const ButtonSegment(
+                      value: 1,
+                      label: _ShrinkLabel('Грядущие'),
+                    ),
+                    const ButtonSegment(
+                      value: 2,
+                      label: _ShrinkLabel('История'),
+                    ),
+                  ],
+                  selected: {_segment},
+                  onSelectionChanged: (s) => setState(() => _segment = s.first),
+                ),
               ),
-              const ButtonSegment(value: 1, label: _ShrinkLabel('Грядущие')),
-              const ButtonSegment(value: 2, label: _ShrinkLabel('История')),
-            ],
-            selected: {_segment},
-            onSelectionChanged: (s) => setState(() => _segment = s.first),
+            ),
           ),
         ),
         Expanded(
@@ -496,20 +514,61 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
                             Center(child: Text(empty)),
                           ],
                         )
-                      : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
-                          itemCount: list.length,
-                          itemBuilder: (context, i) {
-                            final item = list[i].$2;
-                            return item is CloudBooking
+                      : LayoutBuilder(
+                          builder: (context, bc) {
+                            // Режим сайта: записи сеткой в 2–3
+                            // колонки, а не узкой лентой.
+                            final cols = bc.maxWidth > 1500
+                                ? 3
+                                : bc.maxWidth > 860
+                                ? 2
+                                : 1;
+                            Widget card(Object item) => item is CloudBooking
                                 ? _bookingCard(item)
                                 : _manualCard(item as CloudMasterAppointment);
+                            if (cols == 1) {
+                              return ListView.builder(
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  8,
+                                  12,
+                                  88,
+                                ),
+                                itemCount: list.length,
+                                itemBuilder: (context, i) => card(list[i].$2),
+                              );
+                            }
+                            final w =
+                                (bc.maxWidth - 24 - (cols - 1) * 12) / cols;
+                            return SingleChildScrollView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
+                              child: Wrap(
+                                spacing: 12,
+                                children: [
+                                  for (final item in list)
+                                    SizedBox(width: w, child: card(item.$2)),
+                                ],
+                              ),
+                            );
                           },
                         ),
                 ),
         ),
       ],
     );
+  }
+
+  /// Переключение вкладки; у салона открытие «Мастера»
+  /// гасит бейдж ответов.
+  void _onNavTap(int index) {
+    setState(() => _tab = index);
+    if (index == 1 && _isSalon) {
+      _cloud
+          .markTeamResponsesSeen()
+          .catchError((_) {})
+          .whenComplete(_loadTeamBadge);
+    }
   }
 
   void _openMore(Widget screen) {
@@ -586,6 +645,8 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
           title: const Text('Логин и пароль'),
           onTap: () => showCredentialsEditor(context),
         ),
+        // Вид веб-версии: полный сайт / как приложение.
+        const WebViewModeTile(),
         const Divider(),
         ListTile(
           leading: const Icon(Icons.logout),
@@ -610,72 +671,167 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
       const ProviderServicesTab(),
       _moreTab(),
     ];
-    return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: Text(
-          widget.profile.name.isEmpty
-              ? (_isSalon ? 'Салон' : 'Мастер')
-              : widget.profile.name,
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Обновить',
-            onPressed: () {
-              _load();
-              _loadTeamBadge();
-            },
-            icon: const Icon(Icons.refresh),
+    final fab = _tab == 0
+        ? FloatingActionButton.extended(
+            heroTag: 'booking_add',
+            onPressed: () => _editManual(),
+            icon: const Icon(Icons.add),
+            label: const Text('Новая запись'),
+          )
+        : null;
+    final navItems = [
+      _WebNavItem(
+        icon: Icons.event_note,
+        label: 'Записи',
+        badgeCount: _pending.length,
+      ),
+      _WebNavItem(
+        icon: _isSalon ? Icons.content_cut : Icons.mark_email_unread_outlined,
+        label: _isSalon ? 'Мастера' : 'Салоны',
+        badgeCount: _teamBadge,
+      ),
+      const _WebNavItem(icon: Icons.people_outline, label: 'Клиенты'),
+      const _WebNavItem(icon: Icons.spa, label: 'Услуги'),
+      const _WebNavItem(icon: Icons.menu, label: 'Ещё'),
+    ];
+    return ValueListenableBuilder<WebViewMode>(
+      valueListenable: webViewMode,
+      builder: (context, mode, _) {
+        // Режим «Полный сайт»: боковая навигация слева,
+        // контент — широкой колонкой до 1200px по центру.
+        if (webSiteLayout(context)) {
+          final scheme = Theme.of(context).colorScheme;
+          return Scaffold(
+            body: Row(
+              children: [
+                NavigationRail(
+                  selectedIndex: _tab,
+                  onDestinationSelected: _onNavTap,
+                  labelType: NavigationRailLabelType.all,
+                  leading: Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.spa, color: scheme.primary, size: 30),
+                        Text(
+                          'Bizzy',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: scheme.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  destinations: [
+                    for (final item in navItems)
+                      NavigationRailDestination(
+                        icon: _RailBadge(
+                          count: item.badgeCount,
+                          child: Icon(item.icon),
+                        ),
+                        label: Text(item.label),
+                      ),
+                  ],
+                ),
+                const VerticalDivider(width: 1),
+                Expanded(
+                  child: Column(
+                    children: [
+                      // Шапка сайта: имя кабинета + обновить.
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 10, 12, 4),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.profile.name.isEmpty
+                                    ? (_isSalon ? 'Салон' : 'Мастер')
+                                    : widget.profile.name,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Обновить',
+                              onPressed: () {
+                                _load();
+                                _loadTeamBadge();
+                              },
+                              icon: const Icon(Icons.refresh),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 1400),
+                            child: IndexedStack(index: _tab, children: tabs),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            floatingActionButton: fab,
+          );
+        }
+        // «Как приложение» / узкий экран: телефонная вёрстка
+        // с нижней панелью.
+        return Scaffold(
+          appBar: AppBar(
+            automaticallyImplyLeading: false,
+            title: Text(
+              widget.profile.name.isEmpty
+                  ? (_isSalon ? 'Салон' : 'Мастер')
+                  : widget.profile.name,
+            ),
+            actions: [
+              IconButton(
+                tooltip: 'Обновить',
+                onPressed: () {
+                  _load();
+                  _loadTeamBadge();
+                },
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
           ),
-        ],
-      ),
-      body: IndexedStack(index: _tab, children: tabs),
-      bottomNavigationBar: bizzyNavBar(
-        context,
-        bizzy: false,
-        // Своя панель вместо NavigationBar: у стандартной лейбл
-        // переносится посреди слова на узких экранах, а softWrap
-        // там не выключить. Здесь текст всегда в одну строку.
-        child: _WebNavBar(
-          selectedIndex: _tab,
-          onSelected: (index) {
-            setState(() => _tab = index);
-            // Салон открыл «Мастера» — ответы считаются просмотренными.
-            if (index == 1 && _isSalon) {
-              _cloud
-                  .markTeamResponsesSeen()
-                  .catchError((_) {})
-                  .whenComplete(_loadTeamBadge);
-            }
-          },
-          items: [
-            _WebNavItem(
-              icon: Icons.event_note,
-              label: 'Записи',
-              badgeCount: _pending.length,
+          body: IndexedStack(index: _tab, children: tabs),
+          bottomNavigationBar: bizzyNavBar(
+            context,
+            bizzy: false,
+            // Своя панель вместо NavigationBar: у стандартной лейбл
+            // переносится посреди слова на узких экранах, а softWrap
+            // там не выключить. Здесь текст всегда в одну строку.
+            child: _WebNavBar(
+              selectedIndex: _tab,
+              onSelected: _onNavTap,
+              items: navItems,
             ),
-            _WebNavItem(
-              icon: _isSalon
-                  ? Icons.content_cut
-                  : Icons.mark_email_unread_outlined,
-              label: _isSalon ? 'Мастера' : 'Салоны',
-              badgeCount: _teamBadge,
-            ),
-            const _WebNavItem(icon: Icons.people_outline, label: 'Клиенты'),
-            const _WebNavItem(icon: Icons.spa, label: 'Услуги'),
-            const _WebNavItem(icon: Icons.menu, label: 'Ещё'),
-          ],
-        ),
-      ),
-      floatingActionButton: _tab == 0
-          ? FloatingActionButton.extended(
-              heroTag: 'booking_add',
-              onPressed: () => _editManual(),
-              icon: const Icon(Icons.add),
-              label: const Text('Новая запись'),
-            )
-          : null,
+          ),
+          floatingActionButton: fab,
+        );
+      },
     );
+  }
+}
+
+/// Иконка пункта rail с бейджем количества (заявки/ответы).
+class _RailBadge extends StatelessWidget {
+  const _RailBadge({required this.count, required this.child});
+
+  final int count;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (count <= 0) return child;
+    return Badge.count(count: count, child: child);
   }
 }
 

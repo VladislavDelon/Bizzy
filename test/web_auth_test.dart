@@ -28,6 +28,37 @@ void main() {
     expect(find.text('Логин'), findsOneWidget);
     expect(find.text('Пароль'), findsOneWidget);
     expect(find.text('Войти'), findsOneWidget);
+    // Широкий экран — сайт-лендинг: герой-панель о том,
+    // что это запись на бьюти-услуги, и переключатель вида.
+    expect(find.text('Онлайн-запись на бьюти-услуги'), findsOneWidget);
+    expect(find.text('Сайт'), findsOneWidget);
+    expect(find.text('Приложение'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('web auth compact layout on narrow screen', (tester) async {
+    tester.view.physicalSize = const Size(480, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: bizzyTheme(Brightness.dark),
+        locale: const Locale('ru'),
+        supportedLocales: const [Locale('ru'), Locale('en')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        home: WebAuthScreen(onSignedIn: () {}),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 3));
+    // Узкий экран — телефонная заставка без герой-панели,
+    // но переключатель вида доступен и тут.
+    expect(find.text('Вход — клиент'), findsOneWidget);
+    expect(find.text('Онлайн-запись на бьюти-услуги'), findsNothing);
+    expect(find.text('Приложение'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

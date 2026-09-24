@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -38,6 +39,39 @@ const bizzySoftGradient = LinearGradient(
 
 const _themePrefsKey = 'bizzy_theme_mode';
 const _bizzyLookKey = 'bizzy_look';
+const _webViewModeKey = 'bizzy_web_view_mode';
+
+/// Режим веб-версии на широких экранах: «Полный сайт» — боковая
+/// навигация и широкий контент, «Как приложение» — телефонная
+/// вёрстка в рамке по центру. На экранах < 720px всегда
+/// телефонная вёрстка (мобильный браузер), на мобильном
+/// приложении флаг не влияет (kIsWeb).
+enum WebViewMode { site, app }
+
+final ValueNotifier<WebViewMode> webViewMode = ValueNotifier(WebViewMode.site);
+
+Future<void> loadWebViewMode() async {
+  final prefs = await SharedPreferences.getInstance();
+  webViewMode.value = prefs.getString(_webViewModeKey) == 'app'
+      ? WebViewMode.app
+      : WebViewMode.site;
+}
+
+Future<void> saveWebViewMode(WebViewMode value) async {
+  webViewMode.value = value;
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(
+    _webViewModeKey,
+    value == WebViewMode.app ? 'app' : 'site',
+  );
+}
+
+/// true — сейчас нужна «сайтовая» вёрстка: веб + выбран «Полный
+/// сайт» + экран шире 720px.
+bool webSiteLayout(BuildContext context) =>
+    kIsWeb &&
+    webViewMode.value == WebViewMode.site &&
+    MediaQuery.sizeOf(context).width > 720;
 
 ThemeMode themeModeFromString(String? value) {
   return switch (value) {

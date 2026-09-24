@@ -1,21 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_contacts/flutter_contacts.dart' as phone;
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app_theme.dart';
-import '../notifications/push_service.dart';
+import '../notifications/push.dart';
 import 'certificates_screen.dart';
 import 'cloud_service.dart';
+// Условный экспорт: на вебе телефонной книги нет — заглушка
+// с тем же API (contacts_stub.dart).
+import 'contacts.dart' as phone;
 import 'credentials_dialog.dart';
 import 'fan_push.dart';
 import 'geo_service.dart';
 import 'map_screens.dart';
 import 'master_public_profile.dart';
+import 'provider_qr.dart';
 import 'provider_reviews_screen.dart';
-import 'qr_share.dart';
 import 'team_schedule_screen.dart';
 import 'work_hours.dart';
 
@@ -2740,12 +2742,13 @@ class _CloudBookingSheetState extends State<CloudBookingSheet> {
 /// Вкладка «Мастера» у салона: ключ регистрации, команда из облака,
 /// создание аккаунтов мастеров + локальный справочник ниже.
 class SalonTeamScreen extends StatefulWidget {
-  const SalonTeamScreen({super.key, required this.localDirectoryBuilder});
+  const SalonTeamScreen({super.key, this.localDirectoryBuilder});
 
   /// Локальный справочник мастеров — встраивается под облачным
   /// блоком. [onAddMaster] пробрасывается в FAB «Новый мастер»,
   /// чтобы кнопка создавала облачный аккаунт.
-  final Widget Function(VoidCallback onAddMaster) localDirectoryBuilder;
+  /// На вебе локального справочника нет — null скрывает секцию.
+  final Widget Function(VoidCallback onAddMaster)? localDirectoryBuilder;
 
   @override
   State<SalonTeamScreen> createState() => _SalonTeamScreenState();
@@ -3367,8 +3370,10 @@ class _SalonTeamScreenState extends State<SalonTeamScreen> {
                 ),
             ],
           ],
-          Divider(color: scheme.outlineVariant),
-          Expanded(child: widget.localDirectoryBuilder(_createMaster)),
+          if (widget.localDirectoryBuilder != null) ...[
+            Divider(color: scheme.outlineVariant),
+            Expanded(child: widget.localDirectoryBuilder!(_createMaster)),
+          ],
         ],
       ),
     );

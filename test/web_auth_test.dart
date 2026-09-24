@@ -1,6 +1,7 @@
 import 'package:bizzy_app/app_theme.dart';
 import 'package:bizzy_app/web/web_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -11,6 +12,14 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: bizzyTheme(Brightness.dark),
+        // Как в main_web.dart — русская локаль через Global-делегаты.
+        locale: const Locale('ru'),
+        supportedLocales: const [Locale('ru'), Locale('en')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
         home: WebAuthScreen(onSignedIn: () {}),
       ),
     );

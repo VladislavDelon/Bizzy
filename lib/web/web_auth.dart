@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../cloud/animated_logo.dart';
 import '../cloud/cloud_service.dart';
@@ -627,6 +628,32 @@ class _WebAuthScreenState extends State<WebAuthScreen>
                 _HeroTile(Icons.auto_awesome, 'Макияж'),
               ],
             ),
+            const SizedBox(height: 26),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                // Прямая ссылка на свежий APK из последнего релиза.
+                FilledButton.tonalIcon(
+                  onPressed: () => launchUrl(
+                    Uri.parse(
+                      'https://github.com/VladislavDelon/Bizzy/'
+                      'releases/latest/download/app-release.apk',
+                    ),
+                    mode: LaunchMode.externalApplication,
+                  ),
+                  icon: const Icon(Icons.android),
+                  label: const Text('Скачать приложение для Android'),
+                ),
+                // iOS: неподписанный .ipa из релиза + инструкция
+                // по установке через Sideloadly/AltStore.
+                OutlinedButton.icon(
+                  onPressed: () => _showIosInstallDialog(context),
+                  icon: const Icon(Icons.phone_iphone),
+                  label: const Text('Установить на iPhone'),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -651,56 +678,203 @@ class _NoWrapLabel extends StatelessWidget {
   }
 }
 
+/// Диалог «Установить на iPhone»: шаги для бесплатной
+/// установки неподписанного .ipa через Sideloadly/AltStore.
+void _showIosInstallDialog(BuildContext context) {
+  const steps = [
+    'Скачайте файл bizzy-ios-unsigned.ipa кнопкой ниже.',
+    'На компьютере (Windows или Mac) установите бесплатную '
+        'программу Sideloadly (sideloadly.io) или AltStore.',
+    'Подключите iPhone кабелем, перетащите .ipa в Sideloadly, '
+        'введите свой Apple ID и нажмите Start.',
+    'На iPhone откройте «Настройки → Основные → VPN и '
+        'управление устройством» и нажмите «Доверять» '
+        'вашему Apple ID.',
+    'Бесплатная подпись живёт 7 дней — потом повторите '
+        'шаг 3, все данные в приложении сохранятся.',
+  ];
+  showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      icon: Icon(
+        Icons.phone_iphone,
+        size: 40,
+        color: Theme.of(ctx).colorScheme.primary,
+      ),
+      title: const Text('Установка на iPhone', textAlign: TextAlign.center),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < steps.length; i++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text('${i + 1}. ${steps[i]}'),
+              ),
+            const SizedBox(height: 4),
+            Text(
+              'Push-уведомления в бесплатной установке не работают — '
+              'весь остальной функционал как на Android и на сайте.',
+              style: Theme.of(ctx).textTheme.bodySmall
+                  ?.copyWith(color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+      actionsAlignment: MainAxisAlignment.center,
+      actions: [
+        FilledButton.icon(
+          onPressed: () => launchUrl(
+            Uri.parse(
+              'https://github.com/VladislavDelon/Bizzy/'
+              'releases/latest/download/bizzy-ios-unsigned.ipa',
+            ),
+            mode: LaunchMode.externalApplication,
+          ),
+          icon: const Icon(Icons.download),
+          label: const Text('Скачать .ipa'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('Закрыть'),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Что показать по тапу на плитку категории на лендинге.
+const Map<String, String> _heroTileInfo = {
+  'Стрижки':
+      'Женские и мужские стрижки, укладка, окрашивание, '
+      'уход за волосами. Найдите парикмахера рядом и '
+      'запишитесь на свободное окно за пару кликов.',
+  'Наращивание':
+      'Наращивание волос, ресниц и ногтей. Смотрите '
+      'портфолио мастера, рейтинг и отзывы клиентов '
+      'перед записью.',
+  'Маникюр':
+      'Маникюр и педикюр, гель-лак, укрепление и дизайн '
+      'ногтей. Частные мастера и салоны с актуальным '
+      'расписанием.',
+  'Массаж и уход':
+      'Массаж, уход за кожей, SPA-процедуры. Выбирайте '
+      'специалиста по рейтингу и отзывам, записывайтесь '
+      'онлайн без звонков.',
+  'Макияж':
+      'Дневной, вечерний и свадебный макияж, брови, '
+      'обучение. Запишитесь к визажисту на удобное '
+      'время прямо с сайта.',
+};
+
 /// Плитка категории услуг на герой-панели сайта — градиентная
-/// «карточка-фото» с иконкой: наглядно, что Bizzy про красоту.
-class _HeroTile extends StatelessWidget {
+/// «карточка-фото» с иконкой. При наведении приподнимается
+/// и чуть увеличивается; по тапу показывает, что за услуги
+/// в этой категории.
+class _HeroTile extends StatefulWidget {
   const _HeroTile(this.icon, this.label);
 
   final IconData icon;
   final String label;
 
   @override
+  State<_HeroTile> createState() => _HeroTileState();
+}
+
+class _HeroTileState extends State<_HeroTile> {
+  bool _hover = false;
+
+  void _showInfo(BuildContext context) {
+    final text = _heroTileInfo[widget.label] ?? '';
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(
+          widget.icon,
+          size: 40,
+          color: Theme.of(ctx).colorScheme.primary,
+        ),
+        title: Text(widget.label, textAlign: TextAlign.center),
+        content: Text(text, textAlign: TextAlign.center),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Понятно'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dark = scheme.brightness == Brightness.dark;
-    return Container(
-      width: 122,
-      height: 118,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: dark
-              ? [
-                  scheme.primary.withValues(alpha: 0.30),
-                  scheme.surfaceContainerHighest,
-                ]
-              : [
-                  scheme.primary.withValues(alpha: 0.22),
-                  scheme.primaryContainer,
-                ],
-        ),
-        border: Border.all(color: scheme.primary.withValues(alpha: 0.18)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 34, color: scheme.primary),
-          const SizedBox(height: 10),
-          // Подпись ужимается по ширине, но слово не рвётся.
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              label,
-              maxLines: 1,
-              softWrap: false,
-              style: Theme.of(context).textTheme.labelMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: () => _showInfo(context),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          width: 122,
+          height: 118,
+          padding: const EdgeInsets.all(10),
+          // Наведение: плитка приподнимается и чуть растёт.
+          transform: Matrix4.identity()
+            ..translateByDouble(0.0, _hover ? -6.0 : 0.0, 0.0, 1.0)
+            ..scaleByDouble(_hover ? 1.05 : 1.0, _hover ? 1.05 : 1.0, 1.0, 1.0),
+          transformAlignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: dark
+                  ? [
+                      scheme.primary.withValues(alpha: _hover ? 0.42 : 0.30),
+                      scheme.surfaceContainerHighest,
+                    ]
+                  : [
+                      scheme.primary.withValues(alpha: _hover ? 0.34 : 0.22),
+                      scheme.primaryContainer,
+                    ],
             ),
+            border: Border.all(
+              color: scheme.primary.withValues(alpha: _hover ? 0.45 : 0.18),
+            ),
+            boxShadow: _hover
+                ? [
+                    BoxShadow(
+                      color: scheme.primary.withValues(alpha: 0.25),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : null,
           ),
-        ],
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(widget.icon, size: 34, color: scheme.primary),
+              const SizedBox(height: 10),
+              // Подпись ужимается по ширине, но слово не рвётся.
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  widget.label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: Theme.of(context).textTheme.labelMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

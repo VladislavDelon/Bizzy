@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
+import 'web_reload_stub.dart' if (dart.library.html) 'web_reload_web.dart';
 
 /// Переключатель вида веб-версии: «Полный сайт» (широкая
 /// вёрстка с боковой навигацией) или «Как приложение»
@@ -35,7 +36,12 @@ class WebViewModeSwitcher extends StatelessWidget {
             ),
           ],
           selected: {mode},
-          onSelectionChanged: (s) => saveWebViewMode(s.first),
+          // Сохраняем выбор и перезагружаем страницу —
+          // сайт/приложение открывается заново в новой вёрстке.
+          onSelectionChanged: (s) async {
+            await saveWebViewMode(s.first);
+            reloadPage();
+          },
         );
       },
     );
@@ -55,8 +61,10 @@ class WebViewModeTile extends StatelessWidget {
         title: const Text('Полный сайт на большом экране'),
         subtitle: const Text('Выкл — вид как в мобильном приложении'),
         value: mode == WebViewMode.site,
-        onChanged: (v) =>
-            saveWebViewMode(v ? WebViewMode.site : WebViewMode.app),
+        onChanged: (v) async {
+          await saveWebViewMode(v ? WebViewMode.site : WebViewMode.app);
+          reloadPage();
+        },
       ),
     );
   }

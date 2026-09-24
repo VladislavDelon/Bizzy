@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../app_theme.dart';
 import '../cloud/blacklist_screen.dart';
 import '../cloud/certificates_screen.dart';
 import '../cloud/cloud_service.dart';
@@ -451,12 +452,19 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
           child: SegmentedButton<int>(
+            style: const ButtonStyle(
+              // Узкий экран — иначе «Предстоящие» переносится
+              // посреди слова.
+              textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 11)),
+              padding: WidgetStatePropertyAll(EdgeInsets.zero),
+              visualDensity: VisualDensity.compact,
+            ),
             segments: [
               ButtonSegment(
                 value: 0,
                 label: Text('Заявки (${_pending.length})'),
               ),
-              const ButtonSegment(value: 1, label: Text('Предстоящие')),
+              const ButtonSegment(value: 1, label: Text('Грядущие')),
               const ButtonSegment(value: 2, label: Text('История')),
             ],
             selected: {_segment},
@@ -622,44 +630,50 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
         ],
       ),
       body: IndexedStack(index: _tab, children: tabs),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (index) {
-          setState(() => _tab = index);
-          // Салон открыл «Мастера» — ответы считаются просмотренными.
-          if (index == 1 && _isSalon) {
-            _cloud
-                .markTeamResponsesSeen()
-                .catchError((_) {})
-                .whenComplete(_loadTeamBadge);
-          }
-        },
-        destinations: [
-          NavigationDestination(
-            icon: Badge.count(
-              count: _pending.length,
-              isLabelVisible: _pending.isNotEmpty,
-              child: const Icon(Icons.event_note),
-            ),
-            label: 'Записи',
-          ),
-          NavigationDestination(
-            icon: Badge(
-              isLabelVisible: _teamBadge > 0,
-              label: Text('$_teamBadge'),
-              child: Icon(
-                _isSalon ? Icons.content_cut : Icons.mark_email_unread_outlined,
+      bottomNavigationBar: bizzyNavBar(
+        context,
+        bizzy: false,
+        child: NavigationBar(
+          selectedIndex: _tab,
+          onDestinationSelected: (index) {
+            setState(() => _tab = index);
+            // Салон открыл «Мастера» — ответы считаются просмотренными.
+            if (index == 1 && _isSalon) {
+              _cloud
+                  .markTeamResponsesSeen()
+                  .catchError((_) {})
+                  .whenComplete(_loadTeamBadge);
+            }
+          },
+          destinations: [
+            NavigationDestination(
+              icon: Badge.count(
+                count: _pending.length,
+                isLabelVisible: _pending.isNotEmpty,
+                child: const Icon(Icons.event_note),
               ),
+              label: 'Записи',
             ),
-            label: _isSalon ? 'Мастера' : 'Приглашения',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.people_outline),
-            label: 'Клиенты',
-          ),
-          const NavigationDestination(icon: Icon(Icons.spa), label: 'Услуги'),
-          const NavigationDestination(icon: Icon(Icons.menu), label: 'Ещё'),
-        ],
+            NavigationDestination(
+              icon: Badge(
+                isLabelVisible: _teamBadge > 0,
+                label: Text('$_teamBadge'),
+                child: Icon(
+                  _isSalon
+                      ? Icons.content_cut
+                      : Icons.mark_email_unread_outlined,
+                ),
+              ),
+              label: _isSalon ? 'Мастера' : 'Салоны',
+            ),
+            const NavigationDestination(
+              icon: Icon(Icons.people_outline),
+              label: 'Клиенты',
+            ),
+            const NavigationDestination(icon: Icon(Icons.spa), label: 'Услуги'),
+            const NavigationDestination(icon: Icon(Icons.menu), label: 'Ещё'),
+          ],
+        ),
       ),
       floatingActionButton: _tab == 0
           ? FloatingActionButton.extended(

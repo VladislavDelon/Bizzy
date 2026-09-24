@@ -23,9 +23,7 @@ void main() {
     // свои состояния ошибки, а навигация остаётся рабочей.
   });
 
-  testWidgets('салон: пять вкладок как в мобильном приложении', (
-    tester,
-  ) async {
+  testWidgets('салон: пять вкладок как в мобильном приложении', (tester) async {
     // Высокий вьюпорт — весь список «Ещё» помещается без скролла.
     tester.view.physicalSize = const Size(900, 1700);
     tester.view.devicePixelRatio = 1.0;
@@ -44,13 +42,7 @@ void main() {
       ),
     );
     await tester.pump();
-    for (final label in [
-      'Записи',
-      'Мастера',
-      'Клиенты',
-      'Услуги',
-      'Ещё',
-    ]) {
+    for (final label in ['Записи', 'Мастера', 'Клиенты', 'Услуги', 'Ещё']) {
       expect(find.text(label), findsWidgets, reason: label);
     }
     expect(tester.takeException(), isNull);
@@ -93,13 +85,7 @@ void main() {
       ),
     );
     await tester.pump();
-    for (final label in [
-      'Записи',
-      'Приглашения',
-      'Клиенты',
-      'Услуги',
-      'Ещё',
-    ]) {
+    for (final label in ['Записи', 'Салоны', 'Клиенты', 'Услуги', 'Ещё']) {
       expect(find.text(label), findsWidgets, reason: label);
     }
     // FAB «Новая запись» на вкладке записей.

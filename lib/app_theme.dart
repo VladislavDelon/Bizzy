@@ -173,7 +173,27 @@ Widget bizzyNavBar(
   // если флаг остался включённым после смены аккаунта.
   bool bizzy = true,
 }) {
-  if (!bizzyGlassActive(context)) return child;
+  if (!bizzyGlassActive(context)) {
+    // В тёмной теме стекла нет, но лейблы всё равно жмём до 11pt —
+    // иначе длинные подписи («Приглашения», «Избранное»)
+    // переносятся посреди слова на узких экранах.
+    return Theme(
+      data: Theme.of(context).copyWith(
+        navigationBarTheme: Theme.of(context).navigationBarTheme.copyWith(
+          labelTextStyle: WidgetStateProperty.resolveWith(
+            (states) => TextStyle(
+              fontSize: 11,
+              height: 1.1,
+              fontWeight: states.contains(WidgetState.selected)
+                  ? FontWeight.w600
+                  : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+      child: child,
+    );
+  }
   const radius = 30.0;
   return Padding(
     // Узкие поля — плашка шире, лейблы вкладок не обрезаются.

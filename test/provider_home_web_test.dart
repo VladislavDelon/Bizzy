@@ -68,7 +68,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('мастер: вторая вкладка — приглашения от салонов', (
+  testWidgets('мастер: вторая вкладка — расписание, приглашения в «Ещё»', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -85,7 +85,7 @@ void main() {
       ),
     );
     await tester.pump();
-    for (final label in ['Записи', 'Салоны', 'Клиенты', 'Услуги', 'Ещё']) {
+    for (final label in ['Записи', 'Расписание', 'Клиенты', 'Услуги', 'Ещё']) {
       expect(find.text(label), findsWidgets, reason: label);
     }
     // FAB «Новая запись» на вкладке записей.
@@ -94,6 +94,8 @@ void main() {
     await tester.tap(find.text('Ещё'));
     await tester.pump();
     expect(find.text('Мой профиль'), findsWidgets);
+    // Приглашения от салонов — в «Ещё», как на телефоне.
+    expect(find.text('Приглашения от салонов'), findsOneWidget);
     // У мастера-одиночки нет «Расписание команды».
     expect(find.text('Расписание команды'), findsNothing);
     expect(tester.takeException(), isNull);

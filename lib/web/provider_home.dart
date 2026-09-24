@@ -46,6 +46,7 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
   int _teamBadge = 0;
 
   bool get _isSalon => widget.profile.role == 'salon';
+  DateTime _scheduleDay = DateTime.now();
 
   @override
   void initState() {
@@ -437,6 +438,169 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
     );
   }
 
+  /// Записи выбранного дня: облачные (не отменённые) + ручные.
+  List<(DateTime, Object)> _dayItems(DateTime day) {
+    bool sameDay(DateTime a, DateTime b) =>
+        a.year == b.year && a.month == b.month && a.day == b.day;
+    return [
+      for (final b in _bookings)
+        if (b.status != 'cancelled' && sameDay(b.startsAt, day))
+          (b.startsAt, b as Object),
+      for (final a in _manual)
+        if (sameDay(a.startsAt, day)) (a.startsAt, a as Object),
+    ]..sort((x, y) => x.$1.compareTo(y.$1));
+  }
+
+  /// «Расписание» у мастера — веб-аналог «Моих дел» на телефоне:
+  /// планировщик дня со всеми записями по часам.
+  Widget _scheduleTab() {
+    final items = _dayItems(_scheduleDay);
+    final now = DateTime.now();
+    final isToday =
+        _scheduleDay.year == now.year &&
+        _scheduleDay.month == now.month &&
+        _scheduleDay.day == now.day;
+    const weekDays = [
+      'Понедельник',
+      'Вторник',
+      'Среда',
+      'Четверг',
+      'Пятница',
+      'Суббота',
+      'Воскресенье',
+    ];
+    const months = [
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
+    final dayLabel =
+        '${weekDays[_scheduleDay.weekday - 1]}, '
+        '${_scheduleDay.day} ${months[_scheduleDay.month - 1]}';
+    final totalMin = items.fold<int>(
+      0,
+      (sum, item) =>
+          sum +
+          (item.$2 is CloudBooking
+              ? (item.$2 as CloudBooking).durationMinutes
+              : (item.$2 as CloudMasterAppointment).durationMinutes),
+    );
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 12, 8, 4),
+          child: Row(
+            children: [
+              IconButton(
+                tooltip: 'Предыдущий день',
+                icon: const Icon(Icons.chevron_left),
+                onPressed: () => setState(
+                  () => _scheduleDay = _scheduleDay.subtract(
+                    const Duration(days: 1),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  children: [
+                    Text(
+                      dayLabel,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    Text(
+                      items.isEmpty
+                          ? 'Свободный день'
+                          : '${items.length} запис. · $totalMin мин',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: isToday
+                    ? null
+                    : () => setState(() => _scheduleDay = DateTime.now()),
+                child: const Text('Сегодня'),
+              ),
+              IconButton(
+                tooltip: 'Следующий день',
+                icon: const Icon(Icons.chevron_right),
+                onPressed: () => setState(
+                  () =>
+                      _scheduleDay = _scheduleDay.add(const Duration(days: 1)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: items.isEmpty
+                      ? ListView(
+                          children: const [
+                            SizedBox(height: 120),
+                            Center(
+                              child: Text(
+                                'На этот день записей нет.',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                        )
+                      : _cardsGrid(items),
+                ),
+        ),
+      ],
+    );
+  }
+
+  /// Сетка карточек записей: на широком экране (режим сайта)
+  /// в 2–3 колонки, на узком — одна лента.
+  Widget _cardsGrid(List<(DateTime, Object)> list) {
+    return LayoutBuilder(
+      builder: (context, bc) {
+        final cols = bc.maxWidth > 1500
+            ? 3
+            : bc.maxWidth > 860
+            ? 2
+            : 1;
+        Widget card(Object item) => item is CloudBooking
+            ? _bookingCard(item)
+            : _manualCard(item as CloudMasterAppointment);
+        if (cols == 1) {
+          return ListView.builder(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
+            itemCount: list.length,
+            itemBuilder: (context, i) => card(list[i].$2),
+          );
+        }
+        final w = (bc.maxWidth - 24 - (cols - 1) * 12) / cols;
+        return SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
+          child: Wrap(
+            spacing: 12,
+            children: [
+              for (final item in list) SizedBox(width: w, child: card(item.$2)),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _bookingsTab() {
     final list = switch (_segment) {
       0 => _pending.map((b) => (b.startsAt, b as Object)).toList(),
@@ -514,45 +678,7 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
                             Center(child: Text(empty)),
                           ],
                         )
-                      : LayoutBuilder(
-                          builder: (context, bc) {
-                            // Режим сайта: записи сеткой в 2–3
-                            // колонки, а не узкой лентой.
-                            final cols = bc.maxWidth > 1500
-                                ? 3
-                                : bc.maxWidth > 860
-                                ? 2
-                                : 1;
-                            Widget card(Object item) => item is CloudBooking
-                                ? _bookingCard(item)
-                                : _manualCard(item as CloudMasterAppointment);
-                            if (cols == 1) {
-                              return ListView.builder(
-                                padding: const EdgeInsets.fromLTRB(
-                                  12,
-                                  8,
-                                  12,
-                                  88,
-                                ),
-                                itemCount: list.length,
-                                itemBuilder: (context, i) => card(list[i].$2),
-                              );
-                            }
-                            final w =
-                                (bc.maxWidth - 24 - (cols - 1) * 12) / cols;
-                            return SingleChildScrollView(
-                              physics: const AlwaysScrollableScrollPhysics(),
-                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
-                              child: Wrap(
-                                spacing: 12,
-                                children: [
-                                  for (final item in list)
-                                    SizedBox(width: w, child: card(item.$2)),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
+                      : _cardsGrid(list),
                 ),
         ),
       ],
@@ -593,6 +719,24 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
             ),
           ),
         ),
+        if (!_isSalon)
+          // У мастера приглашения салонов — здесь, в «Ещё»
+          // (как в приложении: «Мой профиль» → «Приглашения»).
+          ListTile(
+            leading: Badge(
+              isLabelVisible: _teamBadge > 0,
+              label: Text('$_teamBadge'),
+              child: const Icon(Icons.mark_email_unread_outlined),
+            ),
+            title: const Text('Приглашения от салонов'),
+            subtitle: const Text('Запросы на вступление в команду'),
+            onTap: () => _openMore(
+              Scaffold(
+                appBar: AppBar(title: const Text('Приглашения')),
+                body: ProviderInvitesTab(onChanged: _loadTeamBadge),
+              ),
+            ),
+          ),
         if (_isSalon)
           ListTile(
             leading: const Icon(Icons.calendar_view_week_outlined),
@@ -666,7 +810,10 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
               localDirectoryBuilder: (onAddMaster) =>
                   WebTeamDirectory(onAddMaster: onAddMaster),
             )
-          : ProviderInvitesTab(onChanged: _loadTeamBadge),
+          // У мастера вторая вкладка — «Расписание»: планировщик
+          // дня (веб-аналог «Моих дел» на телефоне). Приглашения
+          // салонов живут в «Ещё», как в приложении.
+          : _scheduleTab(),
       const ProviderClientsTab(),
       const ProviderServicesTab(),
       _moreTab(),
@@ -679,20 +826,27 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
             label: const Text('Новая запись'),
           )
         : null;
+    // Бейджи — как на телефоне: новые заявки на «Клиенты»,
+    // ответы мастеров на «Мастера» (салон) / приглашения
+    // салонов на «Ещё» (мастер).
     final navItems = [
+      const _WebNavItem(icon: Icons.event_note, label: 'Записи'),
       _WebNavItem(
-        icon: Icons.event_note,
-        label: 'Записи',
+        icon: _isSalon ? Icons.content_cut : Icons.calendar_view_day_outlined,
+        label: _isSalon ? 'Мастера' : 'Расписание',
+        badgeCount: _isSalon ? _teamBadge : 0,
+      ),
+      _WebNavItem(
+        icon: Icons.people_outline,
+        label: 'Клиенты',
         badgeCount: _pending.length,
       ),
-      _WebNavItem(
-        icon: _isSalon ? Icons.content_cut : Icons.mark_email_unread_outlined,
-        label: _isSalon ? 'Мастера' : 'Салоны',
-        badgeCount: _teamBadge,
-      ),
-      const _WebNavItem(icon: Icons.people_outline, label: 'Клиенты'),
       const _WebNavItem(icon: Icons.spa, label: 'Услуги'),
-      const _WebNavItem(icon: Icons.menu, label: 'Ещё'),
+      _WebNavItem(
+        icon: Icons.menu,
+        label: 'Ещё',
+        badgeCount: _isSalon ? 0 : _teamBadge,
+      ),
     ];
     return ValueListenableBuilder<WebViewMode>(
       valueListenable: webViewMode,

@@ -418,9 +418,15 @@ class _ProviderClientsTabState extends State<ProviderClientsTab> {
               TextFormField(
                 controller: phoneCtrl,
                 keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Телефон',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
+                  // Кнопка «вставить» — номер из буфера обмена.
+                  suffixIcon: IconButton(
+                    tooltip: 'Вставить из буфера',
+                    icon: const Icon(Icons.content_paste, size: 18),
+                    onPressed: () => pasteFromClipboard(context, phoneCtrl),
+                  ),
                 ),
               ),
             ],
@@ -1066,9 +1072,15 @@ class _WebAppointmentDialogState extends State<_WebAppointmentDialog> {
                 TextFormField(
                   controller: _phoneCtrl,
                   keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Телефон',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
+                    // Кнопка «вставить» — номер из буфера обмена.
+                    suffixIcon: IconButton(
+                      tooltip: 'Вставить из буфера',
+                      icon: const Icon(Icons.content_paste, size: 18),
+                      onPressed: () => pasteFromClipboard(context, _phoneCtrl),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -1198,6 +1210,33 @@ class _WebAppointmentDialogState extends State<_WebAppointmentDialog> {
         ),
       ],
     );
+  }
+}
+
+/// Вставка текста из буфера обмена в поле (веб: Ctrl+V +
+/// эта кнопка; если браузер не дал доступ — подсказка).
+Future<void> pasteFromClipboard(
+  BuildContext context,
+  TextEditingController ctrl,
+) async {
+  try {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim() ?? '';
+    if (text.isEmpty) {
+      throw StateError('empty clipboard');
+    }
+    ctrl.text = text;
+  } catch (_) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Буфер пуст или браузер не дал доступ — '
+            'вставьте вручную (Ctrl+V)',
+          ),
+        ),
+      );
+    }
   }
 }
 

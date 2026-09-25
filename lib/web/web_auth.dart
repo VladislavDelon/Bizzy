@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../cloud/animated_logo.dart';
 import '../cloud/cloud_service.dart';
+import 'seasonal_background.dart';
 import 'web_layout.dart';
 
 /// Веб-вход и регистрация: клиент, мастер или салон.
@@ -153,25 +154,28 @@ class _WebAuthScreenState extends State<WebAuthScreen>
         : [Colors.black, scheme.primary.withValues(alpha: 0.12)];
 
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: background,
-          ),
-        ),
-        child: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, c) {
-              // Широкий экран — сайт-лендинг: презентация сервиса
-              // слева, карточка входа справа. Узкий — телефонная
-              // заставка: логотип по центру поднимается наверх.
-              if (c.maxWidth > 880) return _buildWide(context, c, scheme);
-              return _buildCompact(context, c, scheme);
-            },
-          ),
-        ),
+      body: LayoutBuilder(
+        builder: (context, c) {
+          // Широкий экран — сайт-лендинг: презентация сервиса
+          // слева, карточка входа справа — на сезонном
+          // анимированном фоне. Узкий — телефонная заставка.
+          final wide = c.maxWidth > 880;
+          if (wide) {
+            return SeasonalBackdrop(
+              child: SafeArea(child: _buildWide(context, c, scheme)),
+            );
+          }
+          return Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: background,
+              ),
+            ),
+            child: SafeArea(child: _buildCompact(context, c, scheme)),
+          );
+        },
       ),
     );
   }

@@ -97,6 +97,9 @@ class _ClientHomeState extends State<ClientHome> {
             // через bizzyFilledButton/bizzyFab.
             final site = webSiteLayout(context);
             final scaffold = Scaffold(
+              // Режим «Полный сайт»: Scaffold прозрачный — за
+              // контентом виден сезонный анимированный фон.
+              backgroundColor: site ? Colors.transparent : null,
               // Стеклянная тема: контент заходит под полупрозрачную
               // навигацию с блюром.
               extendBody: bizzyGlassActive(context),

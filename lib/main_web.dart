@@ -8,6 +8,7 @@ import 'cloud/client_app.dart';
 import 'cloud/cloud_service.dart';
 import 'cloud/supabase_config.dart';
 import 'web/provider_home.dart';
+import 'web/seasonal_background.dart';
 import 'web/web_auth.dart';
 
 /// Веб-версия Bizzy: только облако — регистрация/вход клиента,
@@ -124,33 +125,25 @@ class _BizzyWebAppState extends State<BizzyWebApp> {
                             onSignOut: _signOut,
                           );
                     if (c.maxWidth <= 720) return home;
-                    return ValueListenableBuilder<WebViewMode>(
-                      valueListenable: webViewMode,
-                      builder: (context, mode, _) {
-                        // Режим «Полный сайт»: контент на всю ширину,
-                        // навигация сбоку — внутри самих экранов.
-                        if (mode == WebViewMode.site) return home;
-                        // Режим «Как приложение»: телефонная колонка
-                        // 430px в скруглённой рамке с тенью по центру.
-                        final scheme = Theme.of(context).colorScheme;
-                        final dark = scheme.brightness == Brightness.dark;
-                        return DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: dark
-                                  ? [
-                                      Colors.black,
-                                      scheme.primary.withValues(alpha: 0.12),
-                                    ]
-                                  : [
-                                      Colors.white,
-                                      scheme.primary.withValues(alpha: 0.08),
-                                    ],
-                            ),
-                          ),
-                          child: Center(
+                    // На широком экране за всем — сезонный
+                    // анимированный фон (снег/лепестки/пыльца/
+                    // листопад). В режиме «сайт» внутренние
+                    // Scaffold прозрачные и фон виден за
+                    // контентом; в режиме «приложение» — по
+                    // краям телефонной рамки.
+                    return SeasonalBackdrop(
+                      child: ValueListenableBuilder<WebViewMode>(
+                        valueListenable: webViewMode,
+                        builder: (context, mode, _) {
+                          // Режим «Полный сайт»: контент на всю ширину,
+                          // навигация сбоку — внутри самих экранов.
+                          if (mode == WebViewMode.site) return home;
+                          // Режим «Как приложение»: телефонная колонка
+                          // 430px в скруглённой рамке с тенью по центру;
+                          // позади — сезонный фон сайта.
+                          final scheme = Theme.of(context).colorScheme;
+                          final dark = scheme.brightness == Brightness.dark;
+                          return Center(
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 20),
                               child: ConstrainedBox(
@@ -184,9 +177,9 @@ class _BizzyWebAppState extends State<BizzyWebApp> {
                                 ),
                               ),
                             ),
-                          ),
-                        );
-                      },
+                          );
+                        },
+                      ),
                     );
                   },
                 ),

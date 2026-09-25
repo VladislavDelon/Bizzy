@@ -855,7 +855,10 @@ class _ProviderHomeWebState extends State<ProviderHomeWeb> {
         // контент — широкой колонкой до 1200px по центру.
         if (webSiteLayout(context)) {
           final scheme = Theme.of(context).colorScheme;
+          // Прозрачный Scaffold — за контентом виден сезонный
+          // анимированный фон сайта.
           return Scaffold(
+            backgroundColor: Colors.transparent,
             body: Row(
               children: [
                 NavigationRail(

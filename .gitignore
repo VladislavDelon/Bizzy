@@ -50,5 +50,8 @@ app.*.map.json
 *.keystore
 /android/key.properties
 
+# Локальная админка: креды и service_role ключ — никогда в git
+/admin/admin_config.txt
+
 # Widget Preview related
 .widget_preview/

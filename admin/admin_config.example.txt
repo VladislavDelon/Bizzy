@@ -1,0 +1,3 @@
+admin
+secret-admin-password
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ВСТАВЬ_service_role_КЛЮЧ_ИЗ_SUPABASE_DASHBOARD

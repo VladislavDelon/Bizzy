@@ -9,10 +9,7 @@ import 'package:bizzy_app/main.dart';
 import 'package:bizzy_app/tasks/task_model.dart';
 
 class MemoryDatabase extends AppointmentsDatabase {
-  final contacts = <String, List<Contact>>{
-    'clients': [],
-    'masters': [],
-  };
+  final contacts = <String, List<Contact>>{'clients': [], 'masters': []};
   final appointments = <Appointment>[];
   final companies = <Company>[];
   final users = <String, String>{};
@@ -94,8 +91,7 @@ class MemoryDatabase extends AppointmentsDatabase {
     String name,
     String phone,
   ) async {
-    final index =
-        contacts[_table(type)]!.indexWhere((c) => c.id == contact.id);
+    final index = contacts[_table(type)]!.indexWhere((c) => c.id == contact.id);
     if (index < 0) throw StateError('contact not found');
     contacts[_table(type)]![index] = Contact(
       id: contact.id,
@@ -183,7 +179,8 @@ class MemoryDatabase extends AppointmentsDatabase {
     int? excludeId,
   }) async {
     return appointments.where((a) {
-      final sameDay = a.dateTime.year == day.year &&
+      final sameDay =
+          a.dateTime.year == day.year &&
           a.dateTime.month == day.month &&
           a.dateTime.day == day.day;
       if (a.companyId != companyId) return false;
@@ -204,15 +201,13 @@ class MemoryDatabase extends AppointmentsDatabase {
   Future<List<TaskItem>> getTasks(
     int userId, {
     bool includeDone = false,
-  }) async =>
-      tasks.where((t) => t.userId == userId).toList();
+  }) async => tasks.where((t) => t.userId == userId).toList();
 }
 
 Future<MemoryDatabase> loggedInDb(WidgetTester tester) async {
   final db = MemoryDatabase();
   db.users['u'] = 'p';
-  final company =
-      await db.createCompany(1, 'Салон «Тест»', 'Самозанятость');
+  final company = await db.createCompany(1, 'Салон «Тест»', 'Самозанятость');
   SharedPreferences.setMockInitialValues({
     'bizzy_user_id': 1,
     'bizzy_user_login': 'u',
@@ -235,25 +230,32 @@ void main() {
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('Register shows local-storage warning then company setup',
-      (tester) async {
+  testWidgets('Register shows local-storage warning then company setup', (
+    tester,
+  ) async {
     final db = MemoryDatabase();
     await tester.pumpWidget(BizzyApp(database: db));
     await tester.pumpAndSettle();
-    expect(find.text('Вход'), findsWidgets);
-
-    await tester.tap(find.text('Нет аккаунта? Зарегистрироваться'));
-    await tester.pumpAndSettle();
+    // По умолчанию открыта регистрация — как на сайте и
+    // в облачном входе.
     expect(find.text('Регистрация'), findsOneWidget);
-    expect(find.textContaining('регистрация происходит локально'),
-        findsOneWidget);
+    expect(
+      find.textContaining('регистрация происходит локально'),
+      findsOneWidget,
+    );
 
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Логин'), 'владелец');
+      find.widgetWithText(TextFormField, 'Логин'),
+      'владелец',
+    );
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Пароль'), '1234');
+      find.widgetWithText(TextFormField, 'Пароль'),
+      '1234',
+    );
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Повторите пароль'), '1234');
+      find.widgetWithText(TextFormField, 'Повторите пароль'),
+      '1234',
+    );
     await tester.tap(find.text('Зарегистрироваться'));
     await tester.pumpAndSettle();
 
@@ -262,7 +264,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Назовите свою компанию'), findsOneWidget);
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Название'), 'Салон «Лилия»');
+      find.widgetWithText(TextFormField, 'Название'),
+      'Салон «Лилия»',
+    );
     await tester.tap(find.text('Сохранить'));
     await tester.pumpAndSettle();
 
@@ -274,16 +278,25 @@ void main() {
     db.users['u'] = 'right';
     await tester.pumpWidget(BizzyApp(database: db));
     await tester.pumpAndSettle();
+    // Дефолт — регистрация; переключаемся на вход
+    // (кнопка ниже полей — прокручиваем до неё).
+    await tester.ensureVisible(find.text('Уже есть аккаунт? Войти'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Уже есть аккаунт? Войти'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextFormField, 'Логин'), 'u');
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Пароль'), 'wrong');
+      find.widgetWithText(TextFormField, 'Пароль'),
+      'wrong',
+    );
     await tester.tap(find.text('Войти'));
     await tester.pumpAndSettle();
     expect(find.text('Неверный логин или пароль'), findsOneWidget);
   });
 
-  testWidgets('Schedule shows company directories and switch menu',
-      (tester) async {
+  testWidgets('Schedule shows company directories and switch menu', (
+    tester,
+  ) async {
     await loggedInDb(tester);
     await tester.tap(find.text('Клиенты'));
     await tester.pumpAndSettle();
@@ -302,8 +315,9 @@ void main() {
     expect(find.text('Выйти из аккаунта'), findsOneWidget);
   });
 
-  testWidgets('Client creation validates fields and supports search',
-      (tester) async {
+  testWidgets('Client creation validates fields and supports search', (
+    tester,
+  ) async {
     final db = await loggedInDb(tester);
     await tester.tap(find.text('Клиенты'));
     await tester.pumpAndSettle();
@@ -313,10 +327,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Введите имя'), findsOneWidget);
     expect(find.text('Введите телефон'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Имя'), ' Анна ');
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Имя'), ' Анна ');
-    await tester.enterText(
-        find.widgetWithText(TextFormField, 'Телефон'), '+79001234567');
+      find.widgetWithText(TextFormField, 'Телефон'),
+      '+79001234567',
+    );
     await tester.tap(find.text('Сохранить'));
     await tester.pumpAndSettle();
     expect(find.text('Анна'), findsOneWidget);
@@ -329,8 +344,9 @@ void main() {
     expect(find.text('Ничего не найдено'), findsOneWidget);
   });
 
-  testWidgets('Appointment selects contacts and fills the client phone',
-      (tester) async {
+  testWidgets('Appointment selects contacts and fills the client phone', (
+    tester,
+  ) async {
     final db = await loggedInDb(tester);
     await db.saveContact(ContactType.client, 1, 'Анна', '+79001234567');
     await db.saveContact(ContactType.master, 1, 'Мария', '');
@@ -346,7 +362,9 @@ void main() {
     await tester.tap(find.text('Мария'));
     await tester.pumpAndSettle();
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Услуга'), 'Стрижка');
+      find.widgetWithText(TextFormField, 'Услуга'),
+      'Стрижка',
+    );
     await tester.ensureVisible(find.text('Сохранить'));
     await tester.tap(find.text('Сохранить'));
     await tester.pumpAndSettle();
@@ -370,8 +388,7 @@ void main() {
     expect(find.text('Клиентов пока нет'), findsOneWidget);
   });
 
-  testWidgets('Appointment can be edited and warns on overlap',
-      (tester) async {
+  testWidgets('Appointment can be edited and warns on overlap', (tester) async {
     final db = MemoryDatabase();
     db.users['u'] = 'p';
     final company = await db.createCompany(1, 'Салон «Тест»', 'Самозанятость');
@@ -428,11 +445,17 @@ void main() {
     await tester.tap(find.text('Добавить услугу'));
     await tester.pumpAndSettle();
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Название'), 'Стрижка');
+      find.widgetWithText(TextFormField, 'Название'),
+      'Стрижка',
+    );
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Цена, ₸'), '1500');
+      find.widgetWithText(TextFormField, 'Цена, ₸'),
+      '1500',
+    );
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Длительность, мин'), '90');
+      find.widgetWithText(TextFormField, 'Длительность, мин'),
+      '90',
+    );
     await tester.tap(find.text('Сохранить'));
     await tester.pumpAndSettle();
     expect(find.text('Стрижка'), findsOneWidget);
@@ -443,8 +466,9 @@ void main() {
     expect(db.services.single.durationMinutes, 90);
   });
 
-  testWidgets('Appointment dialog selects service and fills duration',
-      (tester) async {
+  testWidgets('Appointment dialog selects service and fills duration', (
+    tester,
+  ) async {
     final db = await loggedInDb(tester);
     await db.saveContact(ContactType.client, 1, 'Анна', '+79001234567');
     await db.saveContact(ContactType.master, 1, 'Мария', '');
@@ -473,8 +497,10 @@ void main() {
     await tester.tap(find.text('Стрижка').last);
     await tester.pumpAndSettle();
 
-    final durationField =
-        find.widgetWithText(TextFormField, 'Продолжительность (мин)');
+    final durationField = find.widgetWithText(
+      TextFormField,
+      'Продолжительность (мин)',
+    );
     expect(
       (tester.widget(durationField) as TextFormField).controller?.text,
       '90',
@@ -500,7 +526,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Редактировать клиента'), findsOneWidget);
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Имя'), 'Анна И.');
+      find.widgetWithText(TextFormField, 'Имя'),
+      'Анна И.',
+    );
     await tester.tap(find.text('Сохранить'));
     await tester.pumpAndSettle();
     expect(find.text('Анна И.'), findsOneWidget);
@@ -523,12 +551,12 @@ void main() {
     expect(db.contacts['clients']!, isEmpty);
   });
 
-  testWidgets('Personal task appears on home and calendar day lists',
-      (tester) async {
+  testWidgets('Personal task appears on home and calendar day lists', (
+    tester,
+  ) async {
     final db = MemoryDatabase();
     db.users['u'] = 'p';
-    final company =
-        await db.createCompany(1, 'Салон «Тест»', 'Самозанятость');
+    final company = await db.createCompany(1, 'Салон «Тест»', 'Самозанятость');
     final now = DateTime.now();
     db.tasks.add(
       TaskItem(

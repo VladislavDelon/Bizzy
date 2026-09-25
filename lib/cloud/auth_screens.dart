@@ -299,7 +299,9 @@ class _CloudAuthScreenState extends State<CloudAuthScreen> {
   final _salonKeyController = TextEditingController();
   final _refCodeController = TextEditingController();
   final _cloud = CloudService();
-  bool _registerMode = false;
+  // По умолчанию — регистрация (как на сайте): новому
+  // пользователю сначала нужен аккаунт, вход — ссылкой снизу.
+  bool _registerMode = true;
   bool _busy = false;
   bool _showPassword = false;
   String? _error;

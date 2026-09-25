@@ -2555,7 +2555,9 @@ class _AuthScreenState extends State<AuthScreen> {
   final _loginController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
-  bool _registerMode = false;
+  // По умолчанию — регистрация (как в облачном входе
+  // и на сайте): вход доступен ссылкой снизу.
+  bool _registerMode = true;
   bool _busy = false;
   String? _error;
   PackageInfo _info = PackageInfo(

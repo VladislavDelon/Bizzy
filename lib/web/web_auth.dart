@@ -39,7 +39,9 @@ class _WebAuthScreenState extends State<WebAuthScreen>
   late final Animation<Offset> _cardSlide;
 
   String _role = 'client';
-  bool _register = false;
+  // По умолчанию — регистрация: новым посетителям сайта
+  // сначала нужен аккаунт, вход — ссылкой снизу.
+  bool _register = true;
   bool _busy = false;
   bool _showPassword = false;
   String? _error;
@@ -470,7 +472,7 @@ class _WebAuthScreenState extends State<WebAuthScreen>
                                         _busy
                                             ? 'Подождите…'
                                             : (_register
-                                                  ? 'Создать аккаунт'
+                                                  ? 'Зарегистрироваться'
                                                   : 'Войти'),
                                       ),
                                     ),
@@ -483,7 +485,7 @@ class _WebAuthScreenState extends State<WebAuthScreen>
                                               _error = null;
                                             }),
                                       child: Text(
-                                        _register ? 'Уже есть аккаунт — войти' : 'Нет аккаунта — зарегистрироваться',
+                                        _register ? 'Войти' : 'Нет аккаунта — зарегистрироваться',
                                       ),
                                     ),
                                   ],

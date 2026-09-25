@@ -24,9 +24,12 @@ void main() {
       ),
     );
     await tester.pump(const Duration(seconds: 3));
-    expect(find.text('Вход — клиент'), findsOneWidget);
+    // По умолчанию — регистрация: новому посетителю сначала
+    // нужен аккаунт; «Войти» — текстовая ссылка снизу.
+    expect(find.text('Регистрация — клиент'), findsOneWidget);
     expect(find.text('Логин'), findsOneWidget);
     expect(find.text('Пароль'), findsOneWidget);
+    expect(find.text('Зарегистрироваться'), findsOneWidget);
     expect(find.text('Войти'), findsOneWidget);
     // Широкий экран — сайт-лендинг: герой-панель о том,
     // что это запись на бьюти-услуги, и переключатель вида.
@@ -56,7 +59,7 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
     // Узкий экран — телефонная заставка без герой-панели,
     // но переключатель вида доступен и тут.
-    expect(find.text('Вход — клиент'), findsOneWidget);
+    expect(find.text('Регистрация — клиент'), findsOneWidget);
     expect(find.text('Онлайн-запись на бьюти-услуги'), findsNothing);
     expect(find.text('Приложение'), findsOneWidget);
     expect(tester.takeException(), isNull);
